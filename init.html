@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles/init.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Veyro</title>
+    <script type="module" src="/src/init.ts" defer></script>
+  </head>
+  <body class="init-body">
+    <main class="init-panel" role="dialog" aria-modal="true" aria-labelledby="init-title">
+      <img class="init-logo" src="/src/assets/logo.png" alt="" width="36" height="36" />
+      <div class="init-copy">
+        <h1 id="init-title" class="init-title" data-init-title>Veyro</h1>
+        <p class="init-message" data-init-message>Starting…</p>
+      </div>
+      <span class="init-spinner" aria-hidden="true"></span>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,6 @@
+#!/bin/sh
+ROOT=$(git rev-parse --show-toplevel) || exit 0
+FILE=$1
+[ -n "$FILE" ] && [ -f "$FILE" ] || exit 0
+python "$ROOT/scripts/strip-coauthor-trailers.py" < "$FILE" > "$FILE.tmp" || exit 0
+mv "$FILE.tmp" "$FILE"

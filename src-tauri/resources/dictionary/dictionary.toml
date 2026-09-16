@@ -1,0 +1,52 @@
+# Veyro transcription dictionary
+#
+# Default location:
+#   Windows: %AppData%\Veyro\dictionary\dictionary.toml
+#   macOS:   ~/Library/Application Support/Veyro/dictionary/dictionary.toml
+#   Linux:   ~/.config/Veyro/dictionary/dictionary.toml
+#
+# Open the folder from Veyro settings → Transcription dictionary → folder icon.
+#
+# ── vocabulary ──────────────────────────────────────────────────────────────
+# Terms passed to Whisper as an initial-prompt hint (biasing).
+#
+# Keep this list SHORT. A long mixed RU/EN list often hurts recognition.
+# Prefer Latin spellings for product and brand names you dictate often.
+#
+# Example:
+#   vocabulary = [
+#     "Veyro",
+#     "ClipBoss",
+#     "Protocol Initiation",
+#     "PsyCloser",
+#   ]
+#
+# ── [corrections] ───────────────────────────────────────────────────────────
+# Post-STT find/replace, applied after Whisper (case-insensitive).
+#
+# Keys: what Whisper (or the AI rewrite step) often outputs — phonetic /
+#       misheard fragments. Values: the text you want. Empty value = remove.
+#
+# Matching ignores hyphens and treats commas like spaces, so
+# "псайк, лоузер" can match key "псайк лоузер".
+#
+# Example:
+#   [corrections]
+#   "клебос" = "ClipBoss"
+#   "протокол инициации" = "Protocol Initiation"
+#   "псайклозер" = "PsyCloser"
+#   "thanks for watching" = ""
+#
+# See dictionary.example.toml in this repo for a larger starter set.
+#
+# ── [whisper] (optional, advanced) ──────────────────────────────────────────
+# Decoding overrides for local Whisper. Uncomment only if you know you need them.
+#
+# [whisper]
+# logprob_thold = -1.0
+# entropy_thold = 2.4
+# temperature_inc = 0.2
+
+vocabulary = []
+
+[corrections]

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Veyro",
+  "version": "1.7.71",
+  "identifier": "com.mkdee.veyro",
+  "build": {
+    "beforeDevCommand": "node scripts/tauri-before-dev.mjs",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "init",
+        "title": "Veyro",
+        "url": "init.html",
+        "width": 320,
+        "height": 132,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "visible": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true,
+        "focus": false
+      },
+      {
+        "label": "overlay",
+        "title": "Veyro Recording",
+        "url": "overlay.html",
+        "width": 320,
+        "height": 72,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "center": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "veyro"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdDODNFQjZFMEVGOUE3QUYKUldTdnAva09idXVEZk5NQTlUSEVESjEybVJYSzErVGt3NVRVVWV4TnlEUms2NDRCaXRXWmE2akMK",
+      "endpoints": [
+        "https://github.com/WtekSupport/veyro/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "deb",
+      "appimage"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "entitlements": "Entitlements.plist"
+    },
+    "publisher": "MKdee Tech",
+    "copyright": "Copyright © 2026 MKdee Tech",
+    "shortDescription": "Desktop voice dictation",
+    "longDescription": "Veyro — fast desktop voice dictation with local Whisper and OpenAI transcription.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "./windows/hooks.nsh",
+        "languages": [
+          "English",
+          "Russian"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
+    "resources": [
+      "resources/sounds/*",
+      "resources/dictionary/*",
+      "resources/skills/*",
+      "resources/legal/*"
+    ],
+    "createUpdaterArtifacts": true
+  }
+}

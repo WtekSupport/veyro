@@ -1,0 +1,4 @@
+pub const FOCUS_BEFORE_INJECT_MS: u64 = 40;
+pub const FOCUS_BEFORE_ENTER_MS: u64 = 25;
+pub const CLIPBOARD_BEFORE_PASTE_MS: u64 = 40;
+pub const CLIPBOARD_AFTER_PASTE_MS: u64 = 50;

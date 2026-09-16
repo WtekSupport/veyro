@@ -1,0 +1,84 @@
+# Dependencies
+node_modules/
+
+# Local / generated docs (keep BUILD, RELEASE, UPDATER in git)
+docs/dictionary/
+docs/skills/
+docs/legal/
+
+# Frontend build output
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Vite cache
+.vite/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/*.dll
+
+# Installer & bundle artifacts — publish via GitHub Releases only
+*.exe
+*.msi
+*.dmg
+*.deb
+*.AppImage
+*.app
+*.pdb
+release/
+
+# Marketing site (Vercel only — not in this GitHub repo)
+landingpage/
+
+# Scaffold / temp
+_scaffold/
+tmp/
+temp/
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor / IDE (local only — not in git)
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local IDE settings
+.cursor/
+
+# Test / coverage
+coverage/
+*.profraw
+
+# Local overrides
+*.local
+
+# Portable build tools (CMake for local Whisper)
+.tools/
+
+# Local cargo overrides (e.g. per-machine build.target-dir)
+.cargo/config.toml
+src-tauri/.cargo/config.toml
