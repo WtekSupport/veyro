@@ -1,0 +1,2 @@
+# Copy to updater.pub after running:  powershell -File scripts/ensure-updater-keys.ps1
+# Or paste the contents of %USERPROFILE%\.tauri\veyro-updater.key.pub (single minisign public key line block).

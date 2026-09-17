@@ -1,0 +1,14 @@
+{
+    "$schema":  "https://schema.tauri.app/config/2",
+    "bundle":  {
+                   "resources":  {
+                                     "resources/sounds/*":  "sounds/",
+                                     "binaries/llama-x86_64-pc-windows-msvc.dll":  "llama.dll",
+                                     "binaries/llama-common-x86_64-pc-windows-msvc.dll":  "llama-common.dll",
+                                     "binaries/ggml-x86_64-pc-windows-msvc.dll":  "ggml.dll",
+                                     "binaries/ggml-base-x86_64-pc-windows-msvc.dll":  "ggml-base.dll",
+                                     "binaries/ggml-cpu-x86_64-pc-windows-msvc.dll":  "ggml-cpu.dll",
+                                     "binaries/ggml-vulkan-x86_64-pc-windows-msvc.dll":  "ggml-vulkan.dll"
+                                 }
+               }
+}
