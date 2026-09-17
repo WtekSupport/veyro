@@ -1,0 +1,99 @@
+[package]
+name = "veyro"
+version = "1.7.74"
+description = "Veyro — desktop voice dictation by MKdee Tech"
+authors = ["MKdee Tech"]
+edition = "2021"
+
+[features]
+default = ["local-whisper", "local-llm"]
+local-whisper = ["dep:whisper-rs"]
+local-whisper-vulkan = ["local-whisper", "whisper-rs/vulkan"]
+local-whisper-cuda = ["local-whisper", "whisper-rs/cuda"]
+local-whisper-metal = ["local-whisper", "whisper-rs/metal"]
+local-llm = ["dep:llama-cpp-2", "llama-cpp-2/dynamic-link"]
+local-llm-vulkan = ["local-llm", "llama-cpp-2/vulkan"]
+local-llm-cuda = ["local-llm", "llama-cpp-2/cuda"]
+
+[lib]
+name = "veyro_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+dirs = "6"
+cpal = "0.15"
+rodio = { version = "0.19", default-features = false, features = ["vorbis"] }
+webrtc-vad = "0.4"
+rubato = "0.16"
+crossbeam-channel = "0.5"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream", "http2"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+hound = "3.5"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+arboard = "3.4"
+enigo = "0.3"
+num2words2-core = "0.1.2"
+num-bigint = "0.4"
+aes-gcm = "0.10"
+getrandom = "0.2"
+base64 = "0.22"
+whisper-rs = { version = "0.14", optional = true }
+llama-cpp-2 = { version = "0.1", optional = true, default-features = false, features = ["openmp"] }
+encoding_rs = "0.8"
+flacenc = "0.4"
+rfd = "0.15"
+url = "2"
+toml = "0.8"
+nnnoiseless = "0.5"
+notify = "7.0"
+sha2 = "0.10"
+hex = "0.4"
+ouroboros = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_Security", "Win32_Security_Authorization"] }
+winreg = "0.55"
+wmi = "0.14"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["allow-unsafe-code", "record"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-graphics = "0.24"
+dispatch2 = "0.3"
+security-framework = "3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

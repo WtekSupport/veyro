@@ -1,0 +1,80 @@
+[
+  {
+    "name": "Tauri",
+    "copyright": "Copyright © Tauri Programme within The Commons Conservancy",
+    "license": "Apache-2.0 OR MIT",
+    "url": "https://github.com/tauri-apps/tauri"
+  },
+  {
+    "name": "Microsoft Edge WebView2",
+    "copyright": "Copyright © Microsoft Corporation",
+    "license": "Microsoft Software License Terms (runtime component)",
+    "url": "https://developer.microsoft.com/microsoft-edge/webview2/"
+  },
+  {
+    "name": "whisper.cpp",
+    "copyright": "Copyright © Georgi Gerganov and whisper.cpp contributors",
+    "license": "MIT",
+    "url": "https://github.com/ggml-org/whisper.cpp"
+  },
+  {
+    "name": "llama.cpp",
+    "copyright": "Copyright © Georgi Gerganov and llama.cpp contributors",
+    "license": "MIT",
+    "url": "https://github.com/ggml-org/llama.cpp"
+  },
+  {
+    "name": "nnnoiseless",
+    "copyright": "Copyright © Jean-Marc Valin and Mozilla",
+    "license": "BSD-3-Clause",
+    "url": "https://github.com/xiph/rnnoise"
+  },
+  {
+    "name": "Tokio",
+    "copyright": "Copyright © Tokio contributors",
+    "license": "MIT",
+    "url": "https://github.com/tokio-rs/tokio"
+  },
+  {
+    "name": "Serde",
+    "copyright": "Copyright © Serde contributors",
+    "license": "Apache-2.0 OR MIT",
+    "url": "https://github.com/serde-rs/serde"
+  },
+  {
+    "name": "reqwest / rustls",
+    "copyright": "Copyright © Sean McArthur and rustls contributors",
+    "license": "Apache-2.0 OR MIT / ISC / MPL-2.0",
+    "url": "https://github.com/seanmonstar/reqwest"
+  },
+  {
+    "name": "cpal / rodio",
+    "copyright": "Copyright © cpal and rodio contributors",
+    "license": "Apache-2.0 OR MIT",
+    "url": "https://github.com/RustAudio/rodio"
+  },
+  {
+    "name": "rubato",
+    "copyright": "Copyright © Henrik Enquist and contributors",
+    "license": "MIT",
+    "url": "https://github.com/HEnquist/rubato"
+  },
+  {
+    "name": "enigo",
+    "copyright": "Copyright © enigo contributors",
+    "license": "MIT",
+    "url": "https://github.com/enigo-rs/enigo"
+  },
+  {
+    "name": "arboard",
+    "copyright": "Copyright © arboard contributors",
+    "license": "MIT",
+    "url": "https://github.com/1Password/arboard"
+  },
+  {
+    "name": "Vite",
+    "copyright": "Copyright © Evan You and Vite contributors",
+    "license": "MIT",
+    "url": "https://github.com/vitejs/vite"
+  }
+]

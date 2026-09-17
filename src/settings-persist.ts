@@ -1,0 +1,220 @@
+import {
+  getDiagnostics,
+  getStatus,
+  getLlmModelStatus,
+  getLlmModelsDir,
+  getWhisperModelStatus,
+  getDictionaryPath,
+  getWhisperModelsDir,
+  listLlmModels,
+  listWhisperModels,
+  setApiKey,
+  updateSettings,
+  type AppSettings,
+  type SettingsPatch,
+} from "./api";
+import { notifyMicDeviceChanged } from "./components/mic-meter";
+import { notifyVadMicDeviceChanged } from "./components/vad-threshold-panel";
+import { readSettingsForm, type SettingsFormValues } from "./components/settings";
+import { setLocale } from "./i18n";
+import { getState, patchState, setError, setSettings, setStatus } from "./state";
+import { translateError } from "./i18n";
+
+export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
+  const hasApiKey = getState().hasApiKey;
+  const transcriptionProvider =
+    !hasApiKey && values.transcription_provider === "openai"
+      ? "local"
+      : values.transcription_provider;
+
+  const current = getState().settings;
+
+  return {
+    global_hotkey: values.global_hotkey,
+    push_to_talk: values.push_to_talk,
+    ptt_hold: values.push_to_talk
+      ? values.ptt_hold
+      : (current?.ptt_hold ?? true),
+    live_dictation_field_indicator: values.push_to_talk
+      ? values.live_dictation_field_indicator
+      : (current?.live_dictation_field_indicator ?? true),
+    hotkey_game_mode: values.hotkey_game_mode,
+    hotkey_block_system: values.hotkey_block_system,
+    microphone_device:
+      values.microphone_device.length > 0 ? values.microphone_device : null,
+    language: values.language === "auto" ? null : values.language,
+    transcription_provider: transcriptionProvider,
+    local_whisper_model: values.local_whisper_model,
+    local_whisper_use_gpu: values.local_whisper_use_gpu,
+    local_whisper_beam_size: values.local_whisper_beam_size,
+    text_rewrite_provider: values.text_rewrite_provider,
+    local_llm_model: values.local_llm_model,
+    local_llm_use_gpu: values.local_llm_use_gpu,
+    ai_rewrite_skill:
+      values.ai_rewrite_skill.length > 0 ? values.ai_rewrite_skill : null,
+    whisper_prompt_prefix: values.whisper_prompt_prefix,
+    transcription_dictionary_path:
+      values.transcription_dictionary_path.length > 0
+        ? values.transcription_dictionary_path
+        : null,
+    audio_preprocess_enabled: values.audio_preprocess_enabled,
+    audio_noise_reduction_enabled: values.audio_noise_reduction_enabled,
+    vad_pre_speech_buffer_ms: values.vad_pre_speech_buffer_ms,
+    vad_minimum_speech_ms: values.vad_minimum_speech_ms,
+    vad_maximum_segment_ms: values.vad_maximum_segment_ms,
+    injection_mode: values.injection_mode,
+    text_processing_mode: values.text_processing_mode,
+    spoken_punctuation: values.spoken_punctuation,
+    numbers_as_words: values.numbers_as_words,
+    emulate_enter: values.emulate_enter,
+    enter_trigger_phrase: values.enter_trigger_phrase,
+    start_on_boot: values.start_on_boot,
+    check_updates_on_startup: values.check_updates_on_startup,
+    capslock_ptt: values.capslock_ptt,
+    show_notifications: values.show_notifications,
+    silence_timeout_ms: values.silence_timeout_ms,
+    vad_threshold_mode: values.vad_threshold_mode,
+    vad_voice_threshold_percent: values.vad_voice_threshold_percent,
+    vad_auto_threshold_percent: values.vad_auto_threshold_percent,
+    ui_locale: values.ui_locale,
+  };
+}
+
+function settingsChanged(values: SettingsFormValues, current: AppSettings): boolean {
+  const patch = formValuesToPatch(values);
+  return (
+    patch.global_hotkey !== current.global_hotkey ||
+    patch.push_to_talk !== current.push_to_talk ||
+    patch.ptt_hold !== current.ptt_hold ||
+    patch.live_dictation_field_indicator !== current.live_dictation_field_indicator ||
+    patch.hotkey_game_mode !== current.hotkey_game_mode ||
+    patch.hotkey_block_system !== current.hotkey_block_system ||
+    patch.microphone_device !== current.microphone_device ||
+    patch.language !== current.language ||
+    patch.transcription_provider !== current.transcription_provider ||
+    patch.local_whisper_model !== current.local_whisper_model ||
+    patch.local_whisper_use_gpu !== current.local_whisper_use_gpu ||
+    patch.local_whisper_beam_size !== current.local_whisper_beam_size ||
+    patch.text_rewrite_provider !== current.text_rewrite_provider ||
+    patch.local_llm_model !== current.local_llm_model ||
+    patch.local_llm_use_gpu !== current.local_llm_use_gpu ||
+    patch.ai_rewrite_skill !== current.ai_rewrite_skill ||
+    patch.whisper_prompt_prefix !== current.whisper_prompt_prefix ||
+    patch.transcription_dictionary_path !== current.transcription_dictionary_path ||
+    patch.audio_preprocess_enabled !== current.audio_preprocess_enabled ||
+    patch.audio_noise_reduction_enabled !== current.audio_noise_reduction_enabled ||
+    patch.vad_pre_speech_buffer_ms !== current.vad_pre_speech_buffer_ms ||
+    patch.vad_minimum_speech_ms !== current.vad_minimum_speech_ms ||
+    patch.vad_maximum_segment_ms !== current.vad_maximum_segment_ms ||
+    patch.injection_mode !== current.injection_mode ||
+    patch.text_processing_mode !== current.text_processing_mode ||
+    patch.spoken_punctuation !== current.spoken_punctuation ||
+    patch.numbers_as_words !== current.numbers_as_words ||
+    patch.emulate_enter !== current.emulate_enter ||
+    patch.enter_trigger_phrase !== current.enter_trigger_phrase ||
+    patch.start_on_boot !== current.start_on_boot ||
+    patch.check_updates_on_startup !== current.check_updates_on_startup ||
+    patch.capslock_ptt !== current.capslock_ptt ||
+    patch.show_notifications !== current.show_notifications ||
+    patch.silence_timeout_ms !== current.silence_timeout_ms ||
+    patch.vad_threshold_mode !== current.vad_threshold_mode ||
+    patch.vad_voice_threshold_percent !== current.vad_voice_threshold_percent ||
+    patch.vad_auto_threshold_percent !== current.vad_auto_threshold_percent ||
+    patch.ui_locale !== current.ui_locale ||
+    values.api_key.trim().length > 0
+  );
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+let persistInFlight = false;
+let persistPending = false;
+
+export function schedulePersistSettings(): void {
+  if (persistTimer !== undefined) {
+    clearTimeout(persistTimer);
+  }
+  persistTimer = setTimeout(() => {
+    persistTimer = undefined;
+    void flushPersistSettings();
+  }, 350);
+}
+
+export async function flushPersistSettings(options?: {
+  compareWith?: AppSettings;
+}): Promise<void> {
+  const form = document.querySelector<HTMLFormElement>("#settings-form");
+  if (!form) {
+    return;
+  }
+
+  if (persistInFlight) {
+    persistPending = true;
+    return;
+  }
+
+  const current = getState().settings;
+  if (!current) {
+    return;
+  }
+
+  const compareWith = options?.compareWith ?? current;
+  const values = readSettingsForm(form);
+  if (!settingsChanged(values, compareWith)) {
+    return;
+  }
+
+  setLocale(values.ui_locale);
+
+  persistInFlight = true;
+  try {
+    if (values.api_key.trim().length > 0) {
+      await setApiKey(values.api_key.trim());
+      patchState({ hasApiKey: true });
+    }
+
+    const patch = formValuesToPatch(values);
+    const micChanged =
+      patch.microphone_device !== compareWith.microphone_device;
+    const nextSettings = await updateSettings(patch);
+    setSettings(nextSettings);
+    if (micChanged) {
+      notifyMicDeviceChanged();
+      notifyVadMicDeviceChanged();
+    }
+    setLocale(nextSettings.ui_locale);
+    setStatus(await getStatus());
+    patchState({
+      diagnostics: await getDiagnostics(),
+      whisperModelsDir: await getWhisperModelsDir(),
+      dictionaryPath: await getDictionaryPath(),
+      whisperModels: await listWhisperModels(),
+      whisperModel: await getWhisperModelStatus(),
+      llmModelsDir: await getLlmModelsDir(),
+      llmModels: await listLlmModels(),
+      llmModel: await getLlmModelStatus(),
+      lastError: null,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const knownCodes = new Set([
+      "hotkey_empty",
+      "provider_empty",
+      "silence_timeout_range",
+      "enter_trigger_phrase_too_long",
+      "beam_size_range",
+      "vad_pre_speech_range",
+      "vad_minimum_speech_range",
+      "vad_maximum_segment_range",
+    ]);
+    setError({
+      code: knownCodes.has(message) ? message : "settings",
+      message: translateError(message, message),
+    });
+  } finally {
+    persistInFlight = false;
+    if (persistPending) {
+      persistPending = false;
+      void flushPersistSettings();
+    }
+  }
+}
