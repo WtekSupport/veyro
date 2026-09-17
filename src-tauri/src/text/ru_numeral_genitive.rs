@@ -25,16 +25,17 @@ pub fn resolve_numeral_case(text_before: &str) -> NumeralCase {
     let mut triggers: Vec<&ContextTrigger> = CONTEXT_TRIGGERS.iter().collect();
     triggers.sort_by_key(|t| std::cmp::Reverse(t.phrase.len()));
     for trigger in triggers {
-        if trimmed.ends_with(trigger.phrase) {
-            let before = trimmed
-                .strip_suffix(trigger.phrase)
-                .unwrap_or(trimmed)
-                .trim_end();
-            if before.ends_with(|c: char| c.is_alphabetic()) {
+        if !trimmed.ends_with(trigger.phrase) {
+            continue;
+        }
+        let prefix_len = trimmed.len().saturating_sub(trigger.phrase.len());
+        if prefix_len > 0 {
+            let ch_before = trimmed[..prefix_len].chars().last();
+            if ch_before.is_some_and(|c| !c.is_whitespace()) {
                 continue;
             }
-            return trigger.case;
         }
+        return trigger.case;
     }
     NumeralCase::Nom
 }
@@ -654,23 +655,23 @@ pub fn apply_russian_genitive_numerals(text: &str) -> String {
             if !trigger_has_word_boundary(text, byte_idx) {
                 continue;
             }
-            let mut num_start = byte_idx + trigger.phrase.len();
+            let Some(mut num_start) = byte_index_after_phrase(text, byte_idx, trigger.phrase) else {
+                continue;
+            };
             while num_start < bytes.len() && bytes[num_start].is_ascii_whitespace() {
                 num_start += 1;
             }
             let chars: Vec<char> = text.chars().collect();
             let char_idx = text[..num_start].chars().count();
             if let Some((num_end_char, value)) = parse_number_at(&chars, char_idx) {
-                if value >= 0 {
-                    let num_end_byte = text
-                        .char_indices()
-                        .nth(num_end_char)
-                        .map(|(i, _)| i)
-                        .unwrap_or(text.len());
-                    matched = Some((num_start, num_end_byte));
-                    matched_case = trigger.case;
-                    break;
-                }
+                let num_end_byte = text
+                    .char_indices()
+                    .nth(num_end_char)
+                    .map(|(i, _)| i)
+                    .unwrap_or(text.len());
+                matched = Some((num_start, num_end_byte));
+                matched_case = trigger.case;
+                break;
             }
         }
 
@@ -691,6 +692,19 @@ pub fn apply_russian_genitive_numerals(text: &str) -> String {
     }
 
     out
+}
+
+fn byte_index_after_phrase(text: &str, start: usize, phrase: &str) -> Option<usize> {
+    let rest = text.get(start..)?.to_lowercase();
+    if !rest.starts_with(phrase) {
+        return None;
+    }
+    let mut end = start;
+    for _ in phrase.chars() {
+        let ch = text.get(end..)?.chars().next()?;
+        end += ch.len_utf8();
+    }
+    Some(end)
 }
 
 fn trigger_has_word_boundary(text: &str, trigger_start: usize) -> bool {
@@ -729,6 +743,7 @@ fn parse_number_at(chars: &[char], start: usize) -> Option<(usize, i64)> {
 
     let mut end = start;
     let mut words: Vec<String> = Vec::new();
+    let mut parsed: Option<(usize, i64)> = None;
     while end < chars.len() {
         if chars[end].is_whitespace() {
             end += 1;
@@ -744,10 +759,16 @@ fn parse_number_at(chars: &[char], start: usize) -> Option<(usize, i64)> {
         words.push(normalize_num_word(
             &chars[word_start..end].iter().collect::<String>(),
         ));
+        match parse_russian_cardinal_words(&words) {
+            Some(value) => parsed = Some((end, value)),
+            None => {
+                words.pop();
+                break;
+            }
+        }
     }
 
-    let value = parse_russian_cardinal_words(&words)?;
-    Some((end, value))
+    parsed
 }
 
 fn normalize_num_word(word: &str) -> String {

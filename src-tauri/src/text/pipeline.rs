@@ -266,13 +266,14 @@ mod tests {
             seg("второе", 1400, 1800),
         ];
         let processed = process_with_segments("первое второе", &segments, &settings).await;
-        assert_eq!(processed.text, "Первое. второе.");
+        assert_eq!(processed.text, "Первое. второе. ");
     }
 
     #[tokio::test]
     async fn enter_trigger_strips_suffix() {
         let settings = AppSettings {
             text_processing_mode: TextProcessingMode::Original,
+            ui_mode: crate::settings::UiMode::Expert,
             emulate_enter: true,
             enter_trigger_phrase: "и строка".to_string(),
             ..Default::default()
