@@ -1,0 +1,7 @@
+# Default reviewers for pull requests (GitHub automatically requests review).
+* @WtekSupport
+
+/src-tauri/ @WtekSupport
+/src/ @WtekSupport
+/.github/ @WtekSupport
+/docs/ @WtekSupport

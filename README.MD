@@ -1,5 +1,11 @@
 # Veyro
 
+[![CI](https://github.com/WtekSupport/veyro/actions/workflows/ci.yml/badge.svg)](https://github.com/WtekSupport/veyro/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/WtekSupport/veyro)](LICENSE)
+[![Releases](https://img.shields.io/github/v/release/WtekSupport/veyro?label=release)](https://github.com/WtekSupport/veyro/releases)
+
+**Website:** [veyrotext.vercel.app](https://veyrotext.vercel.app)
+
 **Veyro** is a desktop app for voice dictation. You speak — it transcribes your speech and inserts the result into the active window: a document, chat, browser, or code editor.
 
 The app runs in the background and is opened from the **system tray** (Windows/Linux) or the **menu bar** (macOS).
@@ -107,7 +113,14 @@ Installed builds can check for signed updates on startup. See [docs/UPDATER.md](
 
 ## Build from source
 
-[docs/BUILD.md](docs/BUILD.md)
+- English: [docs/BUILD.en.md](docs/BUILD.en.md)
+- Русский: [docs/BUILD.md](docs/BUILD.md)
+
+---
+
+## Contributing
+
+We welcome pull requests. Read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Security reports: [`.github/SECURITY.md`](.github/SECURITY.md).
 
 ---
 
