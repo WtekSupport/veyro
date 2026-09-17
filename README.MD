@@ -1,8 +1,14 @@
+<div align="center">
+
+<img src="src/assets/logo.png" alt="Veyro logo" width="128" height="128" />
+
 # Veyro
 
 [![CI](https://github.com/WtekSupport/veyro/actions/workflows/ci.yml/badge.svg)](https://github.com/WtekSupport/veyro/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/WtekSupport/veyro)](LICENSE)
 [![Releases](https://img.shields.io/github/v/release/WtekSupport/veyro?label=release)](https://github.com/WtekSupport/veyro/releases)
+
+</div>
 
 **Website:** [veyrotext.vercel.app](https://veyrotext.vercel.app)
 
