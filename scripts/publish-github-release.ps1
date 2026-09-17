@@ -96,6 +96,11 @@ foreach ($name in $files) {
         Write-Warning "Skip missing: $name"
         continue
     }
+    $existingAssets = @($release.assets | Where-Object { $_.name -eq $name })
+    foreach ($asset in $existingAssets) {
+        Write-Host "Removing existing asset: $($asset.name) (id $($asset.id))"
+        Invoke-GhApi -Method DELETE -Uri "https://api.github.com/repos/$repo/releases/assets/$($asset.id)" | Out-Null
+    }
     Write-Host "Uploading $name ..."
     $encodedName = [System.Uri]::EscapeDataString($name)
     $uri = "${uploadBase}?name=$encodedName"
