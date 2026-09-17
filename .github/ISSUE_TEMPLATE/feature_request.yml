@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What problem does this solve? Who benefits?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Area (optional)
+      options:
+        - label: Speech recognition (Whisper / OpenAI)
+        - label: Text processing / injection
+        - label: Hotkeys / game mode
+        - label: Settings / UI
+        - label: Updater / packaging
+        - label: Other
