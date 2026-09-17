@@ -1,0 +1,431 @@
+# Example / reference dictionary — NOT shipped to new installs.
+# Copy sections into your AppData dictionary.toml as needed.
+# Fresh installs get an empty dictionary.default.toml (comments only).
+
+vocabulary = [
+  # Команды продукта — держим в промпте, чтобы не разъезжались
+  "Veyro",
+  "послать",
+  "отправить",
+  "новая строка",
+  "новый абзац",
+  "стоп диктовка",
+
+  # ИИ и сервисы с «ломкой» латиницей
+  "ChatGPT",
+  "GPT-4o",
+  "GPT-5",
+  "OpenAI",
+  "Claude",
+  "Anthropic",
+  "Gemini",
+  "Grok",
+  "xAI",
+  "DeepSeek",
+  "Perplexity",
+  "Copilot",
+  "Windsurf",
+  "ГигаЧат",
+  "YandexGPT",
+  "Алиса AI",
+  "Qwen",
+  "Llama",
+  "Mistral",
+  "Midjourney",
+  "Stable Diffusion",
+  "ElevenLabs",
+  "Suno",
+  "Runway",
+  "CapCut",
+  "Sora",
+
+  # Соцсети / мессенджеры, которые Whisper часто пишет кириллицей
+  "YouTube",
+  "TikTok",
+  "Instagram",
+  "Telegram",
+  "WhatsApp",
+  "Discord",
+  "LinkedIn",
+
+  # RU-бренды с нестандартным написанием
+  "Wildberries",
+  "Ozon",
+  "AliExpress",
+  "Тинькофф",
+  "Т-Банк",
+  "Альфа-Банк",
+  "Яндекс Маркет",
+  "Госуслуги",
+
+  # IT-имена, которые модель путает
+  "GitHub",
+  "Kubernetes",
+  "PostgreSQL",
+  "TypeScript",
+  "Next.js",
+  "Node.js",
+  "Hugging Face",
+  "Cloudflare",
+  "NVIDIA",
+  "MacBook",
+  "iPhone",
+
+  # Пользовательские продукты / бренды
+  "ClipBoss",
+  "Protocol Initiation",
+  "PsyCloser",
+]
+
+# Пост-коррекция после STT (пустое значение = удалить фрагмент)
+[corrections]
+# --- команды Veyro / диктовка ---
+"число с лать" = ""
+"чисто с лать" = ""
+"с лать" = "послать"
+"паслать" = "послать"
+"по слать" = "послать"
+"отправь" = "отправить"
+"новая строчка" = "новая строка"
+"новую строку" = "новая строка"
+"новый параграф" = "новый абзац"
+"новый абзац" = "новый абзац"
+"перенос строки" = "новая строка"
+"воскл знак" = "восклицательный знак"
+"вопрос знак" = "вопросительный знак"
+
+# --- ChatGPT / GPT / OpenAI ---
+"чат гпт" = "ChatGPT"
+"чатгпт" = "ChatGPT"
+"чат GPT" = "ChatGPT"
+"чат gpt" = "ChatGPT"
+"chat gpt" = "ChatGPT"
+"chat g p t" = "ChatGPT"
+"чат джипити" = "ChatGPT"
+"чат джи пи ти" = "ChatGPT"
+"чатджипити" = "ChatGPT"
+"чаджипити" = "ChatGPT"
+"чаджи пйти" = "ChatGPT"
+"чаджипти" = "ChatGPT"
+"чат жипити" = "ChatGPT"
+"чат джи пити" = "ChatGPT"
+"чат джи пйти" = "ChatGPT"
+"чати джипити" = "ChatGPT"
+"чатиджипити" = "ChatGPT"
+"чат джипти" = "ChatGPT"
+"джипити" = "GPT"
+"жипити" = "GPT"
+"джи пи ти" = "GPT"
+"гпт 4" = "GPT-4"
+"гпт4" = "GPT-4"
+"джипити 4" = "GPT-4"
+"гпт 4о" = "GPT-4o"
+"гпт 4 o" = "GPT-4o"
+"gpt 4o" = "GPT-4o"
+"гпт 5" = "GPT-5"
+"гпт5" = "GPT-5"
+"gpt 5" = "GPT-5"
+"опен ай" = "OpenAI"
+"опенай" = "OpenAI"
+"опен эй ай" = "OpenAI"
+"open ai" = "OpenAI"
+"опенэи" = "OpenAI"
+
+# --- Claude / Anthropic ---
+"клод" = "Claude"
+"клауд" = "Claude"
+"клоуд" = "Claude"
+"clod" = "Claude"
+"clawed" = "Claude"
+"клод 3" = "Claude 3"
+"клод 3.5" = "Claude 3.5"
+"клод 4" = "Claude 4"
+"антропик" = "Anthropic"
+"энтропик" = "Anthropic"
+"anthropic" = "Anthropic"
+
+# --- Gemini / Google ---
+"джемини" = "Gemini"
+"гемини" = "Gemini"
+"джемени" = "Gemini"
+"джимини" = "Gemini"
+"gemini" = "Gemini"
+"бард" = "Bard"
+"гугл джемини" = "Google Gemini"
+
+# --- Grok / xAI ---
+"грок" = "Grok"
+"грокк" = "Grok"
+"грог" = "Grok"
+"грокс" = "Grok"
+"икс ай" = "xAI"
+"экс ай" = "xAI"
+"x ai" = "xAI"
+"иксай" = "xAI"
+
+# --- DeepSeek / Perplexity / Copilot ---
+"дипсик" = "DeepSeek"
+"дип сик" = "DeepSeek"
+"deep seek" = "DeepSeek"
+"дипсик чат" = "DeepSeek"
+"перплексити" = "Perplexity"
+"перплексыти" = "Perplexity"
+"перplexity" = "Perplexity"
+"копилот" = "Copilot"
+"ко пилот" = "Copilot"
+"гитхаб копилот" = "GitHub Copilot"
+"виндсерф" = "Windsurf"
+"windsurf" = "Windsurf"
+
+# --- российские ИИ ---
+"гигачат" = "ГигаЧат"
+"гига чат" = "ГигаЧат"
+"gigachat" = "ГигаЧат"
+"яндекс джипити" = "YandexGPT"
+"яндекс гпт" = "YandexGPT"
+"yandex gpt" = "YandexGPT"
+"алиса ай" = "Алиса AI"
+"алиса ии" = "Алиса AI"
+"квен" = "Qwen"
+"квень" = "Qwen"
+"qw en" = "Qwen"
+"лама" = "Llama"
+"ллама" = "Llama"
+"llama 3" = "Llama 3"
+"мистраль" = "Mistral"
+"мистрал" = "Mistral"
+
+# --- генерация картинок / видео / звука ---
+"миджорни" = "Midjourney"
+"миджорней" = "Midjourney"
+"ми джорни" = "Midjourney"
+"mid journey" = "Midjourney"
+"стейбл дифьюжн" = "Stable Diffusion"
+"стейбл диффужн" = "Stable Diffusion"
+"stable diffusion" = "Stable Diffusion"
+"флюкс" = "Flux"
+"суно" = "Suno"
+"сьюно" = "Suno"
+"удио" = "Udio"
+"юдио" = "Udio"
+"элевенлабс" = "ElevenLabs"
+"элевен лабс" = "ElevenLabs"
+"11 labs" = "ElevenLabs"
+"ранвей" = "Runway"
+"runway ml" = "Runway"
+"клинг" = "Kling"
+"пика" = "Pika"
+"сора" = "Sora"
+"вео" = "Veo"
+"нано банана" = "Nano Banana"
+"капкат" = "CapCut"
+"кап кат" = "CapCut"
+"cap cut" = "CapCut"
+
+# --- мессенджеры и соцсети ---
+"телеграм" = "Telegram"
+"телеграмм" = "Telegram"
+"телега" = "Telegram"
+"ватсап" = "WhatsApp"
+"вотсап" = "WhatsApp"
+"вот сап" = "WhatsApp"
+"вацап" = "WhatsApp"
+"what's app" = "WhatsApp"
+"дискорд" = "Discord"
+"слак" = "Slack"
+"слэк" = "Slack"
+"ютуб" = "YouTube"
+"ютьюб" = "YouTube"
+"ю туб" = "YouTube"
+"you tube" = "YouTube"
+"инстаграм" = "Instagram"
+"инстаграмм" = "Instagram"
+"инста" = "Instagram"
+"тикток" = "TikTok"
+"тик ток" = "TikTok"
+"тик-ток" = "TikTok"
+"фейсбук" = "Facebook"
+"твиттер" = "Twitter"
+"реддит" = "Reddit"
+"линкедин" = "LinkedIn"
+"линкдин" = "LinkedIn"
+"вконтакте" = "ВКонтакте"
+"в контакте" = "ВКонтакте"
+"вк" = "ВК"
+"одноклассники" = "Одноклассники"
+"однокласы" = "Одноклассники"
+
+# --- стриминг / медиа ---
+"нетфликс" = "Netflix"
+"нетфлик" = "Netflix"
+"спотифай" = "Spotify"
+"твич" = "Twitch"
+"твитч" = "Twitch"
+"рутуб" = "Rutube"
+"кинопоиск" = "Кинопоиск"
+"кино поиск" = "Кинопоиск"
+
+# --- маркетплейсы ---
+"вайлдберриз" = "Wildberries"
+"вайлдбериз" = "Wildberries"
+"вайлдберис" = "Wildberries"
+"вайлд берриз" = "Wildberries"
+"wild berries" = "Wildberries"
+"озон" = "Ozon"
+"авито" = "Авито"
+"алиэкспресс" = "AliExpress"
+"али экспресс" = "AliExpress"
+"мегамаркет" = "Мегамаркет"
+"ламода" = "Lamoda"
+"яндекс маркет" = "Яндекс Маркет"
+
+# --- банки / операторы / госуслуги ---
+"сбер" = "Сбер"
+"сбербанк" = "Сбербанк"
+"сбербанк онлайн" = "Сбербанк Онлайн"
+"тинькофф" = "Тинькофф"
+"тинькоф" = "Тинькофф"
+"т банк" = "Т-Банк"
+"т-банк" = "Т-Банк"
+"альфа банк" = "Альфа-Банк"
+"альфабанк" = "Альфа-Банк"
+"втб" = "ВТБ"
+"газпромбанк" = "Газпромбанк"
+"госуслуги" = "Госуслуги"
+"гос услуги" = "Госуслуги"
+"почта россии" = "Почта России"
+"мтс" = "МТС"
+"мегафон" = "МегаФон"
+"билайн" = "Билайн"
+"теле2" = "Теле2"
+"ростелеком" = "Ростелеком"
+
+# --- гаджеты / железо ---
+"айфон" = "iPhone"
+"айпад" = "iPad"
+"макбук" = "MacBook"
+"мак бук" = "MacBook"
+"эйрподс" = "AirPods"
+"аирподс" = "AirPods"
+"эппл вотч" = "Apple Watch"
+"эпл" = "Apple"
+"эппл" = "Apple"
+"самсунг" = "Samsung"
+"сяоми" = "Xiaomi"
+"ксиаоми" = "Xiaomi"
+"хуавей" = "Huawei"
+"хонор" = "Honor"
+"тесла" = "Tesla"
+"спейсекс" = "SpaceX"
+"спейс икс" = "SpaceX"
+"энвидиа" = "NVIDIA"
+"нвидиа" = "NVIDIA"
+"джифорс" = "GeForce"
+"райзен" = "Ryzen"
+"плейстейшен" = "PlayStation"
+"плейстейшн" = "PlayStation"
+"иксбокс" = "Xbox"
+
+# --- созвоны / офис ---
+"зум" = "Zoom"
+"тимс" = "Teams"
+"майкрософт тимс" = "Microsoft Teams"
+"скайп" = "Skype"
+"гугл мит" = "Google Meet"
+"ноушн" = "Notion"
+"фигма" = "Figma"
+"канва" = "Canva"
+"фотошоп" = "Photoshop"
+"иллюстратор" = "Illustrator"
+"премьер про" = "Premiere Pro"
+"эксель" = "Excel"
+"пауэрпоинт" = "PowerPoint"
+"паверпоинт" = "PowerPoint"
+"ворд" = "Word"
+"гугл докс" = "Google Docs"
+"гугл диск" = "Google Drive"
+
+# --- разработка ---
+"гитхаб" = "GitHub"
+"гит хаб" = "GitHub"
+"git hub" = "GitHub"
+"гитлаб" = "GitLab"
+"докер" = "Docker"
+"кубернетес" = "Kubernetes"
+"кубернетис" = "Kubernetes"
+"кубер" = "Kubernetes"
+"постгрес" = "PostgreSQL"
+"постгрескюэль" = "PostgreSQL"
+"монгодб" = "MongoDB"
+"монго дб" = "MongoDB"
+"редис" = "Redis"
+"питон" = "Python"
+"джаваскрипт" = "JavaScript"
+"тайпскрипт" = "TypeScript"
+"реакт" = "React"
+"некст джс" = "Next.js"
+"next js" = "Next.js"
+"ноуд джс" = "Node.js"
+"node js" = "Node.js"
+"фастапи" = "FastAPI"
+"пайторч" = "PyTorch"
+"тензорфлоу" = "TensorFlow"
+"хаггинг фейс" = "Hugging Face"
+"хugging face" = "Hugging Face"
+"вс код" = "VS Code"
+"вижуал студио код" = "VS Code"
+"visual studio code" = "VS Code"
+"клаудфлер" = "Cloudflare"
+"клаудфлэр" = "Cloudflare"
+"версель" = "Vercel"
+"амазон вэбс" = "AWS"
+"азур" = "Azure"
+# --- пользовательские продукты (фонетика диктовки + типичный вывод Whisper) ---
+"клипбосс" = "ClipBoss"
+"клебос" = "ClipBoss"
+"клепбос" = "ClipBoss"
+"липбосс" = "ClipBoss"
+"лип босс" = "ClipBoss"
+"лип-босс" = "ClipBoss"
+"клитус" = "ClipBoss"
+"клейболос" = "ClipBoss"
+"клей болос" = "ClipBoss"
+"клип боз" = "ClipBoss"
+"клип босс" = "ClipBoss"
+"clip boss" = "ClipBoss"
+"clipboss" = "ClipBoss"
+"псайклозер" = "PsyCloser"
+"псиклозер" = "PsyCloser"
+"сайклозер" = "PsyCloser"
+"псайк лозер" = "PsyCloser"
+"псайк лоузер" = "PsyCloser"
+"псайк, лоузер" = "PsyCloser"
+"псайк-лозер" = "PsyCloser"
+"свирфин" = "PsyCloser"
+"санк лозер" = "PsyCloser"
+"psy closer" = "PsyCloser"
+"psycloser" = "PsyCloser"
+"протокол инитиэйшин" = "Protocol Initiation"
+"протокол инициации" = "Protocol Initiation"
+"протокол и сессия" = "Protocol Initiation"
+"протокол и амнициационный" = "Protocol Initiation"
+"протокол сессии" = "Protocol Initiation"
+"паркакулы" = "Protocol Initiation"
+"протокол донансэйшн" = "Protocol Initiation"
+"протокол donation" = "Protocol Initiation"
+"протокол initiation" = "Protocol Initiation"
+"protocol initiation" = "Protocol Initiation"
+
+# --- типичные галлюцинации Whisper ---
+"thanks for watching" = ""
+"thank you for watching" = ""
+"subscribe" = ""
+"subtitles by" = ""
+"amara.org" = ""
+"продолжение следует" = ""
+
+# Optional local Whisper decoding overrides
+[whisper]
+logprob_thold = -1.0
+entropy_thold = 2.4
+temperature_inc = 0.2
