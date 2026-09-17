@@ -1,6 +1,6 @@
 [package]
 name = "veyro"
-version = "1.7.76"
+version = "1.7.79"
 description = "Veyro — desktop voice dictation by MKdee Tech"
 authors = ["MKdee Tech"]
 edition = "2021"

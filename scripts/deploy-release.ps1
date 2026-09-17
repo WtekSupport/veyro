@@ -9,6 +9,8 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $root
 
+& (Join-Path $PSScriptRoot "ensure-updater-keys.ps1")
+
 if (-not $SkipCommit) {
     git add CHANGELOG.md package.json package-lock.json version.json src src-tauri scripts docs
     git add -u
@@ -25,6 +27,10 @@ CHANGELOG documents pause punctuation, Standard/Expert text mode mapping, Russia
 if (-not $SkipBuild) {
     npm run tauri:build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} else {
+    $version = Get-Content (Join-Path $root "version.json") -Raw | ConvertFrom-Json
+    $semver = "$($version.major).$($version.minor).$($version.build)"
+    & (Join-Path $PSScriptRoot "finish-release-artifacts.ps1") -Semver $semver
 }
 
 $version = Get-Content (Join-Path $root "version.json") -Raw | ConvertFrom-Json
