@@ -1,0 +1,49 @@
+name: Bug report
+description: Something is broken in the Veyro desktop app
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For **security** issues, use [Security Advisories](https://github.com/WtekSupport/veyro/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: Veyro version
+      placeholder: e.g. 1.7.74 (About window or Settings → Status)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: 1. … 2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / diagnostics
+      description: Activity log excerpt or Settings → Status → diagnostics if relevant.
