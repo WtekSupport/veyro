@@ -1,5 +1,6 @@
 pub mod homemaker;
 pub mod homemaker_hotkeys;
+pub mod system_memory;
 
 pub use homemaker::{
     apply_homemaker_local_recommendations, get_homemaker_local_setup, HomemakerLocalSetup,

@@ -110,10 +110,12 @@ mod linux {
 #[cfg(target_os = "macos")]
 mod macos {
     pub fn identifiers() -> Vec<String> {
-        let output = std::process::Command::new("ioreg")
+        let Ok(output) = std::process::Command::new("ioreg")
             .args(["-rd1", "-c", "IOPlatformExpertDevice"])
             .output()
-            .ok()?;
+        else {
+            return Vec::new();
+        };
 
         if !output.status.success() {
             return Vec::new();

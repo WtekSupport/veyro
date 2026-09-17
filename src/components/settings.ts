@@ -37,6 +37,7 @@ export interface SettingsFormValues {
   injection_mode: InjectionMode;
   text_processing_mode: TextProcessingMode;
   spoken_punctuation: boolean;
+  auto_punctuation_from_pauses: boolean;
   numbers_as_words: boolean;
   emulate_enter: boolean;
   enter_trigger_phrase: string;
@@ -211,6 +212,7 @@ export function settingsToForm(
     injection_mode: settings.injection_mode,
     text_processing_mode: settings.text_processing_mode,
     spoken_punctuation: settings.spoken_punctuation,
+    auto_punctuation_from_pauses: settings.auto_punctuation_from_pauses ?? true,
     numbers_as_words: settings.numbers_as_words,
     emulate_enter: settings.emulate_enter,
     enter_trigger_phrase: settings.enter_trigger_phrase,
@@ -911,7 +913,7 @@ export function renderSettingsForm(
         </div>
         </section>
 
-        <section class="settings-section">
+        <section class="settings-section" data-openai-connections-section ${needsOpenAiApiKey(values) ? "" : "hidden"}>
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.connections"))}</h3>
         <div class="advanced-grid">
           <label class="field advanced-span-2" data-openai-api-key-panel ${needsOpenAiApiKey(values) ? "" : "hidden"}>
@@ -1010,6 +1012,11 @@ export function renderSettingsForm(
             <span>${escapeHtml(t("settings.spokenPunctuation"))}</span>
           </label>
 
+          <label class="field checkbox" data-local-only-toggle>
+            <input name="auto_punctuation_from_pauses" type="checkbox" ${values.auto_punctuation_from_pauses ? "checked" : ""} />
+            <span>${escapeHtml(t("settings.autoPunctuationFromPauses"))}</span>
+          </label>
+
           <label class="field checkbox">
             <input name="numbers_as_words" type="checkbox" ${values.numbers_as_words ? "checked" : ""} />
             <span>${escapeHtml(t("settings.numbersAsWords"))}</span>
@@ -1069,6 +1076,7 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
       data.get("text_processing_mode") ?? "basic",
     ) as TextProcessingMode,
     spoken_punctuation: data.get("spoken_punctuation") === "on",
+    auto_punctuation_from_pauses: data.get("auto_punctuation_from_pauses") === "on",
     numbers_as_words: data.get("numbers_as_words") === "on",
     emulate_enter: data.get("emulate_enter") === "on",
     enter_trigger_phrase: String(data.get("enter_trigger_phrase") ?? ""),

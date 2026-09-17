@@ -533,6 +533,7 @@ async fn process_one_segment(
     let processed =
         match process_transcription(
             &transcription.text,
+            transcription.timed_segments.as_deref(),
             &settings,
             &http,
             &llm_snapshot,
