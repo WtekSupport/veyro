@@ -306,6 +306,9 @@ function syncTranscriptionProviderUi(form: HTMLFormElement): void {
   form.querySelectorAll<HTMLElement>("[data-local-model-panel]").forEach((element) => {
     element.hidden = provider !== "local";
   });
+  form.querySelectorAll<HTMLElement>("[data-local-only-toggle]").forEach((element) => {
+    element.hidden = provider !== "local";
+  });
 }
 
 function syncTextRewriteProviderUi(form: HTMLFormElement): void {
@@ -328,6 +331,9 @@ function syncOpenAiApiKeyUi(form: HTMLFormElement): void {
     transcriptionProvider === "openai" || textRewriteProvider === "openai";
 
   form.querySelectorAll<HTMLElement>("[data-openai-api-key-panel]").forEach((element) => {
+    element.hidden = !needsKey;
+  });
+  form.querySelectorAll<HTMLElement>("[data-openai-connections-section]").forEach((element) => {
     element.hidden = !needsKey;
   });
 }

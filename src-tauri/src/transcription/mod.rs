@@ -12,6 +12,7 @@ pub mod provider;
 
 pub use factory::create_transcriber;
 pub use languages::{list_transcription_languages, TranscriptionLanguage};
+pub use crate::timed_text::TimedTextSegment;
 pub use models::{TranscriptionOptions, TranscriptionResult, WhisperDecodingOptions};
 pub use openai::OpenAITranscriptionProvider;
 pub use live_dictation::LiveDictationSession;

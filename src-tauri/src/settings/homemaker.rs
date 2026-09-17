@@ -5,6 +5,26 @@ use crate::settings::secrets::has_api_key;
 use crate::setup::apply_homemaker_local_recommendations;
 use crate::setup::normalize_homemaker_hotkey;
 
+/// Expert «Базовая очистка» ↔ standard «Оригинал» (same processing, different stored label).
+pub fn map_text_processing_mode_for_ui_transition(
+    mode: TextProcessingMode,
+    from: UiMode,
+    to: UiMode,
+) -> TextProcessingMode {
+    if from == to {
+        return mode;
+    }
+    match (from, to) {
+        (UiMode::Expert, UiMode::Homemaker) if mode == TextProcessingMode::Basic => {
+            TextProcessingMode::Original
+        }
+        (UiMode::Homemaker, UiMode::Expert) if mode == TextProcessingMode::Original => {
+            TextProcessingMode::Basic
+        }
+        _ => mode,
+    }
+}
+
 pub fn normalize_homemaker_settings(settings: &mut AppSettings) -> bool {
     if !settings.is_homemaker() {
         return false;
@@ -14,6 +34,10 @@ pub fn normalize_homemaker_settings(settings: &mut AppSettings) -> bool {
 
     match settings.text_processing_mode {
         TextProcessingMode::Original | TextProcessingMode::Optimization => {}
+        TextProcessingMode::Basic => {
+            settings.text_processing_mode = TextProcessingMode::Original;
+            changed = true;
+        }
         _ => {
             settings.text_processing_mode = TextProcessingMode::Optimization;
             changed = true;
@@ -53,6 +77,17 @@ pub fn normalize_homemaker_settings(settings: &mut AppSettings) -> bool {
         changed = true;
     }
 
+    if settings.uses_local_storage()
+        && matches!(
+            settings.text_processing_mode,
+            TextProcessingMode::Original | TextProcessingMode::Basic
+        )
+        && !settings.auto_punctuation_from_pauses
+    {
+        settings.auto_punctuation_from_pauses = true;
+        changed = true;
+    }
+
     changed
 }
 
@@ -62,7 +97,20 @@ pub fn apply_homemaker_patch_side_effects(
     homemaker_data_storage: Option<HomemakerDataStorage>,
     apply_local_setup: bool,
 ) -> bool {
-    let mut changed = normalize_homemaker_settings(settings);
+    let mut changed = false;
+    if previous_ui_mode != settings.ui_mode {
+        let mapped = map_text_processing_mode_for_ui_transition(
+            settings.text_processing_mode,
+            previous_ui_mode,
+            settings.ui_mode,
+        );
+        if mapped != settings.text_processing_mode {
+            settings.text_processing_mode = mapped;
+            changed = true;
+        }
+    }
+
+    changed |= normalize_homemaker_settings(settings);
 
     let switched_to_homemaker =
         previous_ui_mode != UiMode::Homemaker && settings.ui_mode == UiMode::Homemaker;
@@ -86,7 +134,7 @@ mod tests {
     use crate::settings::TextProcessingMode;
 
     #[test]
-    fn homemaker_normalizes_text_mode_to_optimization() {
+    fn homemaker_maps_basic_to_original() {
         let mut settings = AppSettings {
             ui_mode: UiMode::Homemaker,
             text_processing_mode: TextProcessingMode::Basic,
@@ -97,7 +145,43 @@ mod tests {
         assert!(normalize_homemaker_settings(&mut settings));
         assert_eq!(
             settings.text_processing_mode,
-            TextProcessingMode::Optimization
+            TextProcessingMode::Original
+        );
+    }
+
+    #[test]
+    fn ui_transition_maps_expert_basic_to_homemaker_original() {
+        assert_eq!(
+            map_text_processing_mode_for_ui_transition(
+                TextProcessingMode::Basic,
+                UiMode::Expert,
+                UiMode::Homemaker,
+            ),
+            TextProcessingMode::Original
+        );
+    }
+
+    #[test]
+    fn ui_transition_maps_homemaker_original_to_expert_basic() {
+        assert_eq!(
+            map_text_processing_mode_for_ui_transition(
+                TextProcessingMode::Original,
+                UiMode::Homemaker,
+                UiMode::Expert,
+            ),
+            TextProcessingMode::Basic
+        );
+    }
+
+    #[test]
+    fn ui_transition_keeps_expert_original_when_entering_homemaker() {
+        assert_eq!(
+            map_text_processing_mode_for_ui_transition(
+                TextProcessingMode::Original,
+                UiMode::Expert,
+                UiMode::Homemaker,
+            ),
+            TextProcessingMode::Original
         );
     }
 
@@ -150,6 +234,20 @@ mod tests {
         };
         assert!(normalize_homemaker_settings(&mut settings));
         assert!(!settings.ptt_hold);
+    }
+
+    #[test]
+    fn homemaker_enables_pause_punctuation_for_local_basic() {
+        let mut settings = AppSettings {
+            ui_mode: UiMode::Homemaker,
+            transcription_provider: "local".to_string(),
+            text_rewrite_provider: TextRewriteProvider::Local,
+            text_processing_mode: TextProcessingMode::Basic,
+            auto_punctuation_from_pauses: false,
+            ..Default::default()
+        };
+        assert!(normalize_homemaker_settings(&mut settings));
+        assert!(settings.auto_punctuation_from_pauses);
     }
 
 }

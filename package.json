@@ -1,7 +1,7 @@
 {
   "name": "veyro",
   "private": true,
-  "version": "1.7.75",
+  "version": "1.7.79",
   "type": "module",
   "scripts": {
     "prepare": "node scripts/ensure-git-hooks.mjs",
@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "powershell -ExecutionPolicy Bypass -File scripts/tauri-dev-local.ps1",
+    "sync-version": "node scripts/sync-version.mjs",
     "tauri:build": "powershell -ExecutionPolicy Bypass -File scripts/tauri-build-local.ps1",
     "tauri:dev:local": "powershell -ExecutionPolicy Bypass -File scripts/tauri-dev-local.ps1",
     "tauri:build:local": "powershell -ExecutionPolicy Bypass -File scripts/tauri-build-local.ps1",
@@ -22,7 +23,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-updater": "^2.11.0"
+    "@tauri-apps/plugin-updater": "^2.11.0",
+    "lucide": "^1.47.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

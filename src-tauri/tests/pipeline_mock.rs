@@ -19,6 +19,7 @@ impl TranscriptionProvider for MockTranscriber {
             text: "hello world".to_string(),
             confidence: None,
             whisper_segments: None,
+            timed_segments: None,
             audio_peak: None,
             audio_rms: None,
             detected_language: None,
@@ -52,7 +53,7 @@ async fn mock_pipeline_processes_and_injects() {
         ..Default::default()
     };
     let llm = veyro_lib::llm::LlmEngine::unloaded(None);
-    let processed = process_transcription(&result.text, &settings, &http, &llm, None)
+    let processed = process_transcription(&result.text, None, &settings, &http, &llm, None)
         .await
         .unwrap();
 

@@ -332,6 +332,9 @@ pub struct AppSettings {
     pub vad_maximum_segment_ms: u32,
     pub injection_mode: InjectionMode,
     pub spoken_punctuation: bool,
+    /// Insert `,` / `.` from Whisper segment pauses (local STT, Basic/Original only).
+    #[serde(default = "default_auto_punctuation_from_pauses")]
+    pub auto_punctuation_from_pauses: bool,
     pub text_processing_mode: TextProcessingMode,
     pub numbers_as_words: bool,
     pub emulate_enter: bool,
@@ -370,6 +373,10 @@ fn default_check_updates_on_startup() -> bool {
 }
 
 fn default_live_dictation_field_indicator() -> bool {
+    true
+}
+
+fn default_auto_punctuation_from_pauses() -> bool {
     true
 }
 
@@ -413,7 +420,8 @@ impl Default for AppSettings {
             vad_maximum_segment_ms: 30_000,
             injection_mode: InjectionMode::Auto,
             spoken_punctuation: true,
-            text_processing_mode: TextProcessingMode::Basic,
+            auto_punctuation_from_pauses: true,
+            text_processing_mode: TextProcessingMode::Original,
             numbers_as_words: false,
             emulate_enter: false,
             enter_trigger_phrase: String::new(),
@@ -587,6 +595,25 @@ impl AppSettings {
         matches!(self.ui_mode, UiMode::Homemaker)
     }
 
+    /// Stored setting for light cleanup: «Оригинал» in standard UI, «Базовая очистка» in expert.
+    pub fn canonical_light_cleanup_mode(&self) -> TextProcessingMode {
+        if self.is_homemaker() {
+            TextProcessingMode::Original
+        } else {
+            TextProcessingMode::Basic
+        }
+    }
+
+    /// Standard (homemaker) UI stores «Оригинал» as [`TextProcessingMode::Original`]
+    /// but applies basic cleanup during transcription processing.
+    pub fn effective_text_processing_mode(&self) -> TextProcessingMode {
+        if self.is_homemaker() && self.text_processing_mode == TextProcessingMode::Original {
+            TextProcessingMode::Basic
+        } else {
+            self.text_processing_mode
+        }
+    }
+
     pub fn uses_cloud_storage(&self) -> bool {
         self.uses_openai_transcription()
             && matches!(self.text_rewrite_provider, TextRewriteProvider::Openai)
@@ -630,6 +657,7 @@ pub struct SettingsPatch {
     pub vad_maximum_segment_ms: Option<u32>,
     pub injection_mode: Option<InjectionMode>,
     pub spoken_punctuation: Option<bool>,
+    pub auto_punctuation_from_pauses: Option<bool>,
     pub text_processing_mode: Option<TextProcessingMode>,
     pub numbers_as_words: Option<bool>,
     pub emulate_enter: Option<bool>,
@@ -737,6 +765,9 @@ impl SettingsPatch {
         }
         if let Some(spoken_punctuation) = self.spoken_punctuation {
             settings.spoken_punctuation = spoken_punctuation;
+        }
+        if let Some(auto_punctuation_from_pauses) = self.auto_punctuation_from_pauses {
+            settings.auto_punctuation_from_pauses = auto_punctuation_from_pauses;
         }
         if let Some(text_processing_mode) = self.text_processing_mode {
             settings.text_processing_mode = text_processing_mode;

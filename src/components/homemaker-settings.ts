@@ -140,7 +140,10 @@ export function renderHomemakerSettings(
 
   const storage = effectiveDataStorage(settings);
 
-  const textMode = settings.text_processing_mode;
+  const textMode =
+    settings.text_processing_mode === "basic"
+      ? "original"
+      : settings.text_processing_mode;
 
   const optimizationAvailable =
 

@@ -10,7 +10,10 @@ use crate::text::normalize::{
     clean_raw_transcription_with_dictionary, ensure_spaces_after_punctuation,
 };
 use crate::text::numbers::apply_numbers_as_words;
+use crate::text::ru_numeral_genitive::apply_russian_numeral_inflection;
+use crate::text::pause_punctuation::apply_pause_punctuation;
 use crate::text::rewrite::rewrite_transcription;
+use crate::timed_text::TimedTextSegment;
 
 #[derive(Debug, Clone)]
 pub struct ProcessedText {
@@ -28,6 +31,7 @@ pub enum TextProcessingError {
 
 pub async fn process_transcription(
     raw: &str,
+    timed_segments: Option<&[TimedTextSegment]>,
     settings: &AppSettings,
     http: &Client,
     llm_engine: &LlmEngine,
@@ -37,8 +41,15 @@ pub async fn process_transcription(
         .unwrap_or_default();
     let terms = protected_terms(&dictionary);
     let postprocess_lang = settings.postprocess_language(whisper_detected_language);
+
+    let source_text = if should_apply_pause_punctuation(settings, timed_segments) {
+        apply_pause_punctuation(timed_segments.unwrap_or_default())
+    } else {
+        raw.to_string()
+    };
+
     let (raw, press_enter) = prepare_transcription_for_processing(
-        raw,
+        &source_text,
         settings,
         &dictionary,
         &postprocess_lang,
@@ -46,7 +57,8 @@ pub async fn process_transcription(
 
     let mut rewrite_fallback = false;
     let mut rewrite_fallback_reason = None;
-    let mut text = match settings.text_processing_mode {
+    let processing_mode = settings.effective_text_processing_mode();
+    let mut text = match processing_mode {
         TextProcessingMode::Original => apply_original(&raw),
         TextProcessingMode::Basic => apply_basic_cleanup(&raw),
         mode if mode.uses_ai() => {
@@ -70,6 +82,9 @@ pub async fn process_transcription(
 
     if settings.numbers_as_words {
         text = apply_numbers_as_words(&text, true, &postprocess_lang);
+        if postprocess_lang.starts_with("ru") {
+            text = apply_russian_numeral_inflection(&text);
+        }
     }
 
     text = ensure_spaces_after_punctuation(&text);
@@ -82,17 +97,33 @@ pub async fn process_transcription(
     })
 }
 
+fn should_apply_pause_punctuation(
+    settings: &AppSettings,
+    timed_segments: Option<&[TimedTextSegment]>,
+) -> bool {
+    if !settings.auto_punctuation_from_pauses {
+        return false;
+    }
+    if settings.transcription_provider != "local" {
+        return false;
+    }
+    if !matches!(
+        settings.effective_text_processing_mode(),
+        TextProcessingMode::Original | TextProcessingMode::Basic
+    ) {
+        return false;
+    }
+    timed_segments.is_some_and(|segments| segments.len() >= 2)
+}
+
 fn prepare_transcription_for_processing(
     raw: &str,
     settings: &AppSettings,
     dictionary: &crate::text::dictionary::Dictionary,
     postprocess_lang: &str,
 ) -> (String, bool) {
-    // Strip known Whisper artifacts and apply user corrections in every mode.
     let raw = clean_raw_transcription_with_dictionary(raw, dictionary);
 
-    // Remove the enter trigger phrase from raw Whisper text before any AI rewrite.
-    // If it reaches the LLM, the model reformulates it and Enter emulation breaks.
     let (mut text, press_enter) = apply_enter_trigger(
         &raw,
         settings.emulate_enter,
@@ -110,19 +141,48 @@ fn prepare_transcription_for_processing(
 mod tests {
     use super::*;
     use crate::settings::AppSettings;
+    use crate::timed_text::TimedTextSegment;
+
+    fn seg(text: &str, start: u64, end: u64) -> TimedTextSegment {
+        TimedTextSegment {
+            text: text.to_string(),
+            start_ms: start,
+            end_ms: end,
+        }
+    }
+
+    async fn process(
+        raw: &str,
+        settings: &AppSettings,
+        lang: Option<&str>,
+    ) -> ProcessedText {
+        let client = Client::new();
+        let llm = crate::llm::LlmEngine::unloaded(None);
+        process_transcription(raw, None, settings, &client, &llm, lang)
+            .await
+            .unwrap()
+    }
+
+    async fn process_with_segments(
+        raw: &str,
+        segments: &[TimedTextSegment],
+        settings: &AppSettings,
+    ) -> ProcessedText {
+        let client = Client::new();
+        let llm = crate::llm::LlmEngine::unloaded(None);
+        process_transcription(raw, Some(segments), settings, &client, &llm, Some("ru"))
+            .await
+            .unwrap()
+    }
 
     #[tokio::test]
     async fn original_mode_adds_trailing_space_after_period() {
         let settings = AppSettings {
             text_processing_mode: TextProcessingMode::Original,
+            ui_mode: crate::settings::UiMode::Expert,
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("первое предложение.", &settings, &client, &llm, None)
-                .await
-                .unwrap();
+        let processed = process("первое предложение.", &settings, None).await;
         assert_eq!(processed.text, "первое предложение. ");
     }
 
@@ -130,14 +190,10 @@ mod tests {
     async fn original_mode_keeps_whitespace() {
         let settings = AppSettings {
             text_processing_mode: TextProcessingMode::Original,
+            ui_mode: crate::settings::UiMode::Expert,
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("  hello   world  ", &settings, &client, &llm, None)
-                .await
-                .unwrap();
+        let processed = process("  hello   world  ", &settings, None).await;
         assert_eq!(processed.text, "hello   world");
     }
 
@@ -147,13 +203,30 @@ mod tests {
             text_processing_mode: TextProcessingMode::Basic,
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("  hello   world  ", &settings, &client, &llm, None)
-                .await
-                .unwrap();
+        let processed = process("  hello   world  ", &settings, None).await;
         assert_eq!(processed.text, "Hello world");
+    }
+
+    #[tokio::test]
+    async fn homemaker_original_runs_basic_cleanup() {
+        let settings = AppSettings {
+            text_processing_mode: TextProcessingMode::Original,
+            ui_mode: crate::settings::UiMode::Homemaker,
+            ..Default::default()
+        };
+        let processed = process("  hello   world  ", &settings, None).await;
+        assert_eq!(processed.text, "Hello world");
+    }
+
+    #[tokio::test]
+    async fn expert_original_skips_basic_cleanup() {
+        let settings = AppSettings {
+            text_processing_mode: TextProcessingMode::Original,
+            ui_mode: crate::settings::UiMode::Expert,
+            ..Default::default()
+        };
+        let processed = process("  hello   world  ", &settings, None).await;
+        assert_eq!(processed.text, "hello   world");
     }
 
     #[tokio::test]
@@ -164,12 +237,7 @@ mod tests {
             language: Some("de".to_string()),
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("Hallo Punkt Welt", &settings, &client, &llm, Some("de"))
-                .await
-                .unwrap();
+        let processed = process("Hallo Punkt Welt", &settings, Some("de")).await;
         assert_eq!(processed.text, "Hallo. Welt");
     }
 
@@ -181,29 +249,36 @@ mod tests {
             language: Some("ru".to_string()),
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("привет запятая мир", &settings, &client, &llm, Some("ru"))
-                .await
-                .unwrap();
+        let processed = process("привет запятая мир", &settings, Some("ru")).await;
         assert_eq!(processed.text, "Привет, мир");
+    }
+
+    #[tokio::test]
+    async fn pause_punctuation_in_basic_mode() {
+        let settings = AppSettings {
+            text_processing_mode: TextProcessingMode::Basic,
+            transcription_provider: "local".to_string(),
+            auto_punctuation_from_pauses: true,
+            ..Default::default()
+        };
+        let segments = [
+            seg("первое", 0, 400),
+            seg("второе", 1400, 1800),
+        ];
+        let processed = process_with_segments("первое второе", &segments, &settings).await;
+        assert_eq!(processed.text, "Первое. второе. ");
     }
 
     #[tokio::test]
     async fn enter_trigger_strips_suffix() {
         let settings = AppSettings {
             text_processing_mode: TextProcessingMode::Original,
+            ui_mode: crate::settings::UiMode::Expert,
             emulate_enter: true,
             enter_trigger_phrase: "и строка".to_string(),
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("текст и строка", &settings, &client, &llm, None)
-                .await
-                .unwrap();
+        let processed = process("текст и строка", &settings, None).await;
         assert_eq!(processed.text, "текст");
         assert!(processed.press_enter);
     }
@@ -212,12 +287,14 @@ mod tests {
     async fn subtitle_hallucination_is_dropped_in_original_mode() {
         let settings = AppSettings {
             text_processing_mode: TextProcessingMode::Original,
+            ui_mode: crate::settings::UiMode::Expert,
             ..Default::default()
         };
         let client = Client::new();
         let llm = crate::llm::LlmEngine::unloaded(None);
         let processed = process_transcription(
             "Редактор субтитров: А. Синецкая. Корректор: А. Егорова.",
+            None,
             &settings,
             &client,
             &llm,
@@ -237,12 +314,7 @@ mod tests {
             ui_locale: crate::settings::UiLocale::En,
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("1985 год", &settings, &client, &llm, Some("ru"))
-                .await
-                .unwrap();
+        let processed = process("1985 год", &settings, Some("ru")).await;
         assert!(processed.text.contains("тысяч"));
         assert!(!processed.text.contains("1985"));
     }
@@ -255,12 +327,7 @@ mod tests {
             enter_trigger_phrase: "отправить сообщение".to_string(),
             ..Default::default()
         };
-        let client = Client::new();
-        let llm = crate::llm::LlmEngine::unloaded(None);
-        let processed =
-            process_transcription("раз два отправить сообщение", &settings, &client, &llm, None)
-                .await
-                .unwrap();
+        let processed = process("раз два отправить сообщение", &settings, None).await;
         assert!(processed.press_enter);
         assert!(
             !processed.text.to_lowercase().contains("отправ"),

@@ -109,7 +109,7 @@ fn hook_thread_main(stop: Arc<AtomicBool>) {
         tap.enable();
 
         while !stop.load(Ordering::Acquire) {
-            CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, 0.2, false);
+            CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, std::time::Duration::from_millis(200), false);
         }
 
         run_loop.remove_source(&loop_source, kCFRunLoopCommonModes);
