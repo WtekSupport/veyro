@@ -663,7 +663,7 @@ pub fn apply_russian_genitive_numerals(text: &str) -> String {
             }
             let chars: Vec<char> = text.chars().collect();
             let char_idx = text[..num_start].chars().count();
-            if let Some((num_end_char, value)) = parse_number_at(&chars, char_idx) {
+            if let Some((num_end_char, _)) = parse_number_at(&chars, char_idx) {
                 let num_end_byte = text
                     .char_indices()
                     .nth(num_end_char)
@@ -711,7 +711,7 @@ fn trigger_has_word_boundary(text: &str, trigger_start: usize) -> bool {
     if trigger_start == 0 {
         return true;
     }
-    let before = text[..trigger_start].chars().rev().next();
+    let before = text[..trigger_start].chars().next_back();
     match before {
         None => true,
         Some(ch) => !ch.is_alphabetic(),
