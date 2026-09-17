@@ -2,15 +2,15 @@
 pub fn total_physical_memory_mb() -> u64 {
     #[cfg(windows)]
     {
-        return windows_total_mb().unwrap_or(default_assumed_mb());
+        windows_total_mb().unwrap_or(default_assumed_mb())
     }
     #[cfg(target_os = "linux")]
     {
-        return linux_total_mb().unwrap_or(default_assumed_mb());
+        linux_total_mb().unwrap_or(default_assumed_mb())
     }
     #[cfg(target_os = "macos")]
     {
-        return macos_total_mb().unwrap_or(default_assumed_mb());
+        macos_total_mb().unwrap_or(default_assumed_mb())
     }
     #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
@@ -41,7 +41,7 @@ fn linux_total_mb() -> Option<u64> {
     let contents = std::fs::read_to_string("/proc/meminfo").ok()?;
     for line in contents.lines() {
         if let Some(kb) = line.strip_prefix("MemTotal:") {
-            let kb: u64 = kb.trim().split_whitespace().next()?.parse().ok()?;
+            let kb: u64 = kb.split_whitespace().next()?.parse().ok()?;
             return Some(kb / 1024);
         }
     }
