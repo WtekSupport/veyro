@@ -42,18 +42,39 @@ function Invoke-GhApi {
     Invoke-RestMethod @params
 }
 
+function Get-ReleaseNotesFromChangelog {
+    param([string]$Version, [string]$ChangelogPath)
+    if (-not (Test-Path $ChangelogPath)) {
+        return "Windows installer, portable build, and updater manifest (``latest.json``)."
+    }
+    $text = Get-Content $ChangelogPath -Raw
+    $pattern = "(?ms)^## \[$([regex]::Escape($Version))\][^\r\n]*\r?\n(?<body>(?:- .+\r?\n)+)"
+    $match = [regex]::Match($text, $pattern)
+    if ($match.Success) {
+        return $match.Groups["body"].Value.TrimEnd()
+    }
+    return "Windows installer, portable build, and updater manifest (``latest.json``)."
+}
+
+$releaseNotes = Get-ReleaseNotesFromChangelog -Version $Semver -ChangelogPath (Join-Path $root "CHANGELOG.md")
+
 Write-Host "Creating release $tag ..."
 try {
     Invoke-GhApi -Method POST -Uri "https://api.github.com/repos/$repo/releases" -Body @{
         tag_name   = $tag
         name       = "Veyro $Semver"
-        body       = "Windows installer, portable build, and updater manifest (`latest.json`)."
+        body       = $releaseNotes
         draft      = $false
         prerelease = $false
     } | Out-Null
 } catch {
     if ($_.Exception.Response.StatusCode.value__ -eq 422) {
         Write-Host "Release $tag already exists; uploading assets."
+        $existing = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
+        Invoke-GhApi -Method PATCH -Uri "https://api.github.com/repos/$repo/releases/$($existing.id)" -Body @{
+            name = "Veyro $Semver"
+            body = $releaseNotes
+        } | Out-Null
     } else {
         throw
     }
