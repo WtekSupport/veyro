@@ -18,6 +18,7 @@ pub mod llm;
 mod setup;
 pub mod settings;
 pub mod text;
+pub mod timed_text;
 pub mod transcription;
 mod tray;
 mod window;

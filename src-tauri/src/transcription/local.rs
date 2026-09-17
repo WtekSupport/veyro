@@ -12,6 +12,7 @@ use crate::audio::segment::AudioSegment;
 use crate::text::dictionary::Dictionary;
 use crate::text::corrections::apply_corrections;
 use crate::text::normalize::{clean_raw_transcription_with_dictionary, strip_prompt_echo};
+use crate::timed_text::TimedTextSegment;
 use crate::transcription::models::{TranscriptionOptions, TranscriptionResult, WhisperDecodingOptions};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
 
@@ -111,16 +112,23 @@ impl SharedModel {
         let decoding = merge_decoding_options(options.whisper_decoding, dictionary);
         let beam_size = self.config.beam_size;
         let (peak, rms) = audio_peak_rms(audio);
-        let meta = |segments: i32, detected: &Option<String>| TranscriptionResult {
-            text: String::new(),
-            confidence: None,
-            whisper_segments: Some(segments),
-            audio_peak: Some(peak),
-            audio_rms: Some(rms),
-            detected_language: detected.clone(),
+        let meta = |segments: i32, detected: &Option<String>, timed: Vec<TimedTextSegment>| {
+            TranscriptionResult {
+                text: String::new(),
+                confidence: None,
+                whisper_segments: Some(segments),
+                timed_segments: if timed.is_empty() {
+                    None
+                } else {
+                    Some(timed)
+                },
+                audio_peak: Some(peak),
+                audio_rms: Some(rms),
+                detected_language: detected.clone(),
+            }
         };
 
-        let (text, raw_segments, segment_count, detected_language) = self.decode_audio(
+        let (text, raw_segments, segment_count, detected_language, timed_segments) = self.decode_audio(
             context,
             audio,
             options,
@@ -145,6 +153,11 @@ impl SharedModel {
                 text,
                 confidence: None,
                 whisper_segments: Some(segment_count),
+                timed_segments: if timed_segments.is_empty() {
+                    None
+                } else {
+                    Some(timed_segments)
+                },
                 audio_peak: Some(peak),
                 audio_rms: Some(rms),
                 detected_language: whisper_detected.clone(),
@@ -166,7 +179,7 @@ impl SharedModel {
                 .language
                 .clone()
                 .or(whisper_detected.clone());
-            let (retry_text, retry_raw, retry_segments, retry_detected) = self.decode_audio(
+            let (retry_text, retry_raw, retry_segments, retry_detected, retry_timed) = self.decode_audio(
                 context,
                 audio,
                 options,
@@ -190,6 +203,11 @@ impl SharedModel {
                     text: retry_text,
                     confidence: None,
                     whisper_segments: Some(retry_segments),
+                    timed_segments: if retry_timed.is_empty() {
+                        None
+                    } else {
+                        Some(retry_timed)
+                    },
                     audio_peak: Some(peak),
                     audio_rms: Some(rms),
                     detected_language: whisper_detected.clone(),
@@ -203,7 +221,7 @@ impl SharedModel {
                 raw = %retry_raw.join(" | "),
                 "local transcription still empty after permissive retry"
             );
-            return Ok(meta(retry_segments, &whisper_detected));
+            return Ok(meta(retry_segments, &whisper_detected, retry_timed));
         }
 
         warn!(
@@ -214,7 +232,7 @@ impl SharedModel {
             raw = %raw_segments.join(" | "),
             "local transcription empty"
         );
-        Ok(meta(segment_count, &whisper_detected))
+        Ok(meta(segment_count, &whisper_detected, timed_segments))
     }
 
     fn transcribe_preview(
@@ -244,7 +262,7 @@ impl SharedModel {
             Some(WhisperDecodingOptions::permissive()),
             &dictionary,
         );
-        let (text, raw_segments, segment_count, detected_language) = self.decode_audio(
+        let (text, raw_segments, segment_count, detected_language, _timed) = self.decode_audio(
             context,
             audio,
             options,
@@ -258,7 +276,7 @@ impl SharedModel {
 
         if finalized.is_empty() && audio.duration_ms >= RETRY_MIN_DURATION_MS {
             let language = options.language.clone().or(detected_language);
-            let (retry_text, retry_raw, retry_segments, _) = self.decode_audio(
+            let (retry_text, retry_raw, retry_segments, _, _retry_timed) = self.decode_audio(
                 context,
                 audio,
                 options,
@@ -303,7 +321,8 @@ impl SharedModel {
         profile: DecodeProfile,
         use_initial_prompt: bool,
         language_override: Option<&str>,
-    ) -> Result<(String, Vec<String>, i32, Option<String>), TranscriptionError> {
+    ) -> Result<(String, Vec<String>, i32, Option<String>, Vec<TimedTextSegment>), TranscriptionError>
+    {
         let mut state = context
             .create_state()
             .map_err(|error| TranscriptionError::InferenceFailed(error.to_string()))?;
@@ -352,6 +371,7 @@ impl SharedModel {
             .and_then(|lang_id| get_lang_str(lang_id).map(str::to_string));
 
         let mut raw_segments = Vec::new();
+        let mut timed_segments = Vec::new();
         let mut text = String::new();
         for index in 0..segment_count {
             let segment = state
@@ -361,6 +381,19 @@ impl SharedModel {
             if trimmed.is_empty() {
                 continue;
             }
+            let start_ms = state
+                .full_get_segment_t0(index)
+                .map(whisper_timestamp_to_ms)
+                .unwrap_or(0);
+            let end_ms = state
+                .full_get_segment_t1(index)
+                .map(whisper_timestamp_to_ms)
+                .unwrap_or(start_ms);
+            timed_segments.push(TimedTextSegment {
+                text: trimmed.to_string(),
+                start_ms,
+                end_ms,
+            });
             raw_segments.push(trimmed.to_string());
             text.push_str(trimmed);
             text.push(' ');
@@ -371,8 +404,13 @@ impl SharedModel {
             raw_segments,
             segment_count,
             detected_language,
+            timed_segments,
         ))
     }
+}
+
+fn whisper_timestamp_to_ms(timestamp: i64) -> u64 {
+    timestamp.max(0) as u64 * 10
 }
 
 fn sampling_strategy(beam_size: u8) -> SamplingStrategy {

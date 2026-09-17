@@ -77,7 +77,7 @@ export const en = {
   "settings.statusHint": "If processing does not start, check API key, mic capture, and messages below.",
   "settings.ptt": "Push-to-talk",
   "settings.pttHold": "Hold to talk",
-  "settings.liveDictationFieldIndicator": "Animated \"...\" in target field while recording",
+  "settings.liveDictationFieldIndicator": "Recording animation",
   "settings.modePtt": "PTT",
   "settings.modeContinuous": "Continuous",
   "settings.modeHintPtt": "PTT mode: hold the hotkey while speaking, release to transcribe and inject.",
@@ -203,6 +203,7 @@ export const en = {
   "settings.textModeHintCustomSkill":
     "Your own full prompt from a skill file below; the built-in optimization prompt is not used.",
   "settings.spokenPunctuation": "Spoken punctuation",
+  "settings.autoPunctuationFromPauses": "Punctuation from pauses",
   "settings.numbersAsWords": "Numbers as words",
   "settings.emulateEnter": "Emulate Enter",
   "settings.enterTriggerPhrase": "Enter trigger phrase",

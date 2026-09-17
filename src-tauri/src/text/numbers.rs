@@ -1,6 +1,7 @@
 use num_bigint::BigInt;
 
 use crate::text::lang_resolve::resolve_num2words_lang;
+use crate::text::ru_numeral_genitive::{int_to_words_ru, resolve_numeral_case};
 
 pub fn apply_numbers_as_words(text: &str, enabled: bool, lang: &str) -> String {
     if !enabled || text.is_empty() {
@@ -15,7 +16,7 @@ pub fn apply_numbers_as_words(text: &str, enabled: bool, lang: &str) -> String {
             digits.push(ch);
         } else {
             if !digits.is_empty() {
-                result.push_str(&convert_number(&digits, lang));
+                result.push_str(&convert_number(&digits, lang, &result));
                 digits.clear();
             }
             result.push(ch);
@@ -23,16 +24,21 @@ pub fn apply_numbers_as_words(text: &str, enabled: bool, lang: &str) -> String {
     }
 
     if !digits.is_empty() {
-        result.push_str(&convert_number(&digits, lang));
+        result.push_str(&convert_number(&digits, lang, &result));
     }
 
     result
 }
 
-fn convert_number(raw: &str, lang: &str) -> String {
+fn convert_number(raw: &str, lang: &str, context_before: &str) -> String {
     let Ok(value) = raw.parse::<i64>() else {
         return raw.to_string();
     };
+
+    if lang.starts_with("ru") {
+        let case = resolve_numeral_case(context_before);
+        return int_to_words_ru(value, case);
+    }
 
     let Some(lang_impl) = resolve_num2words_lang(lang) else {
         return raw.to_string();

@@ -102,6 +102,7 @@ impl TranscriptionProvider for OpenAITranscriptionProvider {
                         debug!(chars = text.len(), "transcription completed");
 
                         return Ok(TranscriptionResult {
+                            timed_segments: None,
                             text,
                             confidence: None,
                             whisper_segments: None,
