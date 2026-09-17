@@ -13,11 +13,18 @@ This creates:
 - **Private key:** `%USERPROFILE%\.tauri\veyro-updater.key` (backup securely; losing it blocks signed updates for existing installs)
 - **Public key:** `src-tauri/updater.pub` (committed to git)
 
-Release builds need the private key in the environment (the build script sets it from the path above when present):
+Release builds load signing env automatically via `scripts/ensure-updater-keys.ps1` (called from `tauri:build` and `deploy-release.ps1`):
+
+- **`TAURI_SIGNING_PRIVATE_KEY`** — key file contents (base64)
+- **`TAURI_SIGNING_PRIVATE_KEY_PATH`** — path to the key file
+- **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** — read from `%USERPROFILE%\.tauri\veyro-updater.password` (auto-created on key generation; empty only for legacy keys)
+
+No interactive password prompt during `tauri build` when the password file matches the key.
+
+**Lost the key password?** Create a new passwordless maintainer key (backs up the old file, updates `updater.pub`; users on very old builds may need one manual install before auto-update works again):
 
 ```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\veyro-updater.key"
-# optional: $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "..."
+powershell -ExecutionPolicy Bypass -File scripts/ensure-updater-keys.ps1 -ResetSigningKey
 npm run tauri:build
 ```
 
