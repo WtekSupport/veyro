@@ -143,7 +143,7 @@ impl AppController {
         if self.settings.text_processing_mode.uses_ai()
             && !crate::llm::ai_rewrite_available(&self.settings)
         {
-            self.settings.text_processing_mode = crate::settings::TextProcessingMode::Basic;
+            self.settings.text_processing_mode = self.settings.canonical_light_cleanup_mode();
         }
         self.settings.validate().map_err(AppError::from)?;
 

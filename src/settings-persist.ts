@@ -65,6 +65,7 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     injection_mode: values.injection_mode,
     text_processing_mode: values.text_processing_mode,
     spoken_punctuation: values.spoken_punctuation,
+    auto_punctuation_from_pauses: values.auto_punctuation_from_pauses,
     numbers_as_words: values.numbers_as_words,
     emulate_enter: values.emulate_enter,
     enter_trigger_phrase: values.enter_trigger_phrase,
@@ -109,6 +110,7 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.injection_mode !== current.injection_mode ||
     patch.text_processing_mode !== current.text_processing_mode ||
     patch.spoken_punctuation !== current.spoken_punctuation ||
+    patch.auto_punctuation_from_pauses !== current.auto_punctuation_from_pauses ||
     patch.numbers_as_words !== current.numbers_as_words ||
     patch.emulate_enter !== current.emulate_enter ||
     patch.enter_trigger_phrase !== current.enter_trigger_phrase ||

@@ -37,12 +37,16 @@ pub struct TranscriptionOptions {
     pub dictionary_path: Option<String>,
 }
 
+use crate::timed_text::TimedTextSegment;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionResult {
     pub text: String,
     pub confidence: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub whisper_segments: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timed_segments: Option<Vec<TimedTextSegment>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_peak: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

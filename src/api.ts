@@ -78,6 +78,7 @@ export interface AppSettings {
   vad_maximum_segment_ms: number;
   injection_mode: InjectionMode;
   spoken_punctuation: boolean;
+  auto_punctuation_from_pauses: boolean;
   text_processing_mode: TextProcessingMode;
   numbers_as_words: boolean;
   emulate_enter: boolean;
@@ -125,6 +126,7 @@ export interface SettingsPatch {
   vad_maximum_segment_ms?: number;
   injection_mode?: InjectionMode;
   spoken_punctuation?: boolean;
+  auto_punctuation_from_pauses?: boolean;
   text_processing_mode?: TextProcessingMode;
   numbers_as_words?: boolean;
   emulate_enter?: boolean;

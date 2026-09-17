@@ -8,6 +8,7 @@ use crate::error::ConfigError;
 use crate::llm::ai_rewrite_available;
 use crate::settings::config::{AppSettings, LlmModelKind, TextProcessingMode, UiLocale};
 use crate::settings::homemaker::normalize_homemaker_settings;
+use crate::setup::apply_homemaker_local_recommendations;
 use crate::settings::{local_llm_gpu_compiled, whisper_gpu_compiled};
 use crate::settings::encryption::{decrypt_json, encrypt_json, EncryptedEnvelope};
 use crate::settings::secrets::has_api_key;
@@ -31,6 +32,10 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         normalize_local_llm_gpu_settings(&mut settings);
         normalize_homemaker_settings(&mut settings);
         normalize_locale_dependent_settings(&mut settings);
+        if settings.is_homemaker() && settings.transcription_provider == "local" {
+            apply_homemaker_local_recommendations(&mut settings);
+            normalize_homemaker_settings(&mut settings);
+        }
         settings.validate()?;
         return Ok(settings);
     }
@@ -158,7 +163,7 @@ fn normalize_api_key_dependent_settings(settings: &mut AppSettings) -> bool {
     }
 
     if settings.text_processing_mode.uses_ai() && !ai_rewrite_available(settings) {
-        settings.text_processing_mode = TextProcessingMode::Basic;
+        settings.text_processing_mode = settings.canonical_light_cleanup_mode();
         changed = true;
     }
 
@@ -329,7 +334,7 @@ mod tests {
         };
         assert!(normalize_api_key_dependent_settings(&mut settings));
         assert_eq!(settings.transcription_provider, "local");
-        assert_eq!(settings.text_processing_mode, TextProcessingMode::Basic);
+        assert_eq!(settings.text_processing_mode, TextProcessingMode::Original);
     }
 
     #[test]
