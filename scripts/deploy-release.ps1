@@ -48,7 +48,7 @@ git tag -f $tag
 if (-not $SkipPush) {
     git push origin main
     git push origin $tag --force
-    & (Join-Path $PSScriptRoot "publish-github-release.ps1") -Semver $semver
+    & (Join-Path $PSScriptRoot "publish-github-release-from-gcm.ps1") -Semver $semver
 }
 
 Write-Host "Release $semver ready: release/$semver/"
