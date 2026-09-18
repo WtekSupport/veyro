@@ -137,6 +137,8 @@ pub fn normalize_whisper_guillemet_chunks(text: &str) -> String {
     let mut result = text.to_string();
     result = result.replace("». «", "», «");
     result = result.replace("».  «", "», «");
+    result = result.replace("».«", "», «");
+    result = result.replace("» . «", "», «");
     result = result.replace(". . «", ". «");
     result = result.replace(". .", ".");
     result
@@ -256,6 +258,14 @@ fn collapse_yes_chain_in_sentence(sentence: &str) -> String {
 
 /// All Basic-specific speech cleanup steps in pipeline order (excluding whitespace / paragraphs).
 pub fn apply_basic_speech_cleanup(text: &str) -> String {
+    text.split("\n\n")
+        .map(apply_basic_speech_cleanup_block)
+        .filter(|block| !block.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn apply_basic_speech_cleanup_block(text: &str) -> String {
     let mut text = normalize_stt_punctuation_glitches(text);
     text = normalize_whisper_guillemet_chunks(&text);
     text = dedupe_consecutive_sentences(&text);

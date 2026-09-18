@@ -9,7 +9,10 @@ pub fn clean_raw_transcription(text: &str) -> String {
     if is_whisper_hallucination_only(&text) || is_whisper_prompt_echo(&text) {
         return String::new();
     }
-    collapse_speech_stutters(&text)
+    text.split("\n\n")
+        .map(|block| collapse_speech_stutters(block))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Drop transcriptions that mostly repeat the Whisper `initial_prompt` (common on silence).
@@ -122,10 +125,16 @@ pub fn apply_basic_cleanup(text: &str) -> String {
     text = crate::text::basic_cleanup::apply_basic_speech_cleanup(&text);
     text = ensure_spaces_after_punctuation(&text);
     text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
-    text = crate::text::basic_cleanup::dedupe_consecutive_sentences(&text);
+    text = text
+        .split("\n\n")
+        .map(crate::text::basic_cleanup::dedupe_consecutive_sentences)
+        .filter(|block| !block.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
     text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
     text = wrap_into_readable_paragraphs(&text);
-    capitalize_paragraphs(&text)
+    text = capitalize_paragraphs(&text);
+    ensure_trailing_space_after_terminal_punctuation(&text)
 }
 
 /// Split long dictation blocks into shorter paragraphs for readability.
@@ -423,7 +432,7 @@ pub fn normalize_transcription(
     } else {
         let mut text = clean_raw_transcription(raw);
         text = ensure_spaces_after_punctuation(&text);
-        text
+        ensure_trailing_space_after_terminal_punctuation(&text)
     };
 
     if spoken_punctuation {
@@ -721,6 +730,23 @@ pub fn ensure_trailing_block_separator(text: &str) -> String {
     result
 }
 
+/// Trailing space after terminal punctuation only (injection glue without touching plain phrases).
+pub fn ensure_trailing_space_after_terminal_punctuation(text: &str) -> String {
+    if text.is_empty() || text.ends_with(char::is_whitespace) {
+        return text.to_string();
+    }
+    let Some(last) = text.chars().last() else {
+        return text.to_string();
+    };
+    if matches!(last, '.' | '!' | '?' | '…') {
+        let mut result = text.to_string();
+        result.push(' ');
+        result
+    } else {
+        text.to_string()
+    }
+}
+
 pub fn ensure_spaces_after_punctuation(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut result = String::with_capacity(text.len() + 4);
@@ -882,7 +908,9 @@ mod tests {
     #[test]
     fn adds_trailing_space_after_terminal_period() {
         assert_eq!(
-            ensure_spaces_after_punctuation("Первое предложение."),
+            ensure_trailing_space_after_terminal_punctuation(&ensure_spaces_after_punctuation(
+                "Первое предложение."
+            )),
             "Первое предложение. "
         );
     }

@@ -8,6 +8,7 @@ use crate::text::enter_trigger::apply_enter_trigger;
 use crate::text::normalize::{
     apply_basic_cleanup, apply_optimization_paragraphs, apply_original, apply_spoken_punctuation,
     clean_raw_transcription_with_dictionary, ensure_spaces_after_punctuation,
+    ensure_trailing_space_after_terminal_punctuation,
 };
 use crate::text::numbers::apply_numbers_as_words;
 use crate::text::ru_numeral_genitive::apply_russian_numeral_inflection;
@@ -116,6 +117,7 @@ pub fn process_transcription_immediate_sync(
     if processing_mode != TextProcessingMode::Original {
         text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
     }
+    text = ensure_trailing_space_after_terminal_punctuation(&text);
 
     Ok(ProcessedText {
         text,
