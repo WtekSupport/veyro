@@ -22,12 +22,19 @@ use crate::error::AppError;
 use crate::injection::TextInjector;
 use crate::privacy::retention::clear_segment;
 use crate::i18n;
-use crate::settings::{AppSettings, TextRewriteProvider, UiLocale};
+use crate::injection::InjectionError;
+use crate::settings::{
+    AppSettings, InjectionMode, TextProcessingMode, TextRewriteProvider, UiLocale,
+};
 use crate::network::HttpClient;
 use crate::llm::LlmEngine;
 use crate::text::dictionary::load_dictionary;
-use crate::text::normalize::ensure_trailing_block_separator;
-use crate::text::process_transcription;
+use crate::text::normalize::{
+    apply_basic_cleanup, apply_optimization_paragraphs, dedupe_near_duplicate_passages,
+    dedupe_ptt_session_overlap, ensure_spaces_after_punctuation, ensure_trailing_block_separator,
+};
+use crate::text::dictionary::protected_terms;
+use crate::text::{process_transcription, rewrite_processed_text};
 use crate::transcription::prompt::{build_whisper_prompt, WhisperPromptInput};
 use crate::transcription::{
     create_transcriber, TranscriptionOptions, TranscriptionProvider, WhisperDecodingOptions,
@@ -121,9 +128,7 @@ impl PipelineRuntime {
             .map(|guard| Arc::clone(&*guard))
             .ok();
         if let Some(transcriber) = transcriber {
-            tokio::spawn(async move {
-                let _ = transcriber.unload().await;
-            });
+            let _ = transcriber.unload().await;
         }
     }
 
@@ -288,6 +293,15 @@ async fn process_one_segment(
             let _ = with_controller(controller, app, |controller, handle| {
                 controller.recover_after_segment(handle)
             });
+            try_finish_ptt_postprocess(
+                app,
+                controller,
+                &injector,
+                &llm_engine,
+                &activity_log,
+                &http,
+            )
+            .await;
             tray::menu::refresh_tray_menu(app);
         }
     };
@@ -498,7 +512,9 @@ async fn process_one_segment(
         },
     );
 
-    if settings.text_processing_mode.uses_ai() {
+    let defer_ai_postprocess = settings.ai_postprocess_mode().is_some();
+
+    if settings.text_processing_mode.uses_ai() && !defer_ai_postprocess {
         log_activity(
             &activity_log,
             Some(&app),
@@ -509,6 +525,7 @@ async fn process_one_segment(
     }
 
     if settings.text_processing_mode.uses_ai()
+        && !defer_ai_postprocess
         && matches!(settings.text_rewrite_provider, TextRewriteProvider::Local)
     {
         if let Err(error) = LlmEngine::ensure_loaded(&settings, &llm_engine) {
@@ -556,7 +573,7 @@ async fn process_one_segment(
         }
     };
 
-    if settings.text_processing_mode.uses_ai() {
+    if settings.text_processing_mode.uses_ai() && !defer_ai_postprocess {
         log_activity(
             &activity_log,
             Some(&app),
@@ -570,7 +587,7 @@ async fn process_one_segment(
         );
     }
 
-    if processed.rewrite_fallback {
+    if processed.rewrite_fallback && !defer_ai_postprocess {
         log_activity(
             &activity_log,
             Some(&app),
@@ -625,13 +642,12 @@ async fn process_one_segment(
     clear_segment(&mut segment);
     clear_segment(&mut captured);
 
-    let char_count = normalized.chars().count();
     log_activity(
         &activity_log,
         Some(&app),
         ActivityLevel::Info,
         "activity.ai.transcribed",
-        json!({ "chars": char_count }),
+        json!({ "chars": normalized.chars().count() }),
     );
 
     notify_localized(
@@ -655,7 +671,9 @@ async fn process_one_segment(
         json!({}),
     );
 
+    normalized = ensure_spaces_after_punctuation(&normalized);
     normalized = ensure_trailing_block_separator(&normalized);
+    let injected_char_count = normalized.chars().count() as u32;
 
     let injection_result = if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
         if ctx.live_dictation.has_injected() {
@@ -682,7 +700,7 @@ async fn process_one_segment(
         return;
     }
 
-    if processed.press_enter {
+    if processed.press_enter && !defer_ai_postprocess {
         if let Err(error) = injector.send_enter().await {
             handle_pipeline_error(
                 &app,
@@ -697,24 +715,369 @@ async fn process_one_segment(
         }
     }
 
+    if defer_ai_postprocess {
+        if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
+            ctx.ptt_postprocess
+                .record_phase1_injection(&normalized, processed.press_enter);
+        }
+    }
+
     log_activity(
         &activity_log,
         Some(&app),
         ActivityLevel::Info,
         "activity.inject.done",
-        json!({ "chars": char_count }),
+        json!({ "chars": injected_char_count }),
     );
     notify_localized(
         &app,
         &settings,
         "notify.inserted",
-        &[("count", &char_count.to_string())],
+        &[("count", &injected_char_count.to_string())],
     );
     emit_injection_completed(&app);
     if let Ok(mut guard) = last_whisper_context.lock() {
         *guard = transcription.text.trim().to_string();
     }
     finish(&pending, &app, &controller).await;
+}
+
+fn delete_injected_session_text(
+    rollback_chars: u32,
+    mode: InjectionMode,
+) -> Result<(), InjectionError> {
+    #[cfg(windows)]
+    {
+        let _ = mode;
+        return crate::injection::live::delete_trailing_injected_text(rollback_chars);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = mode;
+        crate::injection::prepare::prepare_for_live_injection();
+        if rollback_chars > 0 {
+            crate::injection::keyboard_common::send_backspaces(rollback_chars)?;
+        }
+        Ok(())
+    }
+}
+
+fn insert_injected_session_text(final_text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+    if final_text.is_empty() {
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = mode;
+        return crate::injection::live::insert_trailing_injected_text(final_text);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = mode;
+        crate::injection::prepare::prepare_for_live_injection();
+        crate::injection::clipboard::paste_via_clipboard(final_text)
+    }
+}
+
+fn replace_injected_session_text(
+    rollback_chars: u32,
+    final_text: &str,
+    mode: InjectionMode,
+) -> Result<(), InjectionError> {
+    delete_injected_session_text(rollback_chars, mode)?;
+    insert_injected_session_text(final_text, mode)
+}
+
+pub(crate) fn schedule_ptt_postprocess_finish(app: AppHandle, ctx: Arc<AppContext>) {
+    let controller = ctx.controller.clone();
+    let injector = ctx.runtime.injector();
+    let llm_engine = ctx.llm_engine.clone();
+    let activity_log = ctx.activity_log.clone();
+    let http = ctx.http.clone();
+    tauri::async_runtime::spawn(async move {
+        try_finish_ptt_postprocess(
+            &app,
+            &controller,
+            &injector,
+            &llm_engine,
+            &activity_log,
+            &http,
+        )
+        .await;
+    });
+}
+
+async fn try_finish_ptt_postprocess(
+    app: &AppHandle,
+    controller: &SharedController,
+    injector: &Arc<dyn TextInjector>,
+    llm_engine: &Arc<RwLock<LlmEngine>>,
+    activity_log: &Arc<ActivityLog>,
+    http: &reqwest::Client,
+) {
+    let ptt_active = controller
+        .lock()
+        .ok()
+        .is_some_and(|c| c.is_push_to_talk_active());
+    if ptt_active {
+        return;
+    }
+
+    let Some(ctx) = app.try_state::<Arc<AppContext>>() else {
+        return;
+    };
+
+    if ctx.runtime.pending_count() > 0 {
+        return;
+    }
+
+    if !ctx.ptt_postprocess.try_begin_finish() {
+        return;
+    }
+
+    let _finish_guard = PttFinishGuard(&ctx.ptt_postprocess);
+
+    let settings = match controller.lock() {
+        Ok(c) => c.settings().clone(),
+        Err(_) => return,
+    };
+
+    let Some(ai_mode) = settings.ai_postprocess_mode() else {
+        ctx.ptt_postprocess.reset();
+        return;
+    };
+
+    if ctx.runtime.pending_count() > 0 {
+        return;
+    }
+
+    let Some((injected_text, press_enter)) = ctx.ptt_postprocess.take_finish_snapshot() else {
+        return;
+    };
+
+    let rollback_chars = injected_text.chars().count() as u32;
+    if injected_text.is_empty() || rollback_chars == 0 {
+        return;
+    }
+
+    let rewrite_input = apply_basic_cleanup(&dedupe_ptt_session_overlap(injected_text.trim()));
+    if rewrite_input.is_empty() {
+        return;
+    }
+
+    log_activity(
+        activity_log,
+        Some(app),
+        ActivityLevel::Info,
+        "activity.text.rewriting",
+        json!({ "mode": ai_mode.as_str(), "session": true }),
+    );
+
+    if matches!(settings.text_rewrite_provider, TextRewriteProvider::Local) {
+        if let Err(error) = LlmEngine::ensure_loaded(&settings, llm_engine) {
+            warn!("PTT AI postprocess: LLM load failed: {error}");
+            return;
+        }
+    }
+
+    let llm_snapshot = llm_engine
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|poisoned| poisoned.into_inner().clone());
+
+    let dictionary = load_dictionary(settings.transcription_dictionary_path.as_deref())
+        .unwrap_or_default();
+    let terms = protected_terms(&dictionary);
+
+    let _ = with_controller(controller, app, |controller, handle| {
+        controller.transition_only(handle, AppState::Processing)
+    });
+
+    tray::blink::start_purple_blink(app);
+
+    let injection_mode = settings.injection_mode;
+    let rollback_for_delete = rollback_chars;
+    let rewrite_fut = rewrite_processed_text(
+        &rewrite_input,
+        ai_mode,
+        &settings,
+        settings.ai_rewrite_skill.as_deref(),
+        http,
+        &llm_snapshot,
+        &terms,
+        &dictionary,
+        press_enter,
+    );
+    let delete_fut = tokio::task::spawn_blocking(move || {
+        delete_injected_session_text(rollback_for_delete, injection_mode)
+    });
+
+    let (rewrite_result, delete_result) = tokio::join!(rewrite_fut, delete_fut);
+
+    tray::blink::stop_purple_blink(app);
+
+    let delete_ok = matches!(&delete_result, Ok(Ok(())));
+    if let Err(error) = delete_result {
+        warn!("PTT AI postprocess delete task failed: {error}");
+    } else if let Ok(Err(error)) = delete_result {
+        warn!("PTT AI postprocess delete failed: {error}");
+    }
+
+    let processed = match rewrite_result {
+        Ok(processed) => processed,
+        Err(error) => {
+            warn!("PTT AI postprocess failed, keeping phase-1 text: {error}");
+            log_activity(
+                activity_log,
+                Some(app),
+                ActivityLevel::Warn,
+                "activity.text.rewrite_fallback",
+                json!({ "reason": error.to_string(), "session": true }),
+            );
+            restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+            let _ = with_controller(controller, app, |controller, handle| {
+                controller.recover_to_ready(handle)
+            });
+            return;
+        }
+    };
+
+    log_activity(
+        activity_log,
+        Some(app),
+        ActivityLevel::Info,
+        "activity.text.rewrite_done",
+        json!({
+            "in_chars": rewrite_input.chars().count(),
+            "out_chars": processed.text.chars().count(),
+            "fallback": processed.rewrite_fallback,
+            "session": true,
+        }),
+    );
+
+    if processed.rewrite_fallback {
+        log_activity(
+            activity_log,
+            Some(app),
+            ActivityLevel::Warn,
+            "activity.text.rewrite_fallback",
+            json!({
+                "reason": processed.rewrite_fallback_reason.as_deref().unwrap_or(""),
+                "session": true,
+            }),
+        );
+        notify_localized(
+            app,
+            &settings,
+            "notify.rewrite_fallback",
+            &[(
+                "reason",
+                processed.rewrite_fallback_reason.as_deref().unwrap_or(""),
+            )],
+        );
+    }
+
+    let mut cleaned = ensure_spaces_after_punctuation(&dedupe_near_duplicate_passages(
+        &processed.text,
+    ));
+    if ai_mode == TextProcessingMode::Optimization {
+        cleaned = apply_optimization_paragraphs(&cleaned);
+    }
+    let final_text = ensure_trailing_block_separator(&cleaned);
+    if final_text.is_empty() {
+        restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+        let _ = with_controller(controller, app, |controller, handle| {
+            controller.recover_to_ready(handle)
+        });
+        return;
+    }
+
+    if ctx.runtime.pending_count() > 0 {
+        warn!("PTT AI postprocess: replace skipped, segments still pending");
+        restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+        return;
+    }
+
+    let _ = with_controller(controller, app, |controller, handle| {
+        controller.transition_only(handle, AppState::Injecting)
+    });
+
+    let replace_result = tokio::task::spawn_blocking({
+        let final_text = final_text.clone();
+        move || {
+            if delete_ok {
+                insert_injected_session_text(&final_text, injection_mode)
+            } else {
+                replace_injected_session_text(rollback_chars, &final_text, injection_mode)
+            }
+        }
+    })
+    .await;
+
+    match replace_result {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            warn!("PTT AI postprocess replace failed: {error}");
+            restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+            return;
+        }
+        Err(error) => {
+            warn!("PTT AI postprocess replace task failed: {error}");
+            restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+            return;
+        }
+    }
+
+    if processed.press_enter {
+        if let Err(error) = injector.send_enter().await {
+            warn!("PTT AI postprocess enter failed: {error}");
+        }
+    }
+
+    notify_localized(
+        app,
+        &settings,
+        "notify.inserted",
+        &[("count", &final_text.chars().count().to_string())],
+    );
+    emit_injection_completed(app);
+
+    let _ = with_controller(controller, app, |controller, handle| {
+        controller.recover_to_ready(handle)
+    });
+}
+
+struct PttFinishGuard<'a>(&'a crate::app::ptt_postprocess::PttPostprocessSession);
+
+impl Drop for PttFinishGuard<'_> {
+    fn drop(&mut self) {
+        self.0.finish_finish();
+    }
+}
+
+async fn restore_phase1_injected_text(
+    delete_succeeded: bool,
+    injection_mode: InjectionMode,
+    text: &str,
+) {
+    if !delete_succeeded || text.is_empty() {
+        return;
+    }
+    let text = text.to_string();
+    match tokio::task::spawn_blocking(move || insert_injected_session_text(&text, injection_mode))
+        .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            warn!("PTT AI postprocess: failed to restore phase-1 text: {error}");
+        }
+        Err(error) => {
+            warn!("PTT AI postprocess: restore phase-1 task failed: {error}");
+        }
+    }
 }
 
 async fn clear_live_dictation_indicator(app: &AppHandle, injector: &Arc<dyn TextInjector>) {

@@ -3,10 +3,10 @@ use reqwest::Client;
 use crate::llm::LlmEngine;
 use crate::settings::{AppSettings, TextProcessingMode};
 use crate::text::corrections::apply_corrections;
-use crate::text::dictionary::{load_dictionary, protected_terms};
+use crate::text::dictionary::{load_dictionary, protected_terms, Dictionary};
 use crate::text::enter_trigger::apply_enter_trigger;
 use crate::text::normalize::{
-    apply_basic_cleanup, apply_original, apply_spoken_punctuation,
+    apply_basic_cleanup, apply_optimization_paragraphs, apply_original, apply_spoken_punctuation,
     clean_raw_transcription_with_dictionary, ensure_spaces_after_punctuation,
 };
 use crate::text::numbers::apply_numbers_as_words;
@@ -37,9 +37,56 @@ pub async fn process_transcription(
     llm_engine: &LlmEngine,
     whisper_detected_language: Option<&str>,
 ) -> Result<ProcessedText, TextProcessingError> {
+    if settings.ai_postprocess_mode().is_some() {
+        return process_transcription_immediate(
+            raw,
+            timed_segments,
+            settings,
+            whisper_detected_language,
+        )
+        .await;
+    }
+
+    let immediate = process_transcription_immediate(
+        raw,
+        timed_segments,
+        settings,
+        whisper_detected_language,
+    )
+    .await?;
+
+    let processing_mode = settings.effective_text_processing_mode();
+    if !processing_mode.uses_ai() || !settings.push_to_talk {
+        return Ok(immediate);
+    }
+
     let dictionary = load_dictionary(settings.transcription_dictionary_path.as_deref())
         .unwrap_or_default();
     let terms = protected_terms(&dictionary);
+
+    rewrite_processed_text(
+        &immediate.text,
+        processing_mode,
+        settings,
+        settings.ai_rewrite_skill.as_deref(),
+        http,
+        llm_engine,
+        &terms,
+        &dictionary,
+        immediate.press_enter,
+    )
+    .await
+}
+
+/// Phase 1: transcription cleanup without AI rewrite (sync — safe from preview worker threads).
+pub fn process_transcription_immediate_sync(
+    raw: &str,
+    timed_segments: Option<&[TimedTextSegment]>,
+    settings: &AppSettings,
+    whisper_detected_language: Option<&str>,
+) -> Result<ProcessedText, TextProcessingError> {
+    let dictionary = load_dictionary(settings.transcription_dictionary_path.as_deref())
+        .unwrap_or_default();
     let postprocess_lang = settings.postprocess_language(whisper_detected_language);
 
     let source_text = if should_apply_pause_punctuation(settings, timed_segments) {
@@ -55,30 +102,8 @@ pub async fn process_transcription(
         &postprocess_lang,
     );
 
-    let mut rewrite_fallback = false;
-    let mut rewrite_fallback_reason = None;
-    let processing_mode = settings.effective_text_processing_mode();
-    let mut text = match processing_mode {
-        TextProcessingMode::Original => apply_original(&raw),
-        TextProcessingMode::Basic => apply_basic_cleanup(&raw),
-        mode if mode.uses_ai() => {
-            let outcome = rewrite_transcription(
-                &raw,
-                mode,
-                settings,
-                settings.ai_rewrite_skill.as_deref(),
-                http,
-                llm_engine,
-                &terms,
-            )
-            .await
-            .map_err(|error| TextProcessingError::Failed(error.to_string()))?;
-            rewrite_fallback = outcome.used_fallback;
-            rewrite_fallback_reason = outcome.fallback_reason;
-            apply_corrections(&outcome.text, &dictionary.corrections)
-        }
-        _ => apply_basic_cleanup(&raw),
-    };
+    let processing_mode = settings.immediate_transcription_mode();
+    let mut text = apply_mode_cleanup(&raw, processing_mode);
 
     if settings.numbers_as_words {
         text = apply_numbers_as_words(&text, true, &postprocess_lang);
@@ -88,13 +113,80 @@ pub async fn process_transcription(
     }
 
     text = ensure_spaces_after_punctuation(&text);
+    if processing_mode != TextProcessingMode::Original {
+        text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
+    }
 
     Ok(ProcessedText {
         text,
         press_enter,
-        rewrite_fallback,
-        rewrite_fallback_reason,
+        rewrite_fallback: false,
+        rewrite_fallback_reason: None,
     })
+}
+
+/// Phase 1: transcription cleanup without AI rewrite.
+pub async fn process_transcription_immediate(
+    raw: &str,
+    timed_segments: Option<&[TimedTextSegment]>,
+    settings: &AppSettings,
+    whisper_detected_language: Option<&str>,
+) -> Result<ProcessedText, TextProcessingError> {
+    process_transcription_immediate_sync(
+        raw,
+        timed_segments,
+        settings,
+        whisper_detected_language,
+    )
+}
+
+/// Phase 2: AI rewrite on text that already went through phase 1.
+pub async fn rewrite_processed_text(
+    light_text: &str,
+    mode: TextProcessingMode,
+    settings: &AppSettings,
+    ai_rewrite_skill: Option<&str>,
+    http: &Client,
+    llm_engine: &LlmEngine,
+    protected: &[String],
+    dictionary: &Dictionary,
+    press_enter: bool,
+) -> Result<ProcessedText, TextProcessingError> {
+    let outcome = rewrite_transcription(
+        light_text,
+        mode,
+        settings,
+        ai_rewrite_skill,
+        http,
+        llm_engine,
+        protected,
+    )
+    .await
+    .map_err(|error| TextProcessingError::Failed(error.to_string()))?;
+
+    let mut text = apply_corrections(&outcome.text, &dictionary.corrections);
+    text = ensure_spaces_after_punctuation(&text);
+    text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
+    text = ensure_spaces_after_punctuation(&text);
+    if mode == TextProcessingMode::Optimization {
+        text = apply_optimization_paragraphs(&text);
+    }
+
+    Ok(ProcessedText {
+        text,
+        press_enter,
+        rewrite_fallback: outcome.used_fallback,
+        rewrite_fallback_reason: outcome.fallback_reason,
+    })
+}
+
+fn apply_mode_cleanup(raw: &str, processing_mode: TextProcessingMode) -> String {
+    match processing_mode {
+        TextProcessingMode::Original => apply_original(raw),
+        TextProcessingMode::Basic => apply_basic_cleanup(raw),
+        mode if mode.uses_ai() => apply_basic_cleanup(raw),
+        _ => apply_basic_cleanup(raw),
+    }
 }
 
 fn should_apply_pause_punctuation(
@@ -108,7 +200,7 @@ fn should_apply_pause_punctuation(
         return false;
     }
     if !matches!(
-        settings.effective_text_processing_mode(),
+        settings.immediate_transcription_mode(),
         TextProcessingMode::Original | TextProcessingMode::Basic
     ) {
         return false;
@@ -119,7 +211,7 @@ fn should_apply_pause_punctuation(
 fn prepare_transcription_for_processing(
     raw: &str,
     settings: &AppSettings,
-    dictionary: &crate::text::dictionary::Dictionary,
+    dictionary: &Dictionary,
     postprocess_lang: &str,
 ) -> (String, bool) {
     let raw = clean_raw_transcription_with_dictionary(raw, dictionary);
@@ -230,6 +322,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ptt_ai_mode_phase1_skips_inline_rewrite() {
+        let settings = AppSettings {
+            push_to_talk: true,
+            text_processing_mode: TextProcessingMode::Optimization,
+            ui_mode: crate::settings::UiMode::Expert,
+            ..Default::default()
+        };
+        let processed = process("  hello   world  ", &settings, None).await;
+        assert_eq!(processed.text, "Hello world");
+        assert!(!processed.rewrite_fallback);
+    }
+
+    #[tokio::test]
     async fn german_spoken_punctuation_runs_before_cleanup() {
         let settings = AppSettings {
             text_processing_mode: TextProcessingMode::Basic,
@@ -257,6 +362,23 @@ mod tests {
     async fn pause_punctuation_in_basic_mode() {
         let settings = AppSettings {
             text_processing_mode: TextProcessingMode::Basic,
+            transcription_provider: "local".to_string(),
+            auto_punctuation_from_pauses: true,
+            ..Default::default()
+        };
+        let segments = [
+            seg("первое", 0, 400),
+            seg("второе", 1400, 1800),
+        ];
+        let processed = process_with_segments("первое второе", &segments, &settings).await;
+        assert_eq!(processed.text, "Первое. второе. ");
+    }
+
+    #[tokio::test]
+    async fn pause_punctuation_works_with_ptt_ai_selected() {
+        let settings = AppSettings {
+            push_to_talk: true,
+            text_processing_mode: TextProcessingMode::Optimization,
             transcription_provider: "local".to_string(),
             auto_punctuation_from_pauses: true,
             ..Default::default()

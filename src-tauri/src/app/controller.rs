@@ -145,6 +145,9 @@ impl AppController {
         {
             self.settings.text_processing_mode = self.settings.canonical_light_cleanup_mode();
         }
+        if !self.settings.push_to_talk && self.settings.text_processing_mode.uses_ai() {
+            self.settings.text_processing_mode = self.settings.canonical_light_cleanup_mode();
+        }
         self.settings.validate().map_err(AppError::from)?;
 
         let audio_action = if previous_device != self.settings.microphone_device
