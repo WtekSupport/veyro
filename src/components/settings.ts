@@ -181,10 +181,12 @@ function renderTextModeOptions(
     { value: "custom_skill", label: "settings.textModeCustomSkill" },
   ];
   const aiAvailable = aiRewriteAvailable(values, diagnostics, llmModels);
+  const pttEnabled = values.push_to_talk;
 
   return modes
     .map(({ value, label }) => {
-      const disabled = !aiAvailable && AI_TEXT_MODES.has(value);
+      const disabled =
+        AI_TEXT_MODES.has(value) && (!aiAvailable || !pttEnabled);
       return `<option value="${value}" ${values.text_processing_mode === value ? "selected" : ""} ${disabled ? "disabled" : ""}>${escapeHtml(t(label))}</option>`;
     })
     .join("");
@@ -616,6 +618,7 @@ export function renderSettingsForm(
           .join("");
 
   const textModeHint = t(textModeHintKey(values.text_processing_mode));
+  const systemNotificationsAvailable = diagnostics?.system_notifications_available ?? true;
 
   return `
     <form id="settings-form" class="settings-form">
@@ -1049,7 +1052,12 @@ export function renderSettingsForm(
           </label>
 
           <label class="field checkbox">
-            <input name="show_notifications" type="checkbox" ${values.show_notifications ? "checked" : ""} />
+            <input
+              name="show_notifications"
+              type="checkbox"
+              ${values.show_notifications && systemNotificationsAvailable ? "checked" : ""}
+              ${systemNotificationsAvailable ? "" : "disabled"}
+            />
             <span>${escapeHtml(t("settings.notifications"))}</span>
           </label>
         </div>
@@ -1083,7 +1091,13 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     start_on_boot: data.get("start_on_boot") === "on",
     check_updates_on_startup: data.get("check_updates_on_startup") === "on",
     capslock_ptt: data.get("capslock_ptt") === "on",
-    show_notifications: data.get("show_notifications") === "on",
+    show_notifications: (() => {
+      const input = form.querySelector<HTMLInputElement>('input[name="show_notifications"]');
+      if (input?.disabled) {
+        return false;
+      }
+      return data.get("show_notifications") === "on";
+    })(),
     silence_timeout_ms: Number(data.get("silence_timeout_ms") ?? 700),
     ui_locale: String(data.get("ui_locale") ?? "en") as UiLocale,
     transcription_provider: String(data.get("transcription_provider") ?? "local"),

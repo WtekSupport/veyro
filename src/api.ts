@@ -189,6 +189,8 @@ export interface DiagnosticsSnapshot {
   about_webview_alive: boolean;
   process_elevated: boolean;
   hotkeys_blocked_by_elevation: boolean;
+  show_notifications: boolean;
+  system_notifications_available: boolean;
 }
 
 export interface ActivityLogEntry {

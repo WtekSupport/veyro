@@ -70,6 +70,8 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
             about_webview_alive: memory.about_webview_alive,
             process_elevated: crate::game_input::is_process_elevated(),
             hotkeys_blocked_by_elevation: crate::game_input::hotkeys_blocked_by_foreground_elevation(),
+            show_notifications: controller.settings().show_notifications,
+            system_notifications_available: crate::notify::system_notifications_available(),
         };
     }
 
@@ -105,6 +107,8 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
         about_webview_alive: memory.about_webview_alive,
         process_elevated: crate::game_input::is_process_elevated(),
         hotkeys_blocked_by_elevation: crate::game_input::hotkeys_blocked_by_foreground_elevation(),
+        show_notifications: false,
+        system_notifications_available: crate::notify::system_notifications_available(),
     }
 }
 

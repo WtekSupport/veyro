@@ -13,6 +13,7 @@ use crate::audio::preprocess::{preprocess_segment, PreprocessOptions};
 use crate::audio::preview::trim_for_preview;
 use crate::audio::segment::AudioSegment;
 use crate::settings::AppSettings;
+use crate::text::pipeline::process_transcription_immediate_sync;
 use crate::transcription::{TranscriptionOptions, WhisperDecodingOptions};
 
 struct PreviewJob {
@@ -275,15 +276,23 @@ fn run_preview_job(job: PreviewJob, inner: Arc<StreamingPreviewInner>) {
                 return;
             }
 
-            emit_transcription_partial(&app, &text);
+            let preview_text = if settings.ai_postprocess_mode().is_some() {
+                process_transcription_immediate_sync(&text, None, &settings, None)
+                    .map(|processed| processed.text)
+                    .unwrap_or(text)
+            } else {
+                text
+            };
+
+            emit_transcription_partial(&app, &preview_text);
             ctx.record_activity(
                 Some(&app),
                 ActivityLevel::Info,
                 "activity.live.preview",
                 serde_json::json!({
                     "ms": duration_ms,
-                    "chars": text.chars().count(),
-                    "text": text,
+                    "chars": preview_text.chars().count(),
+                    "text": preview_text,
                 }),
             );
         }

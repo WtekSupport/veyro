@@ -1,3 +1,4 @@
+pub mod basic_cleanup;
 pub mod corrections;
 pub mod dictionary;
 pub mod elevated_speech;
@@ -15,4 +16,8 @@ pub mod ru_numeral_genitive;
 pub mod skill;
 
 pub use normalize::normalize_transcription;
-pub use pipeline::{process_transcription, ProcessedText, TextProcessingError};
+pub use pipeline::{
+    process_transcription, process_transcription_immediate,
+    process_transcription_immediate_sync, rewrite_processed_text, ProcessedText,
+    TextProcessingError,
+};

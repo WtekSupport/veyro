@@ -340,6 +340,14 @@ pub(crate) fn apply_ptt_active(
         };
         join_vad_worker(vad_join);
         ctx.set_audio_callbacks_enabled(true);
+        if let Ok(controller) = ctx.controller.try_lock() {
+            if controller.settings().ai_postprocess_mode().is_some() {
+                ctx.ptt_postprocess.begin_session();
+            }
+        }
+        if let Ok(audio) = ctx.audio.lock() {
+            audio.set_ptt_vad_segments_on_silence(true);
+        }
         let capture_status = ctx.audio.lock().ok().map(|audio| {
             json!({
                 "vad_alive": audio.is_capturing(),
@@ -391,11 +399,18 @@ pub(crate) fn complete_ptt_release(
     });
 
     if flushed.is_none() {
-        flushed = ctx
-            .audio
-            .lock()
+        let deferred_ai = ctx
+            .controller
+            .try_lock()
             .ok()
-            .and_then(|audio| audio.poll_ptt_segment());
+            .and_then(|c| c.settings().ai_postprocess_mode())
+            .is_some();
+        flushed = ctx.audio.lock().ok().and_then(|mut audio| {
+            if deferred_ai {
+                audio.drain_pending_segments();
+            }
+            audio.poll_ptt_segment()
+        });
     }
 
     if let Some(segment) = flushed {
@@ -1302,6 +1317,8 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            notify::init_platform();
 
             #[cfg(desktop)]
             {

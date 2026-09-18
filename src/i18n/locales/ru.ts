@@ -50,6 +50,7 @@ export const ru: Record<MessageKey, string> = {
   "diag.sttProvider": "STT",
   "diag.rewriteProvider": "Rewrite",
   "diag.llm": "Локальная LLM",
+  "diag.notifications": "Уведомления",
   "diag.llmReady": "Готова",
   "diag.llmMissing": "Не загружена",
   "diag.llmNotCompiled": "Не в сборке",
@@ -199,7 +200,7 @@ export const ru: Record<MessageKey, string> = {
   "settings.textModeCustomSkill": "Свой skill…",
   "settings.textModeHintOriginal": "Текст Whisper без изменений.",
   "settings.textModeHintBasic":
-    "Удаление галлюцинаций, пробелы, схлопывание, заглавная буква, короткие абзацы.",
+    "Галлюцинации, повторы предложений, артефакты «кавычек» STT, пробелы после знаков препинания, короткие абзацы.",
   "settings.textModeHintOptimization":
     "ИИ превращает диктовку в литературный текст: убирает мат, развёрнуто перефразирует, бренды — на оригинальном языке.",
   "settings.textModeHintCustomSkill":

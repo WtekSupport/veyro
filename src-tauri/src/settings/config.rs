@@ -614,6 +614,25 @@ impl AppSettings {
         }
     }
 
+    /// AI rewrite mode when two-phase PTT post-processing applies.
+    pub fn ai_postprocess_mode(&self) -> Option<TextProcessingMode> {
+        if !self.push_to_talk {
+            return None;
+        }
+        let mode = self.text_processing_mode;
+        mode.uses_ai().then_some(mode)
+    }
+
+    /// Phase-1 transcription cleanup (no AI rewrite in this step).
+    pub fn immediate_transcription_mode(&self) -> TextProcessingMode {
+        if self.ai_postprocess_mode().is_some() {
+            // Two-phase PTT+AI: always inject «быстрая правка» (Basic) before the LLM pass.
+            TextProcessingMode::Basic
+        } else {
+            self.effective_text_processing_mode()
+        }
+    }
+
     pub fn uses_cloud_storage(&self) -> bool {
         self.uses_openai_transcription()
             && matches!(self.text_rewrite_provider, TextRewriteProvider::Openai)
@@ -791,7 +810,8 @@ impl SettingsPatch {
             settings.capslock_ptt = capslock_ptt;
         }
         if let Some(show_notifications) = self.show_notifications {
-            settings.show_notifications = show_notifications;
+            settings.show_notifications = show_notifications
+                && crate::notify::system_notifications_available();
         }
         if let Some(log_level) = self.log_level {
             settings.log_level = log_level;
@@ -867,6 +887,61 @@ mod tests {
         assert!(TextProcessingMode::Optimization.uses_ai());
         assert!(TextProcessingMode::CustomSkill.uses_ai());
         assert!(!TextProcessingMode::Basic.uses_ai());
+    }
+
+    #[test]
+    fn ai_postprocess_requires_ptt_and_ai_mode() {
+        let mut settings = AppSettings {
+            push_to_talk: true,
+            text_processing_mode: TextProcessingMode::Optimization,
+            ..Default::default()
+        };
+        assert_eq!(
+            settings.ai_postprocess_mode(),
+            Some(TextProcessingMode::Optimization)
+        );
+
+        settings.push_to_talk = false;
+        assert_eq!(settings.ai_postprocess_mode(), None);
+
+        settings.push_to_talk = true;
+        settings.text_processing_mode = TextProcessingMode::Basic;
+        assert_eq!(settings.ai_postprocess_mode(), None);
+    }
+
+    #[test]
+    fn immediate_transcription_mode_for_ptt_ai() {
+        let expert = AppSettings {
+            push_to_talk: true,
+            text_processing_mode: TextProcessingMode::Optimization,
+            ui_mode: UiMode::Expert,
+            ..Default::default()
+        };
+        assert_eq!(
+            expert.immediate_transcription_mode(),
+            TextProcessingMode::Basic
+        );
+
+        let homemaker = AppSettings {
+            push_to_talk: true,
+            text_processing_mode: TextProcessingMode::Optimization,
+            ui_mode: UiMode::Homemaker,
+            ..Default::default()
+        };
+        assert_eq!(
+            homemaker.immediate_transcription_mode(),
+            TextProcessingMode::Basic
+        );
+
+        let continuous = AppSettings {
+            push_to_talk: false,
+            text_processing_mode: TextProcessingMode::Optimization,
+            ..Default::default()
+        };
+        assert_eq!(
+            continuous.immediate_transcription_mode(),
+            TextProcessingMode::Optimization
+        );
     }
 
     #[test]

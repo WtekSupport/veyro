@@ -21,6 +21,7 @@ import {
   iconDiagKey,
 
   iconDiagLlm,
+  iconDiagNotify,
 
   iconDiagMic,
 
@@ -421,6 +422,24 @@ export function renderCompactDiagnostics(
         diagnostics.llm_loaded,
 
       diagTooltip(t("diag.llm"), llmLabel),
+
+    ),
+
+    diagIconMark(
+
+      iconDiagNotify(),
+
+      diagnostics.show_notifications && diagnostics.system_notifications_available,
+
+      diagTooltip(
+
+        t("diag.notifications"),
+
+        diagnostics.show_notifications && diagnostics.system_notifications_available
+          ? t("diag.on")
+          : t("diag.off"),
+
+      ),
 
     ),
 

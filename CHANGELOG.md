@@ -12,6 +12,16 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.7.87] — 2026-09-18
+
+- **PTT + AI post-processing (two phases):** While you hold PTT, text is cleaned with **Basic** (fast cleanup) and injected incrementally; after release, one session rewrite replaces that block with **Optimization** / custom skill output—no duplicate paragraphs from per-chunk AI during the hold.
+- **Parallel replace UX:** Deleting the phase-1 block (visible backspace) runs in parallel with the LLM rewrite; the tray icon blinks purple during replacement, then optimized text is inserted.
+- **Optimization output layout:** AI optimization now breaks long prose into readable paragraphs; dictionary corrections no longer strip paragraph breaks; Windows keyboard injection sends Enter for line/paragraph breaks so Word and similar editors show real paragraphs.
+- **Punctuation & glue fixes:** Spaces after sentence punctuation when STT/AI chunks are merged (backend + status-bar preview on the frontend); PTT session buffer and dedupe passes normalize `word.Next` glitches.
+- **Whisper turbo / Basic cleanup:** Deterministic cleanup for repeats, guillemets, fillers, orphan dot artifacts, and related STT noise in Basic mode.
+- **PTT / VAD stability:** Fewer duplicate injections mid-hold (segment-on-silence, preview keep-alive, finish races); live preview during PTT+AI defer uses the same Basic cleanup as phase 1.
+- **Tray & i18n:** Tooltip for AI text replacement; minor diagnostics/settings copy updates.
+
 ## [1.7.79] — 2026-09-17
 
 - **Punctuation from pauses (local Whisper):** Commas and periods are inferred from timing gaps between decoded segments; on by default in Standard mode for local “Original” / light-cleanup paths.

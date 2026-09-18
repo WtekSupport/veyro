@@ -13,6 +13,9 @@ pub struct TrayIconSet {
     pub listening: Image<'static>,
     pub processing: Image<'static>,
     pub error: Image<'static>,
+    /// PTT AI phase: deleting phase-1 text (blink on/off).
+    pub ai_deleting_bright: Image<'static>,
+    pub ai_deleting_dim: Image<'static>,
 }
 
 impl TrayIconSet {
@@ -28,6 +31,8 @@ impl TrayIconSet {
             listening: recolor_icon(&base, [70, 170, 255]),
             processing: recolor_icon(&base, [240, 75, 75]),
             error: recolor_icon(&base, [240, 170, 60]),
+            ai_deleting_bright: recolor_icon(&base, [170, 90, 255]),
+            ai_deleting_dim: recolor_icon(&base, [95, 55, 145]),
         }
     }
 }
