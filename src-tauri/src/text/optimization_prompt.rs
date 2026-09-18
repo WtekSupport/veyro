@@ -182,7 +182,7 @@ pub fn format_protected_terms_section(terms: &[String]) -> String {
 
 /// Mirrors few-shot layout from the optimization prompt — helps local models stay in edit mode.
 pub fn format_optimization_user_message(raw: &str) -> String {
-    format!("RAW TEXT:\n{}\n", raw.trim())
+    format!("Вход: {}\nВыход:", raw.trim())
 }
 
 #[cfg(test)]
