@@ -48,6 +48,7 @@ export const en = {
   "diag.sttProvider": "STT",
   "diag.rewriteProvider": "Rewrite",
   "diag.llm": "Local LLM",
+  "diag.notifications": "Notifications",
   "diag.llmReady": "Ready",
   "diag.llmMissing": "Not loaded",
   "diag.llmNotCompiled": "Not in build",
@@ -197,7 +198,7 @@ export const en = {
   "settings.textModeCustomSkill": "Custom skill…",
   "settings.textModeHintOriginal": "Whisper transcript as-is, without cleanup.",
   "settings.textModeHintBasic":
-    "Strip hallucinations, fix spacing, collapse whitespace, capitalize, short paragraphs.",
+    "Strip hallucinations, drop repeated sentences, fix STT guillemet artifacts, spaces after punctuation, short paragraphs.",
   "settings.textModeHintOptimization":
     "AI turns dictation into literary prose: removes profanity, expands phrasing, keeps brand names in their original language.",
   "settings.textModeHintCustomSkill":

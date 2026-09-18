@@ -9,7 +9,10 @@ pub fn clean_raw_transcription(text: &str) -> String {
     if is_whisper_hallucination_only(&text) || is_whisper_prompt_echo(&text) {
         return String::new();
     }
-    collapse_speech_stutters(&text)
+    text.split("\n\n")
+        .map(collapse_speech_stutters)
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Drop transcriptions that mostly repeat the Whisper `initial_prompt` (common on silence).
@@ -108,6 +111,9 @@ pub fn apply_original(text: &str) -> String {
 const BASIC_MAX_PARAGRAPH_SENTENCES: usize = 2;
 /// Soft character limit per paragraph before forcing a break at the next sentence.
 const BASIC_MAX_PARAGRAPH_CHARS: usize = 220;
+/// Optimization (AI) mode: slightly longer blocks, plus semantic marker breaks.
+const OPTIMIZATION_MAX_PARAGRAPH_SENTENCES: usize = 3;
+const OPTIMIZATION_MAX_PARAGRAPH_CHARS: usize = 340;
 
 pub fn apply_basic_cleanup(text: &str) -> String {
     let mut text = clean_raw_transcription(text);
@@ -116,25 +122,71 @@ pub fn apply_basic_cleanup(text: &str) -> String {
     }
 
     text = collapse_whitespace(&text);
+    text = crate::text::basic_cleanup::apply_basic_speech_cleanup(&text);
     text = ensure_spaces_after_punctuation(&text);
+    text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
+    text = text
+        .split("\n\n")
+        .map(crate::text::basic_cleanup::dedupe_consecutive_sentences)
+        .filter(|block| !block.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
     text = wrap_into_readable_paragraphs(&text);
-    capitalize_paragraphs(&text)
+    text = capitalize_paragraphs(&text);
+    ensure_trailing_space_after_terminal_punctuation(&text)
 }
 
 /// Split long dictation blocks into shorter paragraphs for readability.
 pub fn wrap_into_readable_paragraphs(text: &str) -> String {
+    wrap_paragraphs_with_limits(
+        text,
+        BASIC_MAX_PARAGRAPH_SENTENCES,
+        BASIC_MAX_PARAGRAPH_CHARS,
+        false,
+    )
+}
+
+/// Layout for Optimization (AI) rewrite output: semantic breaks + readable paragraph width.
+pub fn apply_optimization_paragraphs(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let normalized = normalize_optimization_line_breaks(trimmed);
+    let wrapped = wrap_paragraphs_with_limits(
+        &normalized,
+        OPTIMIZATION_MAX_PARAGRAPH_SENTENCES,
+        OPTIMIZATION_MAX_PARAGRAPH_CHARS,
+        true,
+    );
+    capitalize_paragraphs(&wrapped)
+}
+
+fn wrap_paragraphs_with_limits(
+    text: &str,
+    max_sentences: usize,
+    max_chars: usize,
+    semantic_markers: bool,
+) -> String {
     if text.is_empty() {
         return String::new();
     }
 
     text.split("\n\n")
-        .map(split_block_into_paragraphs)
+        .map(|block| split_block_into_paragraphs(block, max_sentences, max_chars, semantic_markers))
         .filter(|block| !block.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n")
 }
 
-fn split_block_into_paragraphs(block: &str) -> String {
+fn split_block_into_paragraphs(
+    block: &str,
+    max_sentences: usize,
+    max_chars: usize,
+    semantic_markers: bool,
+) -> String {
     let block = block.trim_start();
     if block.trim().is_empty() {
         return String::new();
@@ -144,10 +196,44 @@ fn split_block_into_paragraphs(block: &str) -> String {
     let content = block.trim_end();
 
     let sentences = split_sentences(content);
-    if sentences.len() <= BASIC_MAX_PARAGRAPH_SENTENCES
-        && content.chars().count() <= BASIC_MAX_PARAGRAPH_CHARS
-    {
+    if sentences.len() <= max_sentences && content.chars().count() <= max_chars {
         return format!("{content}{trailing}");
+    }
+
+    let groups = if semantic_markers {
+        group_sentences_on_semantic_markers(sentences)
+    } else {
+        vec![sentences]
+    };
+
+    let mut paragraphs = Vec::new();
+    for group in groups {
+        paragraphs.extend(paragraphs_from_sentence_group(
+            group,
+            max_sentences,
+            max_chars,
+        ));
+    }
+
+    let mut result = paragraphs.join("\n\n");
+    result.push_str(&trailing);
+    result
+}
+
+fn paragraphs_from_sentence_group(
+    sentences: Vec<String>,
+    max_sentences: usize,
+    max_chars: usize,
+) -> Vec<String> {
+    if sentences.is_empty() {
+        return Vec::new();
+    }
+
+    if sentences.len() <= max_sentences {
+        let joined = join_sentences(&sentences);
+        if joined.chars().count() <= max_chars {
+            return vec![joined];
+        }
     }
 
     let mut paragraphs = Vec::new();
@@ -157,8 +243,8 @@ fn split_block_into_paragraphs(block: &str) -> String {
     for sentence in sentences {
         let sentence_chars = sentence.chars().count();
         let needs_break = !current.is_empty()
-            && (current.len() >= BASIC_MAX_PARAGRAPH_SENTENCES
-                || current_chars.saturating_add(sentence_chars) > BASIC_MAX_PARAGRAPH_CHARS);
+            && (current.len() >= max_sentences
+                || current_chars.saturating_add(sentence_chars) > max_chars);
         if needs_break {
             paragraphs.push(join_sentences(&current));
             current.clear();
@@ -175,9 +261,97 @@ fn split_block_into_paragraphs(block: &str) -> String {
         paragraphs.push(join_sentences(&current));
     }
 
-    let mut result = paragraphs.join("\n\n");
-    result.push_str(&trailing);
-    result
+    paragraphs
+}
+
+fn group_sentences_on_semantic_markers(sentences: Vec<String>) -> Vec<Vec<String>> {
+    const MARKERS: &[&str] = &[
+        "во-первых",
+        "во-вторых",
+        "во-третьих",
+        "во-четвертых",
+        "во-пятых",
+        "первое",
+        "второе",
+        "третье",
+        "четвертое",
+        "четвёртое",
+        "пятое",
+        "наконец",
+        "итак",
+        "в заключение",
+        "first",
+        "second",
+        "third",
+        "finally",
+        "in conclusion",
+    ];
+
+    let mut groups: Vec<Vec<String>> = Vec::new();
+    for sentence in sentences {
+        let lower = sentence.trim_start().to_lowercase();
+        let starts_marker = MARKERS
+            .iter()
+            .any(|marker| lower.starts_with(marker));
+        if starts_marker && groups.last().is_some_and(|g| !g.is_empty()) {
+            groups.push(Vec::new());
+        }
+        if groups.is_empty() {
+            groups.push(Vec::new());
+        }
+        groups.last_mut().expect("group").push(sentence);
+    }
+
+    groups
+}
+
+fn normalize_optimization_line_breaks(text: &str) -> String {
+    let text = text.replace("\r\n", "\n");
+    let mut out = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        if chars[index] != '\n' {
+            out.push(chars[index]);
+            index += 1;
+            continue;
+        }
+
+        let mut end = index;
+        while end < chars.len() && chars[end] == '\n' {
+            end += 1;
+        }
+        let newline_run = end - index;
+
+        if newline_run >= 2 {
+            if !out.ends_with("\n\n") {
+                out.push_str("\n\n");
+            }
+        } else {
+            let after = chars.get(end).copied();
+            let sentence_break = out
+                .trim_end()
+                .ends_with(['.', '!', '?', '…', ':']);
+            let next_starts_thought = after.is_some_and(|ch| {
+                ch.is_uppercase() || ch == '«' || ch == '"' || ch == '('
+            });
+            if sentence_break && next_starts_thought {
+                if !out.ends_with("\n\n") {
+                    out.push_str("\n\n");
+                }
+            } else if !out.ends_with(' ') && !out.is_empty() {
+                out.push(' ');
+            }
+        }
+
+        index = end;
+    }
+
+    while out.ends_with('\n') {
+        out.pop();
+    }
+    out
 }
 
 fn trailing_whitespace(text: &str) -> String {
@@ -190,11 +364,15 @@ fn trailing_whitespace(text: &str) -> String {
         .collect()
 }
 
-fn join_sentences(sentences: &[String]) -> String {
+pub(crate) fn join_sentences(sentences: &[String]) -> String {
     sentences.join(" ")
 }
 
-fn split_sentences(text: &str) -> Vec<String> {
+pub(crate) fn sentence_word_jaccard(left: &str, right: &str) -> f64 {
+    word_jaccard(left, right)
+}
+
+pub(crate) fn split_sentences(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     if chars.is_empty() {
         return Vec::new();
@@ -254,7 +432,7 @@ pub fn normalize_transcription(
     } else {
         let mut text = clean_raw_transcription(raw);
         text = ensure_spaces_after_punctuation(&text);
-        text
+        ensure_trailing_space_after_terminal_punctuation(&text)
     };
 
     if spoken_punctuation {
@@ -449,6 +627,98 @@ fn alphanumeric_lower(text: &str) -> String {
         .collect()
 }
 
+fn word_jaccard(left: &str, right: &str) -> f64 {
+    use std::collections::HashSet;
+
+    let left: HashSet<_> = left
+        .split_whitespace()
+        .filter(|token| token.chars().any(|ch| ch.is_alphanumeric()))
+        .map(str::to_lowercase)
+        .collect();
+    let right: HashSet<_> = right
+        .split_whitespace()
+        .filter(|token| token.chars().any(|ch| ch.is_alphanumeric()))
+        .map(str::to_lowercase)
+        .collect();
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let intersection = left.intersection(&right).count();
+    let union = left.union(&right).count();
+    intersection as f64 / union as f64
+}
+
+/// When VAD splits overlap, the session buffer can contain the same passage twice in a row.
+pub fn dedupe_ptt_session_overlap(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.len() < 20 {
+        return trimmed.to_string();
+    }
+
+    let mid = words.len() / 2;
+    let first = words[..mid].join(" ");
+    let second = words[mid..].join(" ");
+    if word_jaccard(&first, &second) >= 0.82 {
+        return first;
+    }
+
+    trimmed.to_string()
+}
+
+/// Drop consecutive sentences or paragraphs that repeat the same content (common LLM/STT failure).
+pub fn dedupe_near_duplicate_passages(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let paragraphs: Vec<&str> = trimmed
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    if paragraphs.len() > 1 {
+        let mut kept: Vec<String> = Vec::new();
+        for part in paragraphs {
+            if kept
+                .last()
+                .is_some_and(|prev| word_jaccard(prev, part) >= 0.88)
+            {
+                continue;
+            }
+            kept.push(part.to_string());
+        }
+        return ensure_spaces_after_punctuation(&kept.join("\n\n"));
+    }
+
+    let sentences: Vec<&str> = trimmed
+        .split_inclusive('.')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    if sentences.len() < 2 {
+        return trimmed.to_string();
+    }
+
+    let mut kept: Vec<String> = Vec::new();
+    for part in sentences {
+        if kept
+            .last()
+            .is_some_and(|prev| word_jaccard(prev, part) >= 0.9)
+        {
+            continue;
+        }
+        kept.push(part.to_string());
+    }
+    ensure_spaces_after_punctuation(&kept.join(" "))
+}
+
 /// Adds a trailing space so the next injected dictation block does not glue on.
 pub fn ensure_trailing_block_separator(text: &str) -> String {
     if text.is_empty() || text.ends_with(char::is_whitespace) {
@@ -458,6 +728,23 @@ pub fn ensure_trailing_block_separator(text: &str) -> String {
     let mut result = text.to_string();
     result.push(' ');
     result
+}
+
+/// Trailing space after terminal punctuation only (injection glue without touching plain phrases).
+pub fn ensure_trailing_space_after_terminal_punctuation(text: &str) -> String {
+    if text.is_empty() || text.ends_with(char::is_whitespace) {
+        return text.to_string();
+    }
+    let Some(last) = text.chars().last() else {
+        return text.to_string();
+    };
+    if matches!(last, '.' | '!' | '?' | '…') {
+        let mut result = text.to_string();
+        result.push(' ');
+        result
+    } else {
+        text.to_string()
+    }
 }
 
 pub fn ensure_spaces_after_punctuation(text: &str) -> String {
@@ -476,19 +763,57 @@ pub fn ensure_spaces_after_punctuation(text: &str) -> String {
 
 fn should_add_space_after(chars: &[char], index: usize) -> bool {
     let ch = chars[index];
-    let next = chars.get(index + 1).copied();
+    let Some(next) = chars.get(index + 1).copied() else {
+        return false;
+    };
 
-    if next.is_some_and(|next| next.is_whitespace()) {
+    if next.is_whitespace() {
         return false;
     }
 
     match ch {
-        ',' | '!' | '?' | ';' => true,
-        ':' => !is_time_colon(chars, index),
-        // Include terminal punctuation so the next recognition block does not glue on.
-        '.' => !is_decimal_point(chars, index),
+        '.' => {
+            !is_decimal_point(chars, index)
+                && !is_filename_extension_dot(chars, index)
+                && should_separate_from_next(next)
+        }
+        ':' => !is_time_colon(chars, index) && !is_protocol_colon(chars, index) && should_separate_from_next(next),
+        ',' | '!' | '?' | ';' | '…' | '—' | '–' | '»' | ')' | ']' | '‚' | '“' => {
+            should_separate_from_next(next)
+        }
         _ => false,
     }
+}
+
+fn should_separate_from_next(next: char) -> bool {
+    next.is_alphanumeric() || matches!(next, '«' | '(' | '"' | '„' | '—' | '–')
+}
+
+fn is_protocol_colon(chars: &[char], index: usize) -> bool {
+    if chars[index] != ':' {
+        return false;
+    }
+    let before: String = chars[..index].iter().collect();
+    before.ends_with("http") || before.ends_with("https") || before.ends_with("ftp")
+}
+
+fn is_filename_extension_dot(chars: &[char], index: usize) -> bool {
+    if chars[index] != '.' {
+        return false;
+    }
+    let ext: String = chars[index + 1..]
+        .iter()
+        .take_while(|ch| ch.is_ascii_alphabetic())
+        .collect();
+    if !(2..=5).contains(&ext.len()) || !ext.bytes().all(|b| b.is_ascii_lowercase()) {
+        return false;
+    }
+    chars[..index]
+        .iter()
+        .rev()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || **ch == '_')
+        .count()
+        >= 1
 }
 
 fn is_decimal_point(chars: &[char], index: usize) -> bool {
@@ -573,9 +898,19 @@ mod tests {
     }
 
     #[test]
+    fn adds_space_after_period_before_cyrillic_word() {
+        assert_eq!(
+            ensure_spaces_after_punctuation("апокалипсисом.Второе,третье"),
+            "апокалипсисом. Второе, третье"
+        );
+    }
+
+    #[test]
     fn adds_trailing_space_after_terminal_period() {
         assert_eq!(
-            ensure_spaces_after_punctuation("Первое предложение."),
+            ensure_trailing_space_after_terminal_punctuation(&ensure_spaces_after_punctuation(
+                "Первое предложение."
+            )),
             "Первое предложение. "
         );
     }
@@ -586,6 +921,22 @@ mod tests {
             apply_basic_cleanup("первое предложение."),
             "Первое предложение. "
         );
+    }
+
+    #[test]
+    fn basic_cleanup_dedupes_repeated_sentence() {
+        let raw = "Видно как. Видно как. Дальше текст.";
+        let out = apply_basic_cleanup(raw);
+        assert_eq!(out.matches("Видно как.").count(), 1, "out: {out}");
+        assert!(out.contains("Дальше"), "out: {out}");
+    }
+
+    #[test]
+    fn dedupe_ptt_session_overlap_removes_near_duplicate_halves() {
+        let first = "люди интересные неупакованные не банально мыслящие какой ужас был во всем мире";
+        let duplicated = format!("{first} {first}");
+        let deduped = dedupe_ptt_session_overlap(&duplicated);
+        assert_eq!(deduped, first);
     }
 
     #[test]
@@ -644,6 +995,32 @@ mod tests {
     fn basic_cleanup_preserves_existing_paragraph_breaks() {
         let text = apply_basic_cleanup("Первый абзац.\n\nВторой абзац.");
         assert_eq!(text.matches("\n\n").count(), 1);
+    }
+
+    #[test]
+    fn optimization_paragraphs_split_long_prose() {
+        let raw = "Первое предложение длинное. Второе продолжает мысль. \
+            Третье развивает тему. Четвёртое подводит итог. Пятое завершает блок.";
+        let text = apply_optimization_paragraphs(raw);
+        assert!(
+            text.contains("\n\n"),
+            "expected paragraph breaks, got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn optimization_paragraphs_break_on_first_second_third() {
+        let raw = "Вступление без маркера. Первое, нужно сделать раз. \
+            Второе, нужно сделать два. Третье, нужно сделать три.";
+        let text = apply_optimization_paragraphs(raw);
+        assert!(text.matches("\n\n").count() >= 2, "got: {text:?}");
+    }
+
+    #[test]
+    fn optimization_normalizes_single_newline_between_sentences() {
+        let raw = "Первый абзац закончен.\nВторой начинается здесь.";
+        let text = apply_optimization_paragraphs(raw);
+        assert_eq!(text, "Первый абзац закончен.\n\nВторой начинается здесь.");
     }
 
     #[test]

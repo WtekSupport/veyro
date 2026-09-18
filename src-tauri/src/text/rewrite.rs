@@ -11,7 +11,10 @@ use crate::settings::secrets;
 use crate::settings::{AppSettings, LlmModelKind, TextProcessingMode, TextRewriteProvider, UiLocale};
 use crate::text::elevated_speech::{contains_profanity, STRONGER_ELEVATION_SUFFIX};
 use crate::text::gec_prompt::gec_system_prompt;
-use crate::text::normalize::apply_basic_cleanup;
+use crate::text::normalize::{
+    apply_basic_cleanup, apply_optimization_paragraphs, dedupe_near_duplicate_passages,
+    ensure_spaces_after_punctuation,
+};
 use crate::text::optimization_prompt::{
     format_optimization_user_message, format_protected_terms_section, optimization_system_prompt,
     STRONGER_OPTIMIZATION_SUFFIX,
@@ -473,7 +476,57 @@ fn sanitize_rewrite_output(text: &str) -> String {
         }
     }
 
-    cleaned
+    extract_structured_rewrite_body(&cleaned)
+}
+
+fn extract_structured_rewrite_body(text: &str) -> String {
+    let markers = [
+        "### Отредактированный текст",
+        "### Cleaned-up text",
+        "### Cleaned up text",
+        "### Очищенный текст",
+    ];
+
+    for marker in markers {
+        let Some(start) = text.find(marker) else {
+            continue;
+        };
+        let mut body = text[start + marker.len()..].trim_start();
+        if let Some(stripped) = body.strip_prefix(':') {
+            body = stripped.trim_start();
+        }
+        let end = body
+            .find("\n### ")
+            .or_else(|| body.find("\n## "))
+            .unwrap_or(body.len());
+        let extracted = body[..end].trim();
+        if !extracted.is_empty() {
+            return ensure_spaces_after_punctuation(&dedupe_near_duplicate_passages(extracted));
+        }
+    }
+
+    let text = ensure_spaces_after_punctuation(&dedupe_near_duplicate_passages(text));
+    crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text)
+}
+
+fn output_has_massive_repetition(input: &str, output: &str) -> bool {
+    let output = output.trim();
+    if output.len() < 160 {
+        return false;
+    }
+
+    let words: Vec<_> = output.split_whitespace().collect();
+    if words.len() >= 24 {
+        let mid = words.len() / 2;
+        let first = words[..mid].join(" ");
+        let second = words[mid..].join(" ");
+        if token_jaccard_similarity(&first, &second) >= 0.85 {
+            return true;
+        }
+    }
+
+    let deduped = dedupe_near_duplicate_passages(output);
+    deduped.len() + 48 < output.len() && token_jaccard_similarity(input, output) > 0.55
 }
 
 fn is_ai_rewrite_mode(mode: TextProcessingMode) -> bool {
@@ -566,7 +619,11 @@ fn needs_optimization_retry(input: &str, output: &str) -> bool {
         return true;
     }
 
-    looks_like_raw_dictation(input_trim) && similarity > 0.72
+    if looks_like_raw_dictation(input_trim) && similarity > 0.72 {
+        return true;
+    }
+
+    output_has_massive_repetition(input_trim, output_trim)
 }
 
 fn finalize_mode_output(mode: TextProcessingMode, raw: &str, output: &str) -> String {
@@ -575,8 +632,10 @@ fn finalize_mode_output(mode: TextProcessingMode, raw: &str, output: &str) -> St
     {
         warn!("optimization output looks like an answer, using dictation fallback");
         apply_optimization_dictation_fallback(raw)
+    } else if mode == TextProcessingMode::Optimization {
+        apply_optimization_paragraphs(&ensure_spaces_after_punctuation(output))
     } else {
-        output.to_string()
+        ensure_spaces_after_punctuation(output)
     }
 }
 
@@ -1053,6 +1112,12 @@ mod tests {
             sanitize_rewrite_output("«Исправленный текст: привет мир»"),
             "привет мир"
         );
+    }
+
+    #[test]
+    fn sanitize_extracts_structured_optimization_body() {
+        let raw = "### Отредактированный текст\nПервый абзац.\n\n### Неясные или повреждённые места\n—\n";
+        assert_eq!(sanitize_rewrite_output(raw), "Первый абзац.");
     }
 
     #[test]

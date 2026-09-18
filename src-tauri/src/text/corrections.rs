@@ -170,7 +170,11 @@ fn char_range_to_bytes(text: &str, start_char: usize, end_char: usize) -> (usize
 }
 
 fn collapse_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    text.split("\n\n")
+        .map(|block| block.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|block| !block.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 #[cfg(test)]
@@ -182,6 +186,14 @@ mod tests {
             .iter()
             .map(|(from, to)| (from.to_string(), to.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn collapse_whitespace_preserves_paragraph_breaks() {
+        assert_eq!(
+            collapse_whitespace("Первый абзац.\n\nВторой абзац."),
+            "Первый абзац.\n\nВторой абзац."
+        );
     }
 
     #[test]

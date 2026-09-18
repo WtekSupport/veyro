@@ -1,3 +1,4 @@
+pub mod blink;
 pub mod menu;
 pub mod state;
 
