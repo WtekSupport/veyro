@@ -93,7 +93,7 @@ import {
   updateActivityLogDom,
 } from "./components/status";
 import { bindUiModeSwitch, renderUiModeLink } from "./components/ui-mode-switch";
-import { getLocale, setLocale, subscribeLocale, t, translateError } from "./i18n";
+import { getLocale, setLocale, subscribeLocale, t } from "./i18n";
 import { skillCatalogUrl } from "./lib/skill-catalog-url";
 import {
   flushPersistSettings,
