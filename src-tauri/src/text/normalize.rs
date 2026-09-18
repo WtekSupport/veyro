@@ -10,7 +10,7 @@ pub fn clean_raw_transcription(text: &str) -> String {
         return String::new();
     }
     text.split("\n\n")
-        .map(|block| collapse_speech_stutters(block))
+        .map(collapse_speech_stutters)
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -332,7 +332,7 @@ fn normalize_optimization_line_breaks(text: &str) -> String {
             let after = chars.get(end).copied();
             let sentence_break = out
                 .trim_end()
-                .ends_with(|ch: char| matches!(ch, '.' | '!' | '?' | '…' | ':'));
+                .ends_with(['.', '!', '?', '…', ':']);
             let next_starts_thought = after.is_some_and(|ch| {
                 ch.is_uppercase() || ch == '«' || ch == '"' || ch == '('
             });

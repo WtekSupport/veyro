@@ -657,23 +657,30 @@ fn start_input_stream_resilient(
         std::thread::sleep(std::time::Duration::from_millis(120));
     }
 
-    match start_input_stream(
-        device_id,
-        sample_tx.clone(),
-        mic_level.clone(),
-        Some(mic_monitor.clone()),
-    ) {
-        Ok(result) => Ok(result),
-        Err(first) => {
-            #[cfg(windows)]
-            {
+    #[cfg(windows)]
+    {
+        match start_input_stream(
+            device_id,
+            sample_tx.clone(),
+            mic_level.clone(),
+            Some(mic_monitor.clone()),
+        ) {
+            Ok(result) => Ok(result),
+            Err(first) => {
                 warn!("input stream start failed ({first}), retrying once after brief delay");
                 std::thread::sleep(std::time::Duration::from_millis(200));
-                return start_input_stream(device_id, sample_tx, mic_level, Some(mic_monitor));
+                start_input_stream(device_id, sample_tx, mic_level, Some(mic_monitor))
             }
-            #[cfg(not(windows))]
-            Err(first)
         }
+    }
+    #[cfg(not(windows))]
+    {
+        start_input_stream(
+            device_id,
+            sample_tx,
+            mic_level,
+            Some(mic_monitor),
+        )
     }
 }
 
