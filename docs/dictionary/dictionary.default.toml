@@ -39,6 +39,25 @@
 #
 # See dictionary.example.toml in this repo for a larger starter set.
 #
+# Physics / energy dictation (local Whisper turbo) — examples only; uncomment or copy
+# into your live dictionary.toml as needed:
+#
+#   vocabulary = [
+#     "термоядерный",
+#     "дейтерий",
+#     "тритий",
+#     "антипротон",
+#     "KPD",
+#     "KПД",
+#   ]
+#
+#   [corrections]
+#   "литерий" = "лития"
+#   "деитерио" = "дейтериево"
+#   "дейтерио" = "дейтериево"
+#   "взрывалюта" = "взрывают"
+#   "антифизи" = "антиматерии"
+#
 # ── [whisper] (optional, advanced) ──────────────────────────────────────────
 # Decoding overrides for local Whisper. Uncomment only if you know you need them.
 #

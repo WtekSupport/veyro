@@ -234,6 +234,10 @@ pub(crate) fn spawn_ptt_press(app: AppHandle, ctx: Arc<AppContext>) {
             ctx.streaming_preview.stop_and_clear(&app);
             ctx.live_dictation.stop();
             ctx.live_dictation.reset();
+            ctx.ptt_postprocess.reset();
+            if let Ok(audio) = ctx.audio.lock() {
+                audio.set_ptt_vad_segments_on_silence(false);
+            }
             warn!("hotkey ptt press failed: {error}");
             let locale = app_locale(&app);
             crate::notify::notify(
@@ -393,6 +397,9 @@ pub(crate) fn spawn_ptt_release(
         }
 
         finish_ptt_release_on_controller(&app, &ctx, speech_queued);
+        if ctx.runtime.pending_count() == 0 && ctx.ptt_postprocess.has_injected_text() {
+            crate::app::runtime::schedule_ptt_postprocess_finish(app.clone(), Arc::clone(&ctx));
+        }
         ctx.set_audio_callbacks_enabled(true);
         crate::tray::menu::refresh_tray_menu(&app);
         crate::game_input::reset_toggle_capture();

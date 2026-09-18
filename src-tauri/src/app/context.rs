@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use serde_json::Value;
 use crate::app::activity_log::{ActivityLevel, ActivityLog};
 use crate::app::controller::{AppController, SharedController};
+use crate::app::ptt_postprocess::PttPostprocessSession;
 use crate::app::events::emit_activity_log;
 use crate::app::runtime::PipelineRuntime;
 use crate::audio::monitor::MicMonitor;
@@ -41,6 +42,7 @@ pub struct AppContext {
     pub llm_engine: Arc<RwLock<LlmEngine>>,
     pub streaming_preview: StreamingPreview,
     pub live_dictation: LiveDictationSession,
+    pub ptt_postprocess: PttPostprocessSession,
 }
 
 impl AppContext {
@@ -86,6 +88,7 @@ impl AppContext {
             llm_engine: llm_engine.clone(),
             streaming_preview: StreamingPreview::new(),
             live_dictation: LiveDictationSession::new(),
+            ptt_postprocess: PttPostprocessSession::new(),
         }
     }
 
@@ -134,8 +137,16 @@ impl AppContext {
     }
 
     pub fn sync_llm_engine(&self, settings: &AppSettings) {
+        Self::sync_llm_engine_owned(settings, &self.llm_engine, &self.runtime);
+    }
+
+    fn sync_llm_engine_owned(
+        settings: &AppSettings,
+        llm_engine: &Arc<RwLock<LlmEngine>>,
+        runtime: &Arc<PipelineRuntime>,
+    ) {
         if needs_local_llm(settings) {
-            let previous = self.llm_engine.write().ok().map(|mut guard| {
+            let previous = llm_engine.write().ok().map(|mut guard| {
                 std::mem::replace(
                     &mut *guard,
                     LlmEngine::unloaded(Some("reloading local LLM".to_string())),
@@ -148,14 +159,14 @@ impl AppContext {
             }
 
             let engine = LlmEngine::from_settings(settings);
-            if let Ok(mut guard) = self.llm_engine.write() {
+            if let Ok(mut guard) = llm_engine.write() {
                 *guard = engine.clone();
             }
-            self.runtime.set_llm_engine(engine);
+            runtime.set_llm_engine(engine);
             return;
         }
 
-        let previous = self.llm_engine.write().ok().map(|mut guard| {
+        let previous = llm_engine.write().ok().map(|mut guard| {
             std::mem::replace(
                 &mut *guard,
                 LlmEngine::unloaded(Some(
@@ -168,12 +179,11 @@ impl AppContext {
                 previous.unload();
             }
         }
-        let unloaded = self
-            .llm_engine
+        let unloaded = llm_engine
             .read()
             .map(|guard| guard.clone())
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone());
-        self.runtime.set_llm_engine(unloaded);
+        runtime.set_llm_engine(unloaded);
     }
 
     pub fn ensure_local_llm(&self, settings: &AppSettings) -> Result<(), String> {
@@ -206,7 +216,17 @@ impl AppContext {
         }
 
         if plan.reload_llm_engine || !needs_local_llm(settings) {
-            self.sync_llm_engine(settings);
+            let settings = settings.clone();
+            let llm_engine = Arc::clone(&self.llm_engine);
+            let runtime = Arc::clone(&self.runtime);
+            if tokio::task::spawn_blocking(move || {
+                AppContext::sync_llm_engine_owned(&settings, &llm_engine, &runtime);
+            })
+            .await
+            .is_err()
+            {
+                tracing::warn!("local LLM reload task failed to run on blocking pool");
+            }
         }
 
         if llm_was_ready && !needs_local_llm(settings) {
@@ -291,13 +311,19 @@ impl AppContext {
                 Value::Object(Default::default()),
             );
 
+            let settings = controller.settings().clone();
+            let ptt_streaming = settings.push_to_talk
+                && controller.is_push_to_talk_active()
+                && settings.ptt_hold;
             let stream_live = !controller.status().ptt_hold;
             let _ = controller.on_speech_started(&app_handle);
             drop(controller);
 
-            if stream_live {
+            if stream_live || ptt_streaming {
                 crate::injection::focus_target::capture_injection_target();
                 ctx.streaming_preview.start();
+            }
+            if stream_live {
                 ctx.start_live_dictation();
             }
         });
@@ -360,7 +386,17 @@ impl AppContext {
                 serde_json::json!({ "ms": segment.duration_ms }),
             );
 
-            ctx.streaming_preview.stop_and_clear(&app_handle);
+            let keep_preview = ctx.controller.try_lock().ok().is_some_and(|controller| {
+                let ptt_active = controller.is_push_to_talk_active();
+                if !ptt_active {
+                    return false;
+                }
+                settings.ai_postprocess_mode().is_some()
+                    || (settings.push_to_talk && settings.ptt_hold)
+            });
+            if !keep_preview {
+                ctx.streaming_preview.stop_and_clear(&app_handle);
+            }
 
             ctx.runtime.process_segment(
                 app_handle.clone(),
@@ -420,5 +456,9 @@ impl AppContext {
     pub fn cancel_pending(&self) {
         self.runtime.cancel_pending();
         self.root_cancel.cancel();
+        self.ptt_postprocess.reset();
+        if let Ok(audio) = self.audio.lock() {
+            audio.set_ptt_vad_segments_on_silence(false);
+        }
     }
 }

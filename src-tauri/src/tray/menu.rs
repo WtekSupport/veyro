@@ -147,7 +147,9 @@ fn apply_tray_visual(app: &AppHandle, snapshot: TrayVisualSnapshot) {
     }
 
     if let Some(tray) = app.tray_by_id("main") {
-        let _ = tray.set_icon(Some(icon));
+        if !crate::tray::blink::is_purple_blink_active() {
+            let _ = tray.set_icon(Some(icon));
+        }
         let _ = tray.set_tooltip(Some(&tooltip));
     }
 }

@@ -20,6 +20,7 @@ export function renderDiagnostics(diagnostics: DiagnosticsSnapshot | null): stri
         <li><span>LLM in RAM</span><strong>${diagnostics.llm_loaded ? "Yes" : "No"}</strong></li>
         <li><span>Settings WebView</span><strong>${diagnostics.settings_webview_alive ? "Alive" : "Destroyed"}</strong></li>
         <li><span>About WebView</span><strong>${diagnostics.about_webview_alive ? "Alive" : "Destroyed"}</strong></li>
+        <li><span>Notifications setting</span><strong>${diagnostics.show_notifications ? "On" : "Off"}</strong></li>
       </ul>
     </section>
   `;

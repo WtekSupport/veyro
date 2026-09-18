@@ -167,6 +167,11 @@ fn normalize_api_key_dependent_settings(settings: &mut AppSettings) -> bool {
         changed = true;
     }
 
+    if !settings.push_to_talk && settings.text_processing_mode.uses_ai() {
+        settings.text_processing_mode = settings.canonical_light_cleanup_mode();
+        changed = true;
+    }
+
     changed
 }
 

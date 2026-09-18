@@ -47,6 +47,10 @@ import {
   type StatusSnapshot,
   type TranscriptionCompletedPayload,
 } from "./api";
+import {
+  ensureSpacesAfterPunctuation,
+  mergeTranscriptChunks,
+} from "./lib/text-spacing";
 import { bindHotkeyInputs } from "./components/hotkey-input";
 import { showConfirmDialog } from "./components/confirm-dialog";
 import { FALLBACK_HOMEMAKER_HOTKEY_PRESETS } from "./components/homemaker-hotkeys";
@@ -89,7 +93,7 @@ import {
   updateActivityLogDom,
 } from "./components/status";
 import { bindUiModeSwitch, renderUiModeLink } from "./components/ui-mode-switch";
-import { getLocale, setLocale, subscribeLocale, t } from "./i18n";
+import { getLocale, setLocale, subscribeLocale, t, translateError } from "./i18n";
 import { skillCatalogUrl } from "./lib/skill-catalog-url";
 import {
   flushPersistSettings,
@@ -244,10 +248,12 @@ function syncTextModeUi(form: HTMLFormElement): void {
   hint.textContent = t(textModeHintKey(mode));
 
   const aiAvailable = isAiRewriteAvailable(form);
+  const pttEnabled =
+    form.querySelector<HTMLInputElement>('input[name="push_to_talk"]')?.checked ?? true;
   select.querySelectorAll("option").forEach((option) => {
     const optionMode = option.value as TextProcessingMode;
     if (AI_TEXT_MODES.has(optionMode)) {
-      option.disabled = !aiAvailable;
+      option.disabled = !aiAvailable || !pttEnabled;
     }
   });
 
@@ -649,6 +655,9 @@ function bindEvents(): void {
       const tab = button.dataset.tab as SettingsTab | undefined;
       if (tab) {
         setActiveTab(tab);
+        if (tab === "advanced") {
+          void refreshDiagnostics();
+        }
       }
     });
   });
@@ -915,6 +924,23 @@ function bindEvents(): void {
       element.addEventListener("change", () => {
         if (element instanceof HTMLInputElement && element.name === "push_to_talk") {
           syncCaptureModeUi(form);
+          if (!element.checked) {
+            const current = getState().settings;
+            const aiModes = new Set<TextProcessingMode>(["optimization", "custom_skill"]);
+            if (current && aiModes.has(current.text_processing_mode)) {
+              const fallback: TextProcessingMode =
+                current.ui_mode === "homemaker" ? "original" : "basic";
+              const select = form.querySelector<HTMLSelectElement>(
+                'select[name="text_processing_mode"]',
+              );
+              if (select) {
+                select.value = fallback;
+              }
+              setSettings({ ...current, text_processing_mode: fallback });
+              void flushPersistSettings();
+            }
+          }
+          syncTextModeUi(form);
         }
         if (
           element instanceof HTMLInputElement &&
@@ -1184,7 +1210,13 @@ async function bootstrap(): Promise<void> {
   await subscribe<import("./api").TranscriptionPartialPayload>(
     EVENTS.transcriptionPartial,
     (payload) => {
-      patchState({ partialTranscript: payload.text });
+      const raw = payload.text ?? "";
+      const previous = getState().partialTranscript ?? "";
+      const merged =
+        previous && raw.startsWith(previous.trim())
+          ? ensureSpacesAfterPunctuation(raw)
+          : mergeTranscriptChunks(previous, raw);
+      patchState({ partialTranscript: merged });
     },
   );
 
@@ -1283,6 +1315,12 @@ async function bootstrap(): Promise<void> {
       void refreshDiagnostics();
     });
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void refreshDiagnostics();
+    }
+  });
 }
 
 function escapeHtml(value: string): string {

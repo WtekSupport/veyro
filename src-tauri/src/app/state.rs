@@ -49,6 +49,7 @@ impl AppState {
                 | (Disabled, Initializing)
                 | (Ready, Disabled)
                 | (Ready, Listening)
+                | (Ready, Processing)
                 | (Ready, Error)
                 | (Ready, MicrophoneUnavailable)
                 | (Listening, Processing)
@@ -126,6 +127,8 @@ pub struct DiagnosticsSnapshot {
     pub about_webview_alive: bool,
     pub process_elevated: bool,
     pub hotkeys_blocked_by_elevation: bool,
+    pub show_notifications: bool,
+    pub system_notifications_available: bool,
 }
 
 #[cfg(test)]

@@ -35,6 +35,8 @@ pub struct VadDetector {
     end_on_silence: bool,
     ptt_recording: bool,
     ptt_capture: Vec<f32>,
+    /// True after a SpeechEnded chunk was delivered while PTT was held (silence/max-length split).
+    ptt_subsegments_sent: bool,
 }
 
 impl VadDetector {
@@ -55,6 +57,7 @@ impl VadDetector {
             end_on_silence: true,
             ptt_recording: false,
             ptt_capture: Vec::new(),
+            ptt_subsegments_sent: false,
         }
     }
 
@@ -74,8 +77,15 @@ impl VadDetector {
         self.pending.clear();
         self.pre_buffer.clear();
         self.ptt_capture.clear();
+        self.ptt_subsegments_sent = false;
         self.silence_samples = 0;
         self.resampler.reset();
+    }
+
+    fn mark_ptt_subsegment_delivered(&mut self) {
+        if self.ptt_recording {
+            self.ptt_subsegments_sent = true;
+        }
     }
 
     pub fn push_samples(&mut self, samples: &[f32]) -> Result<Vec<VadEvent>, crate::error::AudioError> {
@@ -129,6 +139,21 @@ impl VadDetector {
 
     pub fn flush_ptt(&mut self) -> Result<Option<VadEvent>, crate::error::AudioError> {
         self.drain_pending_frames()?;
+
+        if self.ptt_subsegments_sent {
+            self.ptt_subsegments_sent = false;
+            let min_speech = self.config.minimum_speech_samples(TARGET_SAMPLE_RATE);
+            if self.state == VadState::Speaking && self.segment.len() >= min_speech {
+                let segment = self.take_segment()?;
+                self.ptt_recording = false;
+                self.ptt_capture.clear();
+                return Ok(Some(VadEvent::SpeechEnded(segment)));
+            }
+            self.ptt_recording = false;
+            self.ptt_capture.clear();
+            self.reset();
+            return Ok(None);
+        }
 
         let ptt_min_samples = (TARGET_SAMPLE_RATE as usize * 100) / 1000;
         if self.ptt_capture.len() >= ptt_min_samples {
@@ -221,6 +246,7 @@ impl VadDetector {
                         if self.segment.len() >= self.config.minimum_speech_samples(TARGET_SAMPLE_RATE) {
                             let segment = self.take_segment()?;
                             self.state = VadState::Idle;
+                            self.mark_ptt_subsegment_delivered();
                             return Ok(Some(VadEvent::SpeechEnded(segment)));
                         }
                         self.reset();
@@ -229,6 +255,7 @@ impl VadDetector {
 
                 if self.segment.len() >= self.config.maximum_segment_samples(TARGET_SAMPLE_RATE) {
                     let segment = self.take_segment()?;
+                    self.mark_ptt_subsegment_delivered();
                     // Mid-utterance chunk: keep Speaking so the next samples stay in one session.
                     return Ok(Some(VadEvent::SpeechEnded(segment)));
                 }
@@ -339,6 +366,41 @@ mod tests {
 
         assert!(saw_start);
         assert!(saw_end);
+    }
+
+    #[test]
+    fn ptt_flush_after_subsegment_does_not_replay_full_capture() {
+        let mut detector = VadDetector::new(
+            VadConfig {
+                minimum_speech_ms: 100,
+                silence_timeout_ms: 100,
+                ..Default::default()
+            },
+            TARGET_SAMPLE_RATE,
+            1,
+        );
+        detector.set_ptt_recording(true);
+        detector.set_end_on_silence(true);
+
+        let mut mid_chunk = false;
+        for _ in 0..15 {
+            let _ = detector.push_samples(&sine_frame(0.6)).unwrap();
+        }
+        for _ in 0..20 {
+            for event in detector.push_samples(&silence_frame()).unwrap() {
+                if matches!(event, VadEvent::SpeechEnded(_)) {
+                    mid_chunk = true;
+                }
+            }
+        }
+
+        assert!(mid_chunk, "silence during PTT should deliver a mid-session chunk");
+
+        let flush = detector.flush_ptt().unwrap();
+        assert!(
+            flush.is_none(),
+            "release flush must not resend the whole ptt_capture after mid chunks"
+        );
     }
 
     #[test]

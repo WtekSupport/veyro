@@ -78,6 +78,8 @@ pub struct AudioPipeline {
     running: Arc<AtomicBool>,
     ptt_active: Arc<AtomicBool>,
     ptt_gate: Arc<AtomicBool>,
+    /// When true, VAD may end segments on silence while PTT gate is held (deferred AI postprocess).
+    ptt_vad_segments_on_silence: Arc<AtomicBool>,
     speech_active: Arc<AtomicBool>,
     mic_level: Arc<AtomicU32>,
     input_stream_active: Arc<AtomicBool>,
@@ -124,6 +126,7 @@ impl AudioPipeline {
             running: Arc::new(AtomicBool::new(false)),
             ptt_active: Arc::new(AtomicBool::new(false)),
             ptt_gate: Arc::new(AtomicBool::new(false)),
+            ptt_vad_segments_on_silence: Arc::new(AtomicBool::new(false)),
             speech_active: Arc::new(AtomicBool::new(false)),
             mic_level: Arc::new(AtomicU32::new(0)),
             input_stream_active,
@@ -161,6 +164,11 @@ impl AudioPipeline {
     ) {
         self.on_speech_started = Some(on_speech_started);
         self.on_speech_ended = Some(on_speech_ended);
+    }
+
+    pub fn set_ptt_vad_segments_on_silence(&self, enabled: bool) {
+        self.ptt_vad_segments_on_silence
+            .store(enabled, Ordering::SeqCst);
     }
 
     pub fn set_preview_sender(&mut self, sender: Sender<AudioSegment>) {
@@ -241,6 +249,8 @@ impl AudioPipeline {
         self.running.store(false, Ordering::SeqCst);
         self.ptt_active.store(false, Ordering::SeqCst);
         self.ptt_gate.store(false, Ordering::SeqCst);
+        self.ptt_vad_segments_on_silence
+            .store(false, Ordering::SeqCst);
         self.speech_active.store(false, Ordering::Relaxed);
         self.mic_level.store(0, Ordering::Relaxed);
         let _ = self.cmd_tx.send(AudioCommand::StopCapture);
@@ -271,6 +281,9 @@ impl AudioPipeline {
         }
 
         self.ptt_gate.store(true, Ordering::SeqCst);
+        // Must be set before VAD worker (re)start so silence splits utterances while PTT is held.
+        self.ptt_vad_segments_on_silence
+            .store(true, Ordering::SeqCst);
 
         let stream_active = self.input_stream_active.load(Ordering::Relaxed);
         let vad_restart = self.vad_worker_needs_restart();
@@ -299,6 +312,8 @@ impl AudioPipeline {
 
         let was_active = self.ptt_active.swap(false, Ordering::SeqCst);
         self.ptt_gate.store(false, Ordering::SeqCst);
+        self.ptt_vad_segments_on_silence
+            .store(false, Ordering::SeqCst);
 
         if !was_active {
             return Ok(self.ptt_flush_rx.take());
@@ -442,6 +457,7 @@ impl AudioPipeline {
             crate::audio::warmup::query_device_format(self.device_id.as_deref())?;
         crate::audio::warmup::warm_vad_detector(self.vad_config.clone(), sample_rate, channels);
         let ptt_gate = Arc::clone(&self.ptt_gate);
+        let ptt_vad_segments_on_silence = Arc::clone(&self.ptt_vad_segments_on_silence);
         let ptt_mode = self.mode == CaptureMode::PushToTalk;
 
         self.cmd_tx
@@ -486,7 +502,13 @@ impl AudioPipeline {
 
                 while session_flag.load(Ordering::SeqCst) {
                     let gate_active = ptt_gate.load(Ordering::SeqCst);
-                    detector.set_end_on_silence(!ptt_mode || !gate_active);
+                    let segment_on_silence = ptt_vad_segments_on_silence.load(Ordering::Relaxed);
+                    let end_on_silence = if ptt_mode {
+                        gate_active && segment_on_silence
+                    } else {
+                        true
+                    };
+                    detector.set_end_on_silence(end_on_silence);
 
                     let flush_requested = ptt_flush_req_rx.try_recv().is_ok();
                     let gate_released =
@@ -543,7 +565,12 @@ impl AudioPipeline {
                                             }
                                             VadEvent::SpeechEnded(segment) => {
                                                 if ptt_mode {
-                                                    // PTT delivers audio on key release via ptt_flush_tx.
+                                                    if gate_active && segment_on_silence {
+                                                        // Mid-PTT chunk: one STT+inject per silence (like continuous mode).
+                                                        if let Some(callback) = &on_speech_ended {
+                                                            callback(segment);
+                                                        }
+                                                    }
                                                 } else {
                                                     let _ = segment_tx.try_send(segment.clone());
                                                     if let Some(callback) = &on_speech_ended {
@@ -617,6 +644,39 @@ fn set_active_input_name(active_input_name: &Mutex<Option<String>>, name: Option
     }
 }
 
+/// WASAPI often returns 0x80070057 if capture is reopened immediately after stop.
+fn start_input_stream_resilient(
+    device_id: Option<&str>,
+    sample_tx: Sender<Vec<f32>>,
+    mic_level: Arc<AtomicU32>,
+    mic_monitor: MicMonitor,
+    after_restart: bool,
+) -> Result<(crate::audio::stream::AudioStreamHandle, u32, u16, String), AudioError> {
+    if after_restart {
+        #[cfg(windows)]
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    }
+
+    match start_input_stream(
+        device_id,
+        sample_tx.clone(),
+        mic_level.clone(),
+        Some(mic_monitor.clone()),
+    ) {
+        Ok(result) => Ok(result),
+        Err(first) => {
+            #[cfg(windows)]
+            {
+                warn!("input stream start failed ({first}), retrying once after brief delay");
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                return start_input_stream(device_id, sample_tx, mic_level, Some(mic_monitor));
+            }
+            #[cfg(not(windows))]
+            Err(first)
+        }
+    }
+}
+
 fn audio_thread_main(
     cmd_rx: Receiver<AudioCommand>,
     shutdown: Arc<AtomicBool>,
@@ -635,6 +695,7 @@ fn audio_thread_main(
                 mic_level,
                 mic_monitor,
             }) => {
+                let after_restart = stream_handle.is_some();
                 stop_input_stream(
                     stream_handle.take(),
                     &input_stream_active,
@@ -642,11 +703,12 @@ fn audio_thread_main(
                     &active_input_name,
                 );
                 stream_kind = StreamKind::None;
-                match start_input_stream(
+                match start_input_stream_resilient(
                     device_id.as_deref(),
                     audio_tx,
                     mic_level.clone(),
-                    Some(mic_monitor),
+                    mic_monitor,
+                    after_restart,
                 ) {
                     Ok((handle, rate, channels, device_name)) => {
                         info!(

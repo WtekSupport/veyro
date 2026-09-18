@@ -1,5 +1,6 @@
 import {
   AudioLines,
+  Bell,
   Bot,
   Download,
   FolderOpen,
@@ -85,4 +86,9 @@ export function iconDiagRewrite(): string {
 /** Local LLM loaded for rewrite. */
 export function iconDiagLlm(): string {
   return icon(Bot);
+}
+
+/** System toast notifications enabled in settings. */
+export function iconDiagNotify(): string {
+  return icon(Bell);
 }

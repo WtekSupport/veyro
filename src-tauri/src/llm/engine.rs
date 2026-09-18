@@ -106,7 +106,7 @@ enum WorkerCommand {
         reply: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
     Shutdown {
-        reply: tokio::sync::oneshot::Sender<()>,
+        reply: std::sync::mpsc::SyncSender<()>,
     },
 }
 
@@ -348,13 +348,13 @@ impl LocalLlmWorker {
     }
 
     fn shutdown(&self) {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
         if self
             .tx
             .send(WorkerCommand::Shutdown { reply: reply_tx })
             .is_ok()
         {
-            let _ = reply_rx.blocking_recv();
+            let _ = reply_rx.recv_timeout(std::time::Duration::from_secs(120));
         }
 
         if let Ok(mut join) = self.join.lock() {
