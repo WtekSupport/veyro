@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::app::context::AppContext;
 
@@ -68,7 +68,7 @@ fn register_windows_app_id() {
     if let Err(error) = result {
         warn!("SetCurrentProcessExplicitAppUserModelID failed: {error}");
     } else {
-        info!("Windows toast AppUserModelID registered ({APP_USER_MODEL_ID})");
+        tracing::info!("Windows toast AppUserModelID registered ({APP_USER_MODEL_ID})");
     }
 }
 

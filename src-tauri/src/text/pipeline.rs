@@ -143,6 +143,7 @@ pub async fn process_transcription_immediate(
 }
 
 /// Phase 2: AI rewrite on text that already went through phase 1.
+#[allow(clippy::too_many_arguments)]
 pub async fn rewrite_processed_text(
     light_text: &str,
     mode: TextProcessingMode,
