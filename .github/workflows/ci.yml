@@ -56,12 +56,12 @@ jobs:
         run: sudo apt-get install -y cmake
       - run: cargo test --no-default-features --lib
       - run: cargo clippy --no-default-features --lib -- -D warnings
-      - name: Ensure sherpa-onnx prebuilt libs (rust-cache can omit native artifacts)
+      - name: Ensure sherpa-onnx prebuilt libs (rust-cache can restore empty native dirs)
         run: |
           LIB_DIR="target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-linux-x64-shared-lib/lib"
           if [ ! -f "$LIB_DIR/libonnxruntime.so" ]; then
-            echo "Sherpa prebuilt missing; rebuilding sherpa-onnx-sys..."
-            cargo clean -p sherpa-onnx-sys
+            echo "Sherpa prebuilt missing; removing stale dir and rebuilding..."
+            rm -rf target/sherpa-onnx-prebuilt
             cargo build --no-default-features --features local-sherpa-stt --lib
           fi
           ls -la "$LIB_DIR"
