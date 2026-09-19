@@ -14,15 +14,12 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## [1.8.8] — 2026-09-19
 
-- **Windows installer fix:** Bundle sherpa-onnx and ONNX Runtime DLLs next to the app so fresh installs of 1.8.x no longer fail with missing `sherpa-onnx-c-api.dll` (portable zip includes the same runtime libraries).
-
-## [1.8.7] — 2026-09-19
-
 - **Local STT (sherpa-onnx):** Parakeet TDT 0.6B v3 and Qwen3-ASR 0.6B / 1.7B alongside Whisper; on-demand model download, unified `local_stt_model` setting (legacy `local_whisper_model` alias), provider factory and live preview for sherpa engines on Windows (DirectML/CUDA when enabled), macOS (CoreML), and CPU fallback.
 - **Expert settings UI:** Reliable tab switching (LOG / Voice / Text & system); dynamic lists (microphones, transcription languages, STT models, diagnostics) load with retry instead of staying empty; fewer full-form redraws on status ticks so language and model changes stick.
 - **Settings reliability:** Failed settings load on startup no longer writes default config over your saved file; bootstrap loads critical UI data in stages when the app controller is busy.
 - **STT model picker:** Compact three-line option labels—model name and download size, CPU/GPU requirements, and features (languages, speed, accuracy, live preview).
 - **Windows build & dev:** Serial MSBuild wrapper for llama.cpp Vulkan (`vulkan-shaders-gen` race mitigation), dev prebuild retry + `finish-llama-cpp-build`, documented `local-sherpa-stt` in BUILD guides and CI.
+- **Windows installer:** Bundle sherpa-onnx and ONNX Runtime DLLs next to the app (fixes missing `sherpa-onnx-c-api.dll` on install; portable zip includes the same runtime libraries). Release **1.8.7** was removed from GitHub—use **1.8.8** or newer.
 
 ## [1.7.87] — 2026-09-18
 
