@@ -52,9 +52,18 @@ jobs:
             libssl-dev \
             libxdo-dev \
             patchelf
-      - run: cargo test --no-default-features --lib
-      - run: cargo clippy --no-default-features --lib -- -D warnings
       - name: Install cmake (sherpa-onnx)
         run: sudo apt-get install -y cmake
+      - run: cargo test --no-default-features --lib
+      - run: cargo clippy --no-default-features --lib -- -D warnings
+      - name: Ensure sherpa-onnx prebuilt libs (rust-cache can omit native artifacts)
+        run: |
+          LIB_DIR="target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-linux-x64-shared-lib/lib"
+          if [ ! -f "$LIB_DIR/libonnxruntime.so" ]; then
+            echo "Sherpa prebuilt missing; rebuilding sherpa-onnx-sys..."
+            cargo clean -p sherpa-onnx-sys
+            cargo build --no-default-features --features local-sherpa-stt --lib
+          fi
+          ls -la "$LIB_DIR"
       - run: cargo test --no-default-features --features local-sherpa-stt --lib
       - run: cargo clippy --no-default-features --features local-sherpa-stt --lib -- -D warnings
