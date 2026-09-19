@@ -8,7 +8,11 @@
                                      "binaries/ggml-x86_64-pc-windows-msvc.dll":  "ggml.dll",
                                      "binaries/ggml-base-x86_64-pc-windows-msvc.dll":  "ggml-base.dll",
                                      "binaries/ggml-cpu-x86_64-pc-windows-msvc.dll":  "ggml-cpu.dll",
-                                     "binaries/ggml-vulkan-x86_64-pc-windows-msvc.dll":  "ggml-vulkan.dll"
+                                     "binaries/ggml-vulkan-x86_64-pc-windows-msvc.dll":  "ggml-vulkan.dll",
+                                     "binaries/sherpa-onnx-c-api-x86_64-pc-windows-msvc.dll":  "sherpa-onnx-c-api.dll",
+                                     "binaries/sherpa-onnx-cxx-api-x86_64-pc-windows-msvc.dll":  "sherpa-onnx-cxx-api.dll",
+                                     "binaries/onnxruntime-x86_64-pc-windows-msvc.dll":  "onnxruntime.dll",
+                                     "binaries/onnxruntime_providers_shared-x86_64-pc-windows-msvc.dll":  "onnxruntime_providers_shared.dll"
                                  }
                }
 }
