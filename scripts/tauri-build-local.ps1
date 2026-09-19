@@ -10,10 +10,10 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-try {
-    & (Join-Path $PSScriptRoot "ensure-updater-keys.ps1")
-} catch {
-    Write-Warning "Updater signing keys not configured: $_"
+. (Join-Path $PSScriptRoot "updater-signing-env.ps1")
+& (Join-Path $PSScriptRoot "ensure-updater-keys.ps1")
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
 }
 & node (Join-Path $PSScriptRoot "sync-updater-config.mjs")
 if ($LASTEXITCODE -ne 0) {
@@ -32,7 +32,7 @@ if (Test-Path (Join-Path $cmakeBin "cmake.exe")) {
 
 . (Join-Path $PSScriptRoot "resolve-local-features.ps1")
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
-$parallel = Set-LlamaCppBuildParallelism
+$parallel = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
 
 $featureArgs = @()
 if ($features) {
@@ -82,6 +82,9 @@ try {
 }
 
 Write-Host "Bundling installer..."
+if (-not (Set-UpdaterSigningEnv)) {
+    Write-Error "Updater signing env missing before bundle. Run scripts/ensure-updater-keys.ps1"
+}
 $bundleArgs = @("run", "tauri", "build", "--")
 if ($features) {
     $bundleArgs += @("--features", $features)
@@ -147,10 +150,12 @@ function Publish-ReleaseArtifacts {
                     }
                 }
                 $latestJson = Join-Path $versionOut "latest.json"
-                ($manifest | ConvertTo-Json -Depth 6) | Set-Content -Path $latestJson -Encoding UTF8
+                $jsonText = ($manifest | ConvertTo-Json -Depth 6)
+                $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+                [System.IO.File]::WriteAllText($latestJson, $jsonText, $utf8NoBom)
                 Write-Host "Release manifest: $latestJson"
             } else {
-                Write-Warning "No .sig file for updater (set TAURI_SIGNING_PRIVATE_KEY before build)."
+                Write-Warning "No .sig file for updater (run ensure-updater-keys.ps1; signing env is applied before bundle)."
             }
         } else {
             Write-Warning "No NSIS setup.exe found under $nsisDir"

@@ -155,7 +155,73 @@ function stateClass(state: StatusSnapshot["state"]): string {
 
 }
 
+function livePartialMarkup(
+  status: StatusSnapshot,
+  partialTranscript: string | null,
+  compact: boolean,
+): string {
+  if (status.state === "listening") {
+    const tag = compact ? "span" : "p";
+    return `<${tag} class="status-partial status-listening-indicator" aria-hidden="true"><span class="listening-dots"></span></${tag}>`;
+  }
+  const trimmed = partialTranscript?.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const tag = compact ? "span" : "p";
+  const max = compact ? 80 : 120;
+  return `<${tag} class="status-partial" aria-live="polite">${escapeHtml(truncatePartial(trimmed, max))}</${tag}>`;
+}
 
+export function patchLiveStatusUi(
+  status: StatusSnapshot | null,
+  partialTranscript: string | null = null,
+): void {
+  if (!status) {
+    return;
+  }
+
+  const label = translateState(status.state);
+  const klass = stateClass(status.state);
+
+  document.querySelectorAll(".status-bar").forEach((bar) => {
+    const dot = bar.querySelector<HTMLElement>(".status-dot");
+    if (dot) {
+      dot.className = klass;
+    }
+    const text = bar.querySelector(".status-text");
+    if (text) {
+      text.textContent = label;
+    }
+    const meta = bar.querySelector(".status-meta");
+    if (meta) {
+      meta.textContent = status.state === "ready" ? t("status.ready") : t("status.live");
+    }
+  });
+
+  const compactPartial = livePartialMarkup(status, partialTranscript, true);
+  document.querySelectorAll(".status-bar--compact").forEach((bar) => {
+    const existing = bar.querySelector(".status-partial");
+    if (existing) {
+      existing.remove();
+    }
+    if (compactPartial) {
+      bar.insertAdjacentHTML("beforeend", compactPartial);
+    }
+  });
+
+  const fullPartial = livePartialMarkup(status, partialTranscript, false);
+  document.querySelectorAll(".status-bar:not(.status-bar--compact)").forEach((bar) => {
+    let sibling = bar.nextElementSibling;
+    if (sibling?.classList.contains("status-partial")) {
+      sibling.remove();
+      sibling = bar.nextElementSibling;
+    }
+    if (fullPartial) {
+      bar.insertAdjacentHTML("afterend", fullPartial);
+    }
+  });
+}
 
 export function renderCompactStatusBar(
   status: StatusSnapshot | null,
@@ -370,10 +436,8 @@ export function renderCompactDiagnostics(
       iconDiagWhisper(),
 
       diagnostics.whisper_local_compiled &&
-
         diagnostics.transcription_provider === "local" &&
-
-        diagnostics.whisper_loaded,
+        (diagnostics.local_stt_loaded ?? diagnostics.whisper_loaded),
 
       diagTooltip(t("diag.whisper"), whisperLabel),
 
@@ -646,7 +710,10 @@ function whisperDiagLabel(diagnostics: DiagnosticsSnapshot): string {
 
   }
 
-  if (diagnostics.transcription_provider === "local" && !diagnostics.whisper_loaded) {
+  if (
+    diagnostics.transcription_provider === "local" &&
+    !(diagnostics.local_stt_loaded ?? diagnostics.whisper_loaded)
+  ) {
 
     return t("diag.memoryUnloaded");
 

@@ -113,10 +113,11 @@ impl AppController {
         let previous_vad_voice_threshold = self.settings.vad_voice_threshold_percent;
         let previous_vad_auto_threshold = self.settings.vad_auto_threshold_percent;
         let previous_provider = self.settings.transcription_provider.clone();
-        let previous_model = self.settings.local_whisper_model;
+        let previous_model = self.settings.local_stt_model;
         let previous_models_dir = self.settings.local_whisper_models_dir.clone();
         let previous_use_gpu = self.settings.local_whisper_use_gpu;
         let previous_beam = self.settings.local_whisper_beam_size;
+        let previous_sherpa_threads = self.settings.local_sherpa_num_threads;
         let previous_text_processing_mode = self.settings.text_processing_mode;
         let previous_rewrite_provider = self.settings.text_rewrite_provider;
         let previous_llm_model = self.settings.local_llm_model;
@@ -166,10 +167,11 @@ impl AppController {
         };
 
         let reload_transcriber = previous_provider != self.settings.transcription_provider
-            || previous_model != self.settings.local_whisper_model
+            || previous_model != self.settings.local_stt_model
             || previous_models_dir != self.settings.local_whisper_models_dir
             || previous_use_gpu != self.settings.local_whisper_use_gpu
-            || previous_beam != self.settings.local_whisper_beam_size;
+            || previous_beam != self.settings.local_whisper_beam_size
+            || previous_sherpa_threads != self.settings.local_sherpa_num_threads;
 
         let reload_llm_engine = previous_text_processing_mode != self.settings.text_processing_mode
             || previous_rewrite_provider != self.settings.text_rewrite_provider

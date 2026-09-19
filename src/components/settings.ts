@@ -1,19 +1,20 @@
-import type {
-  ActivityLogEntry,
-  AiSkillInfo,
-  AppSettings,
-  DiagnosticsSnapshot,
-  InjectionMode,
-  LlmModelDownloadProgress,
-  LlmModelInfo,
-  LlmModelKind,
-  TextProcessingMode,
-  TextRewriteProvider,
-  TranscriptionLanguageInfo,
-  UiLocale,
-  WhisperModelDownloadProgress,
-  WhisperModelInfo,
-  WhisperModelKind,
+import {
+  isWhisperSttModel,
+  type ActivityLogEntry,
+  type AiSkillInfo,
+  type AppSettings,
+  type DiagnosticsSnapshot,
+  type InjectionMode,
+  type LlmModelDownloadProgress,
+  type LlmModelInfo,
+  type LlmModelKind,
+  type LocalSttModelInfo,
+  type LocalSttModelKind,
+  type TextProcessingMode,
+  type TextRewriteProvider,
+  type TranscriptionLanguageInfo,
+  type UiLocale,
+  type WhisperModelDownloadProgress,
 } from "../api";
 import type { SettingsTab } from "../state";
 import { t, whisperBackendLabel } from "../i18n";
@@ -48,7 +49,7 @@ export interface SettingsFormValues {
   silence_timeout_ms: number;
   ui_locale: UiLocale;
   transcription_provider: string;
-  local_whisper_model: WhisperModelKind;
+  local_stt_model: LocalSttModelKind;
   local_whisper_models_dir: string;
   whisper_model_exists: boolean;
   local_whisper_use_gpu: boolean;
@@ -73,23 +74,99 @@ export interface SettingsFormValues {
   has_api_key: boolean;
 }
 
-const WHISPER_MODEL_LABELS: Record<WhisperModelKind, MessageKey> = {
-  base: "settings.whisperModelBase",
-  small: "settings.whisperModelSmall",
-  medium: "settings.whisperModelMedium",
-  large_v3_turbo: "settings.whisperModelLargeV3Turbo",
-  large_v3: "settings.whisperModelLargeV3",
+type LocalSttModelOptionCopy = {
+  name: MessageKey;
+  req: MessageKey;
+  features: MessageKey;
 };
 
-const WHISPER_MODEL_NAMES: Record<WhisperModelKind, MessageKey> = {
-  base: "settings.whisperModelNameBase",
-  small: "settings.whisperModelNameSmall",
-  medium: "settings.whisperModelNameMedium",
-  large_v3_turbo: "settings.whisperModelNameLargeV3Turbo",
-  large_v3: "settings.whisperModelNameLargeV3",
+const LOCAL_STT_MODEL_OPTION_COPY: Record<LocalSttModelKind, LocalSttModelOptionCopy> = {
+  base: {
+    name: "settings.whisperModelNameBase",
+    req: "settings.sttModelBaseReq",
+    features: "settings.sttModelBaseFeatures",
+  },
+  small: {
+    name: "settings.whisperModelNameSmall",
+    req: "settings.sttModelSmallReq",
+    features: "settings.sttModelSmallFeatures",
+  },
+  medium: {
+    name: "settings.whisperModelNameMedium",
+    req: "settings.sttModelMediumReq",
+    features: "settings.sttModelMediumFeatures",
+  },
+  large_v3_turbo: {
+    name: "settings.whisperModelNameLargeV3Turbo",
+    req: "settings.sttModelLargeV3TurboReq",
+    features: "settings.sttModelLargeV3TurboFeatures",
+  },
+  large_v3: {
+    name: "settings.whisperModelNameLargeV3",
+    req: "settings.sttModelLargeV3Req",
+    features: "settings.sttModelLargeV3Features",
+  },
+  parakeet_tdt_0_6b_v3: {
+    name: "settings.sttModelNameParakeetTdt06bV3",
+    req: "settings.sttModelParakeetReq",
+    features: "settings.sttModelParakeetFeatures",
+  },
+  qwen3_asr_0_6b: {
+    name: "settings.sttModelNameQwen3Asr06b",
+    req: "settings.sttModelQwen06Req",
+    features: "settings.sttModelQwen06Features",
+  },
+  qwen3_asr_1_7b: {
+    name: "settings.sttModelNameQwen3Asr17b",
+    req: "settings.sttModelQwen17Req",
+    features: "settings.sttModelQwen17Features",
+  },
 };
 
-function whisperModelHintKey(model: WhisperModelKind): MessageKey | null {
+const FALLBACK_LOCAL_STT_MODEL_KINDS: LocalSttModelKind[] = [
+  "base",
+  "small",
+  "medium",
+  "large_v3_turbo",
+  "large_v3",
+  "parakeet_tdt_0_6b_v3",
+  "qwen3_asr_0_6b",
+  "qwen3_asr_1_7b",
+];
+
+const LEGACY_LOCAL_STT_KIND: Record<string, LocalSttModelKind> = {
+  whisper_base: "base",
+  whisper_small: "small",
+  whisper_medium: "medium",
+  whisper_large_v3_turbo: "large_v3_turbo",
+  whisper_large_v3: "large_v3",
+};
+
+function normalizeLocalSttModelKind(kind: string): LocalSttModelKind {
+  return (LEGACY_LOCAL_STT_KIND[kind] ?? kind) as LocalSttModelKind;
+}
+
+function formatSttModelSize(sizeMb: number): string {
+  if (sizeMb <= 0) {
+    return "…";
+  }
+  return t("settings.sttModelSizeFormat", { size: sizeMb });
+}
+
+function formatLocalSttModelOptionLabel(kind: LocalSttModelKind, sizeMb: number): string {
+  const copy = LOCAL_STT_MODEL_OPTION_COPY[kind];
+  const title = `${t(copy.name)} (${formatSttModelSize(sizeMb)})`;
+  return `${title}\n${t(copy.req)}\n${t(copy.features)}`;
+}
+
+function localSttModelDisplayName(kind: LocalSttModelKind): string {
+  return t(LOCAL_STT_MODEL_OPTION_COPY[kind].name);
+}
+
+function localSttModelHintKey(model: LocalSttModelKind): MessageKey | null {
+  if (!isWhisperSttModel(model)) {
+    return "settings.sttModelSherpaHint";
+  }
   if (model === "large_v3_turbo") {
     return "settings.whisperModelTurboHint";
   }
@@ -225,7 +302,10 @@ export function settingsToForm(
     silence_timeout_ms: settings.silence_timeout_ms,
     ui_locale: settings.ui_locale,
     transcription_provider: settings.transcription_provider,
-    local_whisper_model: settings.local_whisper_model ?? "base",
+    local_stt_model:
+      settings.local_stt_model ??
+      (settings as { local_whisper_model?: LocalSttModelKind }).local_whisper_model ??
+      "base",
     local_whisper_models_dir: whisperModelsDir,
     whisper_model_exists: whisperModelExists,
     local_whisper_use_gpu: settings.local_whisper_use_gpu ?? false,
@@ -250,6 +330,18 @@ export function settingsToForm(
     api_key: "",
     has_api_key: hasApiKey,
   };
+}
+
+export function syncSettingsTabUi(activeTab: SettingsTab): void {
+  document.querySelectorAll<HTMLButtonElement>(".tab[data-tab]").forEach((button) => {
+    const selected = button.dataset.tab === activeTab;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll<HTMLElement>(".tab-panel[data-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.panel === activeTab);
+  });
 }
 
 export function renderTabBar(activeTab: SettingsTab): string {
@@ -332,22 +424,22 @@ export function updateWhisperDownloadUi(
   progressRoot.setAttribute("aria-valuenow", String(percent));
 }
 
-function selectedWhisperModelExists(
+function selectedLocalSttModelExists(
   values: SettingsFormValues,
-  whisperModels: WhisperModelInfo[],
+  localSttModels: LocalSttModelInfo[],
 ): boolean {
-  const selected = whisperModels.find((model) => model.kind === values.local_whisper_model);
+  const selected = localSttModels.find((model) => model.kind === values.local_stt_model);
   return selected?.exists ?? values.whisper_model_exists;
 }
 
-function renderWhisperModelAction(
+function renderLocalSttModelAction(
   values: SettingsFormValues,
-  whisperModels: WhisperModelInfo[],
+  localSttModels: LocalSttModelInfo[],
   whisperModelDownload: WhisperModelDownloadProgress | null,
   downloadProgressPercent: number | null,
 ): string {
   const downloadingModel = whisperModelDownload !== null;
-  const modelExists = selectedWhisperModelExists(values, whisperModels);
+  const modelExists = selectedLocalSttModelExists(values, localSttModels);
 
   if (downloadingModel) {
     return `
@@ -378,7 +470,7 @@ function renderWhisperModelAction(
   }
 
   if (modelExists) {
-    const modelName = t(WHISPER_MODEL_NAMES[values.local_whisper_model]);
+    const modelName = localSttModelDisplayName(values.local_stt_model);
     return `<span class="field-hint">${escapeHtml(t("settings.whisperModelUsing", { model: modelName }))}</span>`;
   }
 
@@ -391,20 +483,22 @@ function renderWhisperModelAction(
   `;
 }
 
-function renderWhisperModelOptions(values: SettingsFormValues, whisperModels: WhisperModelInfo[]): string {
-  const kinds: WhisperModelKind[] = [
-    "base",
-    "small",
-    "medium",
-    "large_v3_turbo",
-    "large_v3",
-  ];
-  return kinds
-    .map((kind) => {
-      const info = whisperModels.find((model) => model.kind === kind);
-      const sizeMb = info?.size_mb ?? 0;
-      const label = t(WHISPER_MODEL_LABELS[kind], { size: sizeMb });
-      return `<option value="${kind}" ${values.local_whisper_model === kind ? "selected" : ""}>${escapeHtml(label)}</option>`;
+function renderLocalSttModelOptions(
+  values: SettingsFormValues,
+  localSttModels: LocalSttModelInfo[],
+): string {
+  const models =
+    localSttModels.length > 0
+      ? localSttModels.map((info) => ({
+          kind: normalizeLocalSttModelKind(String(info.kind)),
+          size_mb: info.size_mb,
+        }))
+      : FALLBACK_LOCAL_STT_MODEL_KINDS.map((kind) => ({ kind, size_mb: 0 }));
+
+  return models
+    .map((info) => {
+      const label = formatLocalSttModelOptionLabel(info.kind, info.size_mb);
+      return `<option value="${info.kind}" ${values.local_stt_model === info.kind ? "selected" : ""}>${escapeHtml(label)}</option>`;
     })
     .join("");
 }
@@ -590,7 +684,7 @@ export function renderSettingsForm(
   activeTab: SettingsTab,
   activityLog: ActivityLogEntry[],
   whisperModelDownload: WhisperModelDownloadProgress | null = null,
-  whisperModels: WhisperModelInfo[] = [],
+  localSttModels: LocalSttModelInfo[] = [],
   aiSkills: AiSkillInfo[] = [],
   diagnostics: DiagnosticsSnapshot | null = null,
   llmModelDownload: LlmModelDownloadProgress | null = null,
@@ -735,12 +829,12 @@ export function renderSettingsForm(
         <div class="local-whisper-panel" data-local-model-panel ${effectiveTranscriptionProvider(values) === "local" ? "" : "hidden"}>
           <label class="field">
             <span>${escapeHtml(t("settings.whisperModelSelect"))}</span>
-            <select name="local_whisper_model" data-whisper-model-select>
-              ${renderWhisperModelOptions(values, whisperModels)}
+            <select name="local_stt_model" data-whisper-model-select class="stt-model-select">
+              ${renderLocalSttModelOptions(values, localSttModels)}
             </select>
             ${
-              whisperModelHintKey(values.local_whisper_model)
-                ? `<span class="field-hint">${escapeHtml(t(whisperModelHintKey(values.local_whisper_model)!))}</span>`
+              localSttModelHintKey(values.local_stt_model)
+                ? `<span class="field-hint">${escapeHtml(t(localSttModelHintKey(values.local_stt_model)!))}</span>`
                 : ""
             }
           </label>
@@ -765,24 +859,24 @@ export function renderSettingsForm(
             </div>
           </label>
 
-          ${renderWhisperModelAction(values, whisperModels, whisperModelDownload, downloadProgressPercent)}
+          ${renderLocalSttModelAction(values, localSttModels, whisperModelDownload, downloadProgressPercent)}
 
           <label class="field checkbox">
             <input
               name="local_whisper_use_gpu"
               type="checkbox"
               ${values.local_whisper_use_gpu ? "checked" : ""}
-              ${diagnostics?.whisper_gpu_compiled ? "" : "disabled"}
+              ${diagnostics?.whisper_gpu_compiled || diagnostics?.sherpa_stt_compiled ? "" : "disabled"}
             />
             <span>${escapeHtml(t("settings.whisperUseGpu"))}</span>
             ${
-              diagnostics?.whisper_gpu_compiled
+              diagnostics?.whisper_gpu_compiled || diagnostics?.sherpa_stt_compiled
                 ? `<span class="field-hint">${escapeHtml(t("settings.whisperBackend", { backend: whisperBackendLabel(diagnostics.whisper_backend) }))}</span>`
                 : `<span class="field-hint">${escapeHtml(t("settings.whisperGpuUnavailable"))}</span>`
             }
           </label>
 
-          <label class="field">
+          <label class="field" data-whisper-beam-field ${isWhisperSttModel(values.local_stt_model) ? "" : "hidden"}>
             <span>${escapeHtml(t("settings.whisperBeamSize"))}</span>
             <select name="local_whisper_beam_size">
               <option value="1" ${values.local_whisper_beam_size === 1 ? "selected" : ""}>${escapeHtml(t("settings.whisperBeamGreedy"))}</option>
@@ -1101,7 +1195,9 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     silence_timeout_ms: Number(data.get("silence_timeout_ms") ?? 700),
     ui_locale: String(data.get("ui_locale") ?? "en") as UiLocale,
     transcription_provider: String(data.get("transcription_provider") ?? "local"),
-    local_whisper_model: String(data.get("local_whisper_model") ?? "base") as WhisperModelKind,
+    local_stt_model: String(
+      data.get("local_stt_model") ?? data.get("local_whisper_model") ?? "base",
+    ) as LocalSttModelKind,
     local_whisper_models_dir: String(data.get("local_whisper_models_dir") ?? ""),
     whisper_model_exists: false,
     local_whisper_use_gpu: data.get("local_whisper_use_gpu") === "on",
