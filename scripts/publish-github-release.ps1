@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $repo = "WtekSupport/veyro"
 $tag = "v$Semver"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
