@@ -70,7 +70,7 @@ bzip2 = "0.5"
 llama-cpp-2 = { version = "0.1", optional = true, default-features = false, features = ["openmp"] }
 encoding_rs = "0.8"
 flacenc = "0.4"
-rfd = "0.15"
+rfd = "0.17"
 url = "2"
 toml = "0.8"
 nnnoiseless = "0.5"
