@@ -1,7 +1,7 @@
 # Merge release PR when checks pass; sync local main; retag v* on release head if needed.
 param(
-    [int]$PullNumber = 14,
-    [string]$HeadBranch = "release/1.8.7"
+    [int]$PullNumber = 0,
+    [string]$HeadBranch = "release/1.8.8"
 )
 
 $ErrorActionPreference = "Stop"
