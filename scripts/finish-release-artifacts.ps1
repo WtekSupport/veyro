@@ -59,7 +59,7 @@ if (Test-Path $veyroExe) {
     New-Item -ItemType Directory -Force -Path $portableStage | Out-Null
     Copy-Item $veyroExe $portableStage -Force
     Get-ChildItem $releaseDir -Filter "*.dll" |
-        Where-Object { $_.Name -match '^(llama|ggml)' } |
+        Where-Object { $_.Name -match '^(llama|ggml|sherpa-onnx|onnxruntime)' } |
         Copy-Item -Destination $portableStage -Force
     $zipPath = Join-Path $versionOut "Veyro_${Semver}_x64-portable.zip"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
