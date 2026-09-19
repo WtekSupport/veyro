@@ -38,6 +38,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: false
+          shared-key: sherpa-1.13.8
       - name: Install Linux build deps (minimal)
         run: |
           sudo apt-get update
@@ -52,18 +54,15 @@ jobs:
             libssl-dev \
             libxdo-dev \
             patchelf
-      - name: Install cmake (sherpa-onnx)
-        run: sudo apt-get install -y cmake
       - run: cargo test --no-default-features --lib
       - run: cargo clippy --no-default-features --lib -- -D warnings
-      - name: Ensure sherpa-onnx prebuilt libs (rust-cache can restore empty native dirs)
+      - name: Install cmake (sherpa-onnx)
+        run: sudo apt-get install -y cmake
+      - name: Drop stale sherpa prebuilt dir (rust-cache can restore empty lib folders)
         run: |
           LIB_DIR="target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-linux-x64-shared-lib/lib"
-          if [ ! -f "$LIB_DIR/libonnxruntime.so" ]; then
-            echo "Sherpa prebuilt missing; removing stale dir and rebuilding..."
+          if [ -d "$LIB_DIR" ] && [ ! -f "$LIB_DIR/libonnxruntime.so" ]; then
             rm -rf target/sherpa-onnx-prebuilt
-            cargo build --no-default-features --features local-sherpa-stt --lib
           fi
-          ls -la "$LIB_DIR"
       - run: cargo test --no-default-features --features local-sherpa-stt --lib
       - run: cargo clippy --no-default-features --features local-sherpa-stt --lib -- -D warnings
