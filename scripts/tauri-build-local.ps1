@@ -64,9 +64,17 @@ if ($buildExit -ne 0) {
     exit $buildExit
 }
 
+$syncWindowsBundle = $false
 if ($features -match "local-llm") {
     & (Join-Path $PSScriptRoot "finish-llama-cpp-build.ps1") -RepoRoot $repoRoot -Profile "release" -Parallel $parallel
     & (Join-Path $PSScriptRoot "stage-llm-dlls.ps1") -RepoRoot $repoRoot -Required
+    $syncWindowsBundle = $true
+}
+if ($features -match "local-sherpa-stt") {
+    & (Join-Path $PSScriptRoot "stage-sherpa-dlls.ps1") -RepoRoot $repoRoot -Required
+    $syncWindowsBundle = $true
+}
+if ($syncWindowsBundle) {
     & (Join-Path $PSScriptRoot "sync-windows-bundle-resources.ps1") -RepoRoot $repoRoot
 }
 
@@ -168,7 +176,7 @@ function Publish-ReleaseArtifacts {
         New-Item -ItemType Directory -Force -Path $portableStage | Out-Null
         Copy-Item $veyroExe $portableStage -Force
         Get-ChildItem $ReleaseDir -Filter "*.dll" |
-            Where-Object { $_.Name -match '^(llama|ggml)' } |
+            Where-Object { $_.Name -match '^(llama|ggml|sherpa-onnx|onnxruntime)' } |
             Copy-Item -Destination $portableStage -Force
         $zipPath = Join-Path $versionOut "Veyro_${Semver}_x64-portable.zip"
         if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
