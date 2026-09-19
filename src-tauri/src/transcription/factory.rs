@@ -107,17 +107,17 @@ fn create_sherpa_transcriber(
                         path.display()
                     );
                 }
-                return Arc::new(LocalSherpaProvider::new_with_bundle(
+                Arc::new(LocalSherpaProvider::new_with_bundle(
                     settings.clone(),
                     path,
                     cancel,
-                ));
+                ))
             }
             Err(error) => {
                 warn!("sherpa model path unavailable: {error}");
-                return Arc::new(LocalTranscriptionUnavailable {
+                Arc::new(LocalTranscriptionUnavailable {
                     reason: error.to_string(),
-                });
+                })
             }
         }
     }
