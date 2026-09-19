@@ -10,6 +10,7 @@ Set-Location $repoRoot
 . (Join-Path $PSScriptRoot "updater-signing-env.ps1")
 & (Join-Path $PSScriptRoot "ensure-updater-keys.ps1")
 & node (Join-Path $PSScriptRoot "sync-updater-config.mjs")
+& (Join-Path $PSScriptRoot "ensure-rust-path.ps1")
 . (Join-Path $PSScriptRoot "ensure-cargo-target.ps1")
 . (Join-Path $PSScriptRoot "resolve-local-features.ps1")
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
