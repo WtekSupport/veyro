@@ -38,7 +38,7 @@ use llm::model_store as llm_model_store;
 use llm::LlmEngine;
 use settings::{
     clear_api_key, has_api_key, load_settings, save_api_key, save_settings, AppSettings,
-    LlmModelKind, SettingsPatch, UiMode, WhisperModelKind,
+    LlmModelKind, LocalSttModelKind, SettingsPatch, UiMode, WhisperModelKind,
 };
 use setup::HomemakerLocalSetup;
 use text::dictionary::{
@@ -500,9 +500,9 @@ async fn apply_audio_action_async(
 fn get_settings(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<AppSettings, String> {
     ctx.inner()
         .controller
-        .lock()
+        .try_lock()
         .map(|controller| controller.settings().clone())
-        .map_err(|_| "application controller lock poisoned".to_string())
+        .map_err(|_| "application is busy, try again".to_string())
 }
 
 #[tauri::command]
@@ -639,8 +639,8 @@ fn get_homemaker_local_setup(
 ) -> Result<HomemakerLocalSetup, String> {
     let controller = ctx
         .controller
-        .lock()
-        .map_err(|_| "application controller lock poisoned".to_string())?;
+        .try_lock()
+        .map_err(|_| "application is busy, try again".to_string())?;
     Ok(setup::get_homemaker_local_setup(controller.settings()))
 }
 
@@ -889,10 +889,12 @@ fn get_whisper_model_status(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<Wh
         .map_err(|_| "application controller lock poisoned".to_string())?
         .settings()
         .clone();
-    let path = model_store::resolve_model_path(&settings).map_err(|error| error.to_string())?;
+    let kind = settings.local_stt_model;
+    let path =
+        transcription::local_stt_model_store::resolve_model_bundle(&settings).map_err(|e| e.to_string())?;
     Ok(WhisperModelStatus {
         path: path.display().to_string(),
-        exists: model_store::model_exists(&path),
+        exists: transcription::local_stt_model_store::bundle_ready(&path, kind),
     })
 }
 
@@ -958,7 +960,75 @@ async fn download_whisper_model(
         json!({ "path": path.display().to_string() }),
     );
 
-    if settings.local_whisper_model == model {
+    if settings.local_stt_model.whisper_kind() == Some(model) {
+        ctx.inner().reload_transcriber(&settings);
+        spawn_prewarm_local_models(ctx.inner().clone(), Some(app.clone()), settings);
+    }
+
+    Ok(path.display().to_string())
+}
+
+#[tauri::command]
+fn list_local_stt_models(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<Vec<transcription::local_stt_model_store::LocalSttModelInfo>, String> {
+    let settings = ctx
+        .inner()
+        .controller
+        .try_lock()
+        .map_err(|_| "application is busy, try again".to_string())?
+        .settings()
+        .clone();
+    transcription::local_stt_model_store::list_models(&settings).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn download_local_stt_model(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    model: LocalSttModelKind,
+) -> Result<String, String> {
+    use crate::app::events::WHISPER_MODEL_DOWNLOAD_PROGRESS;
+
+    let settings = ctx
+        .inner()
+        .controller
+        .lock()
+        .map_err(|_| "application controller lock poisoned".to_string())?
+        .settings()
+        .clone();
+
+    let http = transcription::local_stt_model_store::download_client_for_stt()
+        .map_err(|error| error.to_string())?;
+    ctx.inner().record_activity(
+        Some(&app),
+        ActivityLevel::Info,
+        "activity.model.download_started",
+        json!({ "model": model.as_api_str() }),
+    );
+
+    let app_for_progress = app.clone();
+    let path = transcription::local_stt_model_store::download_model(&http, &settings, model, |progress| {
+        let _ = app_for_progress.emit(WHISPER_MODEL_DOWNLOAD_PROGRESS, progress);
+    })
+    .await
+    .inspect_err(|error| {
+        ctx.inner().record_activity(
+            Some(&app),
+            ActivityLevel::Error,
+            "activity.model.download_failed",
+            json!({ "error": error.clone() }),
+        );
+    })?;
+
+    ctx.inner().record_activity(
+        Some(&app),
+        ActivityLevel::Info,
+        "activity.model.download_done",
+        json!({ "path": path.display().to_string() }),
+    );
+
+    if settings.local_stt_model == model {
         ctx.inner().reload_transcriber(&settings);
         spawn_prewarm_local_models(ctx.inner().clone(), Some(app.clone()), settings);
     }
@@ -1227,12 +1297,17 @@ fn apply_window_locale(app: &AppHandle, locale: settings::UiLocale) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut settings = load_settings().unwrap_or_else(|error| {
-        eprintln!("failed to load settings, using defaults: {error}");
-        AppSettings::default()
-    });
+    let (mut settings, settings_loaded) = match load_settings() {
+        Ok(settings) => (settings, true),
+        Err(error) => {
+            eprintln!("failed to load settings, using in-memory defaults (config not overwritten): {error}");
+            (AppSettings::default(), false)
+        }
+    };
     settings.enabled = true;
-    let _ = save_settings(&settings);
+    if settings_loaded {
+        let _ = save_settings(&settings);
+    }
 
     diagnostics::init_logging(&settings.log_level);
     let _ = text::skill::ensure_skills_dir();
@@ -1294,7 +1369,9 @@ pub fn run() {
             get_whisper_model_status,
             list_transcription_languages,
             list_whisper_models,
+            list_local_stt_models,
             download_whisper_model,
+            download_local_stt_model,
             get_whisper_models_dir,
             pick_whisper_models_dir,
             get_llm_model_status,

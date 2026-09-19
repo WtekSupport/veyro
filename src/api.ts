@@ -31,6 +31,15 @@ export type WhisperModelKind =
   | "medium"
   | "large_v3_turbo"
   | "large_v3";
+
+export type SherpaSttModelKind =
+  | "parakeet_tdt_0_6b_v3"
+  | "qwen3_asr_0_6b"
+  | "qwen3_asr_1_7b";
+
+export type LocalSttModelKind = WhisperModelKind | SherpaSttModelKind;
+
+export type LocalSttEngine = "whisper" | "sherpa";
 export type TextRewriteProvider = "openai" | "local";
 export type LlmModelKind = "qwen3_4b" | "t_lite_it21" | "qwen25_7b" | "gec08b";
 
@@ -61,9 +70,10 @@ export interface AppSettings {
   transcription_provider: string;
   transcription_model: string;
   local_whisper_models_dir: string | null;
-  local_whisper_model: WhisperModelKind;
+  local_stt_model: LocalSttModelKind;
   local_whisper_use_gpu: boolean;
   local_whisper_beam_size: number;
+  local_sherpa_num_threads?: number;
   text_rewrite_provider: TextRewriteProvider;
   local_llm_model: LlmModelKind;
   local_llm_models_dir: string | null;
@@ -109,9 +119,11 @@ export interface SettingsPatch {
   transcription_provider?: string;
   transcription_model?: string;
   local_whisper_models_dir?: string | null;
-  local_whisper_model?: WhisperModelKind;
+  local_stt_model?: LocalSttModelKind;
+  local_whisper_model?: LocalSttModelKind;
   local_whisper_use_gpu?: boolean;
   local_whisper_beam_size?: number;
+  local_sherpa_num_threads?: number;
   text_rewrite_provider?: TextRewriteProvider;
   local_llm_model?: LlmModelKind;
   local_llm_models_dir?: string | null;
@@ -147,7 +159,7 @@ export interface SettingsPatch {
 }
 
 export interface HomemakerLocalSetup {
-  local_whisper_model: WhisperModelKind;
+  local_stt_model: LocalSttModelKind;
   local_llm_model: LlmModelKind;
   local_whisper_use_gpu: boolean;
   local_llm_use_gpu: boolean;
@@ -184,6 +196,10 @@ export interface DiagnosticsSnapshot {
   local_llm_gpu_compiled: boolean;
   local_llm_ready: boolean;
   whisper_loaded: boolean;
+  local_stt_loaded: boolean;
+  local_stt_engine: string;
+  local_stt_model: string;
+  sherpa_stt_compiled: boolean;
   llm_loaded: boolean;
   settings_webview_alive: boolean;
   about_webview_alive: boolean;
@@ -237,6 +253,15 @@ export interface WhisperModelDownloadProgress {
   downloaded: number;
   total: number | null;
   percent: number | null;
+}
+
+export interface LocalSttModelInfo {
+  kind: LocalSttModelKind;
+  engine: LocalSttEngine;
+  path: string;
+  exists: boolean;
+  size_mb: number;
+  selected: boolean;
 }
 
 export interface WhisperModelInfo {
@@ -360,8 +385,26 @@ export async function listWhisperModels(): Promise<WhisperModelInfo[]> {
   return invoke<WhisperModelInfo[]>("list_whisper_models");
 }
 
+export async function listLocalSttModels(): Promise<LocalSttModelInfo[]> {
+  return invoke<LocalSttModelInfo[]>("list_local_stt_models");
+}
+
 export async function downloadWhisperModel(model: WhisperModelKind): Promise<string> {
   return invoke<string>("download_whisper_model", { model });
+}
+
+export async function downloadLocalSttModel(model: LocalSttModelKind): Promise<string> {
+  return invoke<string>("download_local_stt_model", { model });
+}
+
+export function isWhisperSttModel(model: LocalSttModelKind): model is WhisperModelKind {
+  return (
+    model === "base" ||
+    model === "small" ||
+    model === "medium" ||
+    model === "large_v3_turbo" ||
+    model === "large_v3"
+  );
 }
 
 export async function getWhisperModelsDir(): Promise<string> {

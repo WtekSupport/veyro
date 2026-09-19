@@ -19,7 +19,9 @@ Detailed Russian guide: [BUILD.md](BUILD.md).
 | Frontend only | `npm run build` |
 | CI-like Rust check | `cd src-tauri && cargo test --no-default-features --lib && cargo clippy --no-default-features --lib -- -D warnings` |
 
-Default Windows builds enable **local Whisper + local LLM** and pick the best GPU backend when SDKs are present.
+Default Windows builds enable **local Whisper + sherpa-onnx STT (Parakeet / Qwen3-ASR) + local LLM** and pick the best GPU backend when SDKs are present.
+
+Sherpa models download on demand into `{models}/sherpa/…` (tar.bz2 from [k2-fsa/sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)). Runtime EPs: **CoreML** (Apple Silicon), **DirectML** (Windows, feature `local-sherpa-directml`), **CUDA** (`local-sherpa-cuda`), else CPU.
 
 ## Cloud-only / minimal build (matches GitHub CI)
 
@@ -42,6 +44,7 @@ Release artifacts default to `C:\veyro-target` (override with `VEYRO_CARGO_TARGE
 | `VEYRO_DISABLE_GPU=1` | CPU-only Whisper/LLM |
 | `VEYRO_DISABLE_LOCAL_LLM=1` | No on-device LLM |
 | `VEYRO_DISABLE_LOCAL_WHISPER=1` | OpenAI STT only |
+| `VEYRO_DISABLE_SHERPA_STT=1` | Omit sherpa-onnx (Parakeet / Qwen3); Whisper-only local STT |
 | `VEYRO_CARGO_TARGET_DIR` | Custom Cargo target directory |
 
 Full table: [BUILD.md](BUILD.md#отключение-функционала-opt-out).

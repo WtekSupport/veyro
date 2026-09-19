@@ -1,5 +1,6 @@
 import { updateSettings, type UiMode } from "../api";
 import { t } from "../i18n";
+import { setError } from "../state";
 import { showConfirmDialog } from "./confirm-dialog";
 
 function escapeHtml(value: string): string {
@@ -51,8 +52,11 @@ export function bindUiModeSwitch(root: ParentNode, currentMode: UiMode): void {
         return;
       }
 
-      void switchUiMode(nextMode, currentMode).catch(() => {
-        // Settings update failed — keep current UI.
+      void switchUiMode(nextMode, currentMode).catch((error) => {
+        setError({
+          code: "ui_mode",
+          message: error instanceof Error ? error.message : String(error),
+        });
       });
     });
   });

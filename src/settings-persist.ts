@@ -7,7 +7,7 @@ import {
   getDictionaryPath,
   getWhisperModelsDir,
   listLlmModels,
-  listWhisperModels,
+  listLocalSttModels,
   setApiKey,
   updateSettings,
   type AppSettings,
@@ -44,7 +44,7 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
       values.microphone_device.length > 0 ? values.microphone_device : null,
     language: values.language === "auto" ? null : values.language,
     transcription_provider: transcriptionProvider,
-    local_whisper_model: values.local_whisper_model,
+    local_stt_model: values.local_stt_model,
     local_whisper_use_gpu: values.local_whisper_use_gpu,
     local_whisper_beam_size: values.local_whisper_beam_size,
     text_rewrite_provider: values.text_rewrite_provider,
@@ -93,7 +93,7 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.microphone_device !== current.microphone_device ||
     patch.language !== current.language ||
     patch.transcription_provider !== current.transcription_provider ||
-    patch.local_whisper_model !== current.local_whisper_model ||
+    patch.local_stt_model !== current.local_stt_model ||
     patch.local_whisper_use_gpu !== current.local_whisper_use_gpu ||
     patch.local_whisper_beam_size !== current.local_whisper_beam_size ||
     patch.text_rewrite_provider !== current.text_rewrite_provider ||
@@ -189,7 +189,7 @@ export async function flushPersistSettings(options?: {
       diagnostics: await getDiagnostics(),
       whisperModelsDir: await getWhisperModelsDir(),
       dictionaryPath: await getDictionaryPath(),
-      whisperModels: await listWhisperModels(),
+      whisperModels: await listLocalSttModels(),
       whisperModel: await getWhisperModelStatus(),
       llmModelsDir: await getLlmModelsDir(),
       llmModels: await listLlmModels(),

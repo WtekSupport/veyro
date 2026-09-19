@@ -103,9 +103,12 @@ mod tests {
     fn capture_and_restore_roundtrip() {
         let original = Clipboard::new().ok().and_then(|mut c| c.get_text().ok());
         let text = "voice-input-clipboard-test";
-        ClipboardGuard::set_text(text).unwrap();
         let guard = ClipboardGuard::capture().unwrap();
-        assert_eq!(guard.previous.as_deref(), Some(text));
+        ClipboardGuard::set_text(text).unwrap();
+        assert_eq!(
+            Clipboard::new().unwrap().get_text().unwrap(),
+            text
+        );
         guard.restore();
         if let Some(original) = original {
             let restored = Clipboard::new().unwrap().get_text().unwrap();

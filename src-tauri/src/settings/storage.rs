@@ -241,8 +241,13 @@ fn migrate_legacy_fields(value: &mut Value) {
         }
     }
 
-    if value.get("local_whisper_model").is_none() {
-        value["local_whisper_model"] = Value::String("base".to_string());
+    if value.get("local_stt_model").is_none() && value.get("local_whisper_model").is_none() {
+        value["local_stt_model"] = Value::String("base".to_string());
+    }
+    if value.get("local_stt_model").is_none() {
+        if let Some(legacy) = value.get("local_whisper_model").cloned() {
+            value["local_stt_model"] = legacy;
+        }
     }
 
     if value.get("text_rewrite_provider").is_none() {

@@ -54,3 +54,7 @@ jobs:
             patchelf
       - run: cargo test --no-default-features --lib
       - run: cargo clippy --no-default-features --lib -- -D warnings
+      - name: Install cmake (sherpa-onnx)
+        run: sudo apt-get install -y cmake
+      - run: cargo test --no-default-features --features local-sherpa-stt --lib
+      - run: cargo clippy --no-default-features --features local-sherpa-stt --lib -- -D warnings

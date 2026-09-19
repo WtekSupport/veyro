@@ -1,13 +1,16 @@
 [package]
 name = "veyro"
-version = "1.7.87"
+version = "1.8.7"
 description = "Veyro — desktop voice dictation by MKdee Tech"
 authors = ["MKdee Tech"]
 edition = "2021"
 
 [features]
-default = ["local-whisper", "local-llm"]
+default = ["local-whisper", "local-llm", "local-sherpa-stt"]
 local-whisper = ["dep:whisper-rs"]
+local-sherpa-stt = ["dep:sherpa-onnx"]
+local-sherpa-cuda = ["local-sherpa-stt"]
+local-sherpa-directml = ["local-sherpa-stt"]
 local-whisper-vulkan = ["local-whisper", "whisper-rs/vulkan"]
 local-whisper-cuda = ["local-whisper", "whisper-rs/cuda"]
 local-whisper-metal = ["local-whisper", "whisper-rs/metal"]
@@ -60,6 +63,10 @@ aes-gcm = "0.10"
 getrandom = "0.2"
 base64 = "0.22"
 whisper-rs = { version = "0.14", optional = true }
+# Shared prebuilt libs on Windows avoid MT (sherpa) vs MD (whisper-rs/MSVC) link errors.
+sherpa-onnx = { version = "1.13.8", optional = true, default-features = false, features = ["shared"] }
+tar = "0.4"
+bzip2 = "0.5"
 llama-cpp-2 = { version = "0.1", optional = true, default-features = false, features = ["openmp"] }
 encoding_rs = "0.8"
 flacenc = "0.4"

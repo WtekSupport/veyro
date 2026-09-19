@@ -32,13 +32,20 @@ function Set-UpdaterSigningEnv {
         return $false
     }
 
-    # Wrong pattern from old docs: path stored in TAURI_SIGNING_PRIVATE_KEY breaks non-interactive sign.
+    # Wrong pattern from old docs: a filesystem path in TAURI_SIGNING_PRIVATE_KEY breaks non-interactive sign.
     Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
     $userKey = [Environment]::GetEnvironmentVariable("TAURI_SIGNING_PRIVATE_KEY", "User")
     if ($userKey -and $userKey -match '\.key$') {
-        Write-Warning "Remove User env var TAURI_SIGNING_PRIVATE_KEY (file path). Scripts use TAURI_SIGNING_PRIVATE_KEY_PATH + .tauri\veyro-updater.password."
+        Write-Warning "Remove User env var TAURI_SIGNING_PRIVATE_KEY (file path). Scripts use key file contents + TAURI_SIGNING_PRIVATE_KEY_PATH."
     }
 
+    $keyContents = (Get-Content -LiteralPath $paths.KeyPath -Raw -ErrorAction Stop).TrimEnd("`r", "`n")
+    if ([string]::IsNullOrWhiteSpace($keyContents)) {
+        Write-Warning "Updater signing key file is empty: $($paths.KeyPath)"
+        return $false
+    }
+
+    $env:TAURI_SIGNING_PRIVATE_KEY = $keyContents
     $env:TAURI_SIGNING_PRIVATE_KEY_PATH = $paths.KeyPath
     $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = Get-UpdaterSigningPassword -PasswordPath $paths.PasswordPath
     return $true
