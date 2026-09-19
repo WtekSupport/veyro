@@ -1,4 +1,4 @@
-# Writes src-tauri/tauri.windows.conf.json from staged llama/ggml DLLs in binaries/.
+# Writes src-tauri/tauri.windows.conf.json from staged native DLLs in binaries/.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -10,12 +10,16 @@ $ErrorActionPreference = "Stop"
 $triple = "x86_64-pc-windows-msvc"
 $binariesDir = Join-Path (Join-Path $RepoRoot "src-tauri") "binaries"
 $destMap = [ordered]@{
-    "llama-$triple.dll"        = "llama.dll"
-    "llama-common-$triple.dll" = "llama-common.dll"
-    "ggml-$triple.dll"         = "ggml.dll"
-    "ggml-base-$triple.dll"    = "ggml-base.dll"
-    "ggml-cpu-$triple.dll"     = "ggml-cpu.dll"
-    "ggml-vulkan-$triple.dll"  = "ggml-vulkan.dll"
+    "llama-$triple.dll"                   = "llama.dll"
+    "llama-common-$triple.dll"            = "llama-common.dll"
+    "ggml-$triple.dll"                    = "ggml.dll"
+    "ggml-base-$triple.dll"               = "ggml-base.dll"
+    "ggml-cpu-$triple.dll"                = "ggml-cpu.dll"
+    "ggml-vulkan-$triple.dll"             = "ggml-vulkan.dll"
+    "sherpa-onnx-c-api-$triple.dll"       = "sherpa-onnx-c-api.dll"
+    "sherpa-onnx-cxx-api-$triple.dll"     = "sherpa-onnx-cxx-api.dll"
+    "onnxruntime-$triple.dll"             = "onnxruntime.dll"
+    "onnxruntime_providers_shared-$triple.dll" = "onnxruntime_providers_shared.dll"
 }
 
 $resources = [ordered]@{
@@ -30,7 +34,7 @@ foreach ($entry in $destMap.GetEnumerator()) {
 }
 
 if ($resources.Count -le 1) {
-    Write-Error "No llama/ggml DLLs staged in $binariesDir. Run stage-llm-dlls.ps1 first."
+    Write-Error "No native DLLs staged in $binariesDir. Run stage-llm-dlls.ps1 and/or stage-sherpa-dlls.ps1 first."
 }
 
 $config = [ordered]@{

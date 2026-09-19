@@ -12,6 +12,10 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.8] — 2026-09-19
+
+- **Windows installer fix:** Bundle sherpa-onnx and ONNX Runtime DLLs next to the app so fresh installs of 1.8.x no longer fail with missing `sherpa-onnx-c-api.dll` (portable zip includes the same runtime libraries).
+
 ## [1.8.7] — 2026-09-19
 
 - **Local STT (sherpa-onnx):** Parakeet TDT 0.6B v3 and Qwen3-ASR 0.6B / 1.7B alongside Whisper; on-demand model download, unified `local_stt_model` setting (legacy `local_whisper_model` alias), provider factory and live preview for sherpa engines on Windows (DirectML/CUDA when enabled), macOS (CoreML), and CPU fallback.
