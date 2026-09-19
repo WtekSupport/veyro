@@ -1,7 +1,7 @@
 # Merge release PR when checks pass; sync local main; retag v* on release head if needed.
 param(
-    [int]$PullNumber = 14,
-    [string]$HeadBranch = "release/1.8.7"
+    [int]$PullNumber = 0,
+    [string]$HeadBranch = "release/1.8.8"
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,10 +59,12 @@ $script:GhHeaders = @{
 git fetch origin
 
 $pull = $null
-try {
-    $pull = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/pulls/$PullNumber"
-} catch {
-    $pull = $null
+if ($PullNumber -gt 0) {
+    try {
+        $pull = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/pulls/$PullNumber"
+    } catch {
+        $pull = $null
+    }
 }
 
 if (-not $pull -or $pull.state -ne "open") {
@@ -71,6 +73,20 @@ if (-not $pull -or $pull.state -ne "open") {
         $pull = $open[0]
         $PullNumber = $pull.number
     }
+}
+
+if (-not $pull -or $pull.state -ne "open") {
+    $version = Get-Content (Join-Path $repoRoot "version.json") -Raw | ConvertFrom-Json
+    $semver = "$($version.major).$($version.minor).$($version.build)"
+    Write-Host "Creating PR $HeadBranch -> main ..."
+    $pull = Invoke-GhApi -Method POST -Uri "https://api.github.com/repos/$repo/pulls" -Body @{
+        title = "Release $semver"
+        head  = $HeadBranch
+        base  = "main"
+        body  = "Release $semver. See CHANGELOG.md and GitHub release v$semver."
+    }
+    $PullNumber = $pull.number
+    Write-Host "Created PR #$PullNumber $($pull.html_url)"
 }
 
 if ($pull -and $pull.state -eq "open") {

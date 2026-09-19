@@ -1,4 +1,4 @@
-# Stage llama.cpp runtime DLLs for Tauri externalBin bundling (Windows).
+# Stage sherpa-onnx runtime DLLs for Tauri bundle resources (Windows, shared feature).
 
 param(
     [Parameter(Mandatory = $true)]
@@ -10,8 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "ensure-cargo-target.ps1")
-$targetRoot = $env:CARGO_TARGET_DIR
-$releaseDir = Join-Path $targetRoot "release"
+$releaseDir = Join-Path $env:CARGO_TARGET_DIR "release"
 $binariesDir = Join-Path (Join-Path $RepoRoot "src-tauri") "binaries"
 $triple = "x86_64-pc-windows-msvc"
 
@@ -25,11 +24,26 @@ if (-not (Test-Path $releaseDir)) {
 New-Item -ItemType Directory -Force -Path $binariesDir | Out-Null
 
 Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '^(llama|ggml)-' } |
+    Where-Object { $_.Name -match '^(sherpa-onnx|onnxruntime)' } |
     Remove-Item -Force
 
+$patterns = @(
+    "^sherpa-onnx-",
+    "^onnxruntime"
+)
+
 $copied = 0
-foreach ($dll in Get-ChildItem $releaseDir -Filter "*.dll" | Where-Object { $_.Name -match '^(llama|ggml)' }) {
+foreach ($dll in Get-ChildItem $releaseDir -Filter "*.dll") {
+    $match = $false
+    foreach ($pattern in $patterns) {
+        if ($dll.Name -match $pattern) {
+            $match = $true
+            break
+        }
+    }
+    if (-not $match) {
+        continue
+    }
     $dest = Join-Path $binariesDir "$($dll.BaseName)-$triple.dll"
     Copy-Item $dll.FullName $dest -Force
     Write-Host "Staged $($dll.Name) -> $(Split-Path $dest -Leaf)"
@@ -37,5 +51,5 @@ foreach ($dll in Get-ChildItem $releaseDir -Filter "*.dll" | Where-Object { $_.N
 }
 
 if ($Required -and $copied -eq 0) {
-    Write-Error "No llama/ggml DLLs found in $releaseDir"
+    Write-Error "No sherpa/onnxruntime DLLs found in $releaseDir (build with local-sherpa-stt first)."
 }
