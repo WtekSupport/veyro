@@ -1,6 +1,7 @@
 pub mod config;
 pub mod encryption;
 pub mod homemaker;
+pub mod local_stt;
 pub mod secrets;
 pub mod storage;
 
@@ -9,6 +10,10 @@ pub use config::{
     whisper_gpu_backend_label, whisper_gpu_compiled, whisper_local_compiled, AppSettings,
     HomemakerDataStorage, InjectionMode, LlmModelKind, SettingsPatch, TextProcessingMode,
     TextRewriteProvider, UiLocale, UiMode, VadThresholdMode, WhisperModelKind,
+};
+pub use local_stt::{
+    sherpa_accelerator_available, sherpa_gpu_compiled, sherpa_stt_compiled, LocalSttEngine,
+    LocalSttModelKind,
 };
 pub use homemaker::{apply_homemaker_patch_side_effects, normalize_homemaker_settings};
 pub use secrets::{clear_api_key, has_api_key, load_api_key, save_api_key};

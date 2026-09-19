@@ -2,8 +2,8 @@ use serde::Serialize;
 
 use crate::llm::model_store as llm_model_store;
 use crate::settings::{
-    local_llm_gpu_compiled, whisper_gpu_compiled, AppSettings, LlmModelKind, TextRewriteProvider,
-    UiLocale, WhisperModelKind,
+    local_llm_gpu_compiled, whisper_gpu_compiled, AppSettings, LlmModelKind, LocalSttModelKind,
+    TextRewriteProvider, UiLocale, WhisperModelKind,
 };
 use crate::transcription::model_store as whisper_model_store;
 
@@ -11,7 +11,7 @@ use super::system_memory::total_physical_memory_mb;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct HomemakerLocalSetup {
-    pub local_whisper_model: WhisperModelKind,
+    pub local_stt_model: LocalSttModelKind,
     pub local_llm_model: LlmModelKind,
     pub local_whisper_use_gpu: bool,
     pub local_llm_use_gpu: bool,
@@ -26,20 +26,20 @@ const LLM_RUNTIME_OVERHEAD_MB: u64 = 2_000;
 
 pub fn recommend_homemaker_local_setup(settings: &AppSettings) -> HomemakerLocalSetup {
     let total_mb = total_physical_memory_mb();
-    let (local_whisper_model, local_llm_model) =
+    let (local_stt_model, local_llm_model) =
         recommend_local_models_for_memory(total_mb, settings.ui_locale);
 
     let local_whisper_use_gpu = whisper_gpu_compiled();
     let local_llm_use_gpu = local_llm_gpu_compiled();
 
     HomemakerLocalSetup {
-        local_whisper_model,
+        local_stt_model,
         local_llm_model,
         local_whisper_use_gpu,
         local_llm_use_gpu,
         whisper_download_needed: false,
         llm_download_needed: false,
-        whisper_size_mb: local_whisper_model.approx_size_mb(),
+        whisper_size_mb: local_stt_model.approx_size_mb(),
         llm_size_mb: local_llm_model.approx_size_mb(),
     }
 }
@@ -48,7 +48,7 @@ pub fn recommend_homemaker_local_setup(settings: &AppSettings) -> HomemakerLocal
 pub(crate) fn recommend_local_models_for_memory(
     total_mb: u64,
     locale: UiLocale,
-) -> (WhisperModelKind, LlmModelKind) {
+) -> (LocalSttModelKind, LlmModelKind) {
     let whisper_ladder = [
         WhisperModelKind::LargeV3Turbo,
         WhisperModelKind::Medium,
@@ -64,19 +64,20 @@ pub(crate) fn recommend_local_models_for_memory(
     llm_candidates.push(LlmModelKind::Gec08B);
 
     for whisper in whisper_ladder {
+        let stt = LocalSttModelKind::from_whisper(whisper);
         for llm in &llm_candidates {
-            if local_stack_fits(total_mb, whisper, *llm) {
-                return (whisper, *llm);
+            if local_stack_fits(total_mb, stt, *llm) {
+                return (stt, *llm);
             }
         }
     }
 
-    (WhisperModelKind::Base, LlmModelKind::Gec08B)
+    (LocalSttModelKind::WhisperBase, LlmModelKind::Gec08B)
 }
 
-fn local_stack_fits(total_mb: u64, whisper: WhisperModelKind, llm: LlmModelKind) -> bool {
-    let whisper_runtime = (whisper.approx_size_mb() as u64 * 3) / 2;
-    let need = OS_RESERVE_MB + whisper_runtime + llm.approx_size_mb() as u64 + LLM_RUNTIME_OVERHEAD_MB;
+fn local_stack_fits(total_mb: u64, stt: LocalSttModelKind, llm: LlmModelKind) -> bool {
+    let stt_runtime = (stt.approx_size_mb() as u64 * 3) / 2;
+    let need = OS_RESERVE_MB + stt_runtime + llm.approx_size_mb() as u64 + LLM_RUNTIME_OVERHEAD_MB;
     total_mb >= need
 }
 
@@ -84,7 +85,7 @@ pub fn get_homemaker_local_setup(settings: &AppSettings) -> HomemakerLocalSetup 
     let recommendation = recommend_homemaker_local_setup(settings);
     let whisper_path = whisper_model_store::model_path_for(
         settings,
-        recommendation.local_whisper_model,
+        recommendation.local_stt_model.whisper_kind().unwrap_or(WhisperModelKind::Base),
     )
     .ok();
     let llm_path = llm_model_store::model_path_for(settings, recommendation.local_llm_model).ok();
@@ -104,8 +105,8 @@ pub fn apply_homemaker_local_recommendations(settings: &mut AppSettings) -> bool
     let recommendation = recommend_homemaker_local_setup(settings);
     let mut changed = false;
 
-    if settings.local_whisper_model != recommendation.local_whisper_model {
-        settings.local_whisper_model = recommendation.local_whisper_model;
+    if settings.local_stt_model != recommendation.local_stt_model {
+        settings.local_stt_model = recommendation.local_stt_model;
         changed = true;
     }
     if settings.local_llm_model != recommendation.local_llm_model {
@@ -147,14 +148,14 @@ mod tests {
     #[test]
     fn high_memory_ru_prefers_turbo_and_t_lite() {
         let (whisper, llm) = recommend_local_models_for_memory(32 * 1024, UiLocale::Ru);
-        assert_eq!(whisper, WhisperModelKind::LargeV3Turbo);
+        assert_eq!(whisper, LocalSttModelKind::WhisperLargeV3Turbo);
         assert_eq!(llm, LlmModelKind::TLiteIt21);
     }
 
     #[test]
     fn high_memory_en_prefers_turbo_and_qwen() {
         let (whisper, llm) = recommend_local_models_for_memory(32 * 1024, UiLocale::En);
-        assert_eq!(whisper, WhisperModelKind::LargeV3Turbo);
+        assert_eq!(whisper, LocalSttModelKind::WhisperLargeV3Turbo);
         assert_eq!(llm, LlmModelKind::Qwen3_4B);
     }
 
@@ -163,7 +164,9 @@ mod tests {
         let (whisper, llm) = recommend_local_models_for_memory(6 * 1024, UiLocale::Ru);
         assert!(matches!(
             whisper,
-            WhisperModelKind::Small | WhisperModelKind::Base | WhisperModelKind::Medium
+            LocalSttModelKind::WhisperSmall
+                | LocalSttModelKind::WhisperBase
+                | LocalSttModelKind::WhisperMedium
         ));
         assert!(matches!(llm, LlmModelKind::Gec08B | LlmModelKind::Qwen3_4B));
     }

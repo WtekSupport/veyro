@@ -1,10 +1,15 @@
 pub mod factory;
 #[cfg(feature = "local-whisper")]
 pub mod local;
+#[cfg(feature = "local-sherpa-stt")]
+pub mod local_sherpa;
+pub mod local_stt_model_store;
 pub mod live_dictation;
 pub mod streaming;
 pub mod languages;
 pub mod model_store;
+#[cfg(feature = "local-sherpa-stt")]
+pub mod sherpa;
 pub mod models;
 pub mod openai;
 pub mod prompt;

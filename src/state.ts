@@ -1,3 +1,6 @@
+import { syncSettingsTabUi } from "./components/settings";
+import { patchLiveStatusUi } from "./components/status";
+
 import type {
   ActivityLogEntry,
   AiSkillInfo,
@@ -11,7 +14,7 @@ import type {
   LlmModelStatus,
   TranscriptionLanguageInfo,
   WhisperModelDownloadProgress,
-  WhisperModelInfo,
+  LocalSttModelInfo,
   WhisperModelStatus,
 } from "./api";
 
@@ -26,7 +29,7 @@ export interface UiState {
   lastError: ErrorPayload | null;
   activityLog: ActivityLogEntry[];
   whisperModel: WhisperModelStatus | null;
-  whisperModels: WhisperModelInfo[];
+  whisperModels: LocalSttModelInfo[];
   whisperModelsDir: string;
   dictionaryPath: string;
   aiSkills: AiSkillInfo[];
@@ -104,7 +107,8 @@ export function patchState(
 }
 
 export function setStatus(status: StatusSnapshot): void {
-  patchState({ status });
+  patchState({ status }, { render: false });
+  patchLiveStatusUi(status, state.partialTranscript);
 }
 
 export function setSettings(settings: AppSettings): void {
@@ -116,5 +120,9 @@ export function setError(lastError: ErrorPayload | null): void {
 }
 
 export function setActiveTab(activeTab: SettingsTab): void {
-  patchState({ activeTab });
+  if (state.activeTab === activeTab) {
+    return;
+  }
+  patchState({ activeTab }, { render: false });
+  syncSettingsTabUi(activeTab);
 }

@@ -873,6 +873,16 @@ body {
   gap: var(--space-md);
 }
 
+select.stt-model-select {
+  line-height: 1.35;
+}
+
+select.stt-model-select option {
+  white-space: pre-line;
+  line-height: 1.35;
+  padding: 6px 8px;
+}
+
 .tab-panel--advanced {
   gap: var(--section-gap);
 }

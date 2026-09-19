@@ -311,8 +311,11 @@ pub struct AppSettings {
     pub transcription_provider: String,
     pub transcription_model: String,
     pub local_whisper_models_dir: Option<String>,
-    pub local_whisper_model: WhisperModelKind,
+    #[serde(default, alias = "local_whisper_model")]
+    pub local_stt_model: crate::settings::LocalSttModelKind,
     pub local_whisper_use_gpu: bool,
+    #[serde(default = "default_local_sherpa_num_threads")]
+    pub local_sherpa_num_threads: u32,
     #[serde(default)]
     pub local_whisper_gpu_autodetected: bool,
     pub local_whisper_beam_size: u8,
@@ -384,6 +387,13 @@ fn default_hotkey_game_mode() -> bool {
     cfg!(windows)
 }
 
+fn default_local_sherpa_num_threads() -> u32 {
+    std::thread::available_parallelism()
+        .map(|count| count.get() as u32)
+        .unwrap_or(4)
+        .clamp(1, 8)
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -401,8 +411,9 @@ impl Default for AppSettings {
             transcription_provider: "local".to_string(),
             transcription_model: "whisper-1".to_string(),
             local_whisper_models_dir: None,
-            local_whisper_model: WhisperModelKind::Base,
+            local_stt_model: crate::settings::LocalSttModelKind::WhisperBase,
             local_whisper_use_gpu: whisper_gpu_compiled(),
+            local_sherpa_num_threads: default_local_sherpa_num_threads(),
             local_whisper_gpu_autodetected: false,
             local_whisper_beam_size: 1,
             text_rewrite_provider: TextRewriteProvider::Openai,
@@ -659,9 +670,11 @@ pub struct SettingsPatch {
     pub transcription_provider: Option<String>,
     pub transcription_model: Option<String>,
     pub local_whisper_models_dir: Option<Option<String>>,
-    pub local_whisper_model: Option<WhisperModelKind>,
+    #[serde(default, alias = "local_whisper_model")]
+    pub local_stt_model: Option<crate::settings::LocalSttModelKind>,
     pub local_whisper_use_gpu: Option<bool>,
     pub local_whisper_beam_size: Option<u8>,
+    pub local_sherpa_num_threads: Option<u32>,
     pub text_rewrite_provider: Option<TextRewriteProvider>,
     pub local_llm_model: Option<LlmModelKind>,
     pub local_llm_models_dir: Option<Option<String>>,
@@ -734,14 +747,17 @@ impl SettingsPatch {
         if let Some(local_whisper_models_dir) = self.local_whisper_models_dir {
             settings.local_whisper_models_dir = local_whisper_models_dir;
         }
-        if let Some(local_whisper_model) = self.local_whisper_model {
-            settings.local_whisper_model = local_whisper_model;
+        if let Some(local_stt_model) = self.local_stt_model {
+            settings.local_stt_model = local_stt_model;
         }
         if let Some(local_whisper_use_gpu) = self.local_whisper_use_gpu {
             settings.local_whisper_use_gpu = local_whisper_use_gpu;
         }
         if let Some(local_whisper_beam_size) = self.local_whisper_beam_size {
             settings.local_whisper_beam_size = local_whisper_beam_size;
+        }
+        if let Some(local_sherpa_num_threads) = self.local_sherpa_num_threads {
+            settings.local_sherpa_num_threads = local_sherpa_num_threads.clamp(1, 16);
         }
         if let Some(text_rewrite_provider) = self.text_rewrite_provider {
             settings.text_rewrite_provider = text_rewrite_provider;
