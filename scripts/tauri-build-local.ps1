@@ -32,7 +32,7 @@ if (Test-Path (Join-Path $cmakeBin "cmake.exe")) {
 
 . (Join-Path $PSScriptRoot "resolve-local-features.ps1")
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
-$parallel = Set-LlamaCppBuildParallelism
+$parallel = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
 
 $featureArgs = @()
 if ($features) {
@@ -147,7 +147,9 @@ function Publish-ReleaseArtifacts {
                     }
                 }
                 $latestJson = Join-Path $versionOut "latest.json"
-                ($manifest | ConvertTo-Json -Depth 6) | Set-Content -Path $latestJson -Encoding UTF8
+                $jsonText = ($manifest | ConvertTo-Json -Depth 6)
+                $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+                [System.IO.File]::WriteAllText($latestJson, $jsonText, $utf8NoBom)
                 Write-Host "Release manifest: $latestJson"
             } else {
                 Write-Warning "No .sig file for updater (set TAURI_SIGNING_PRIVATE_KEY before build)."

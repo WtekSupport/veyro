@@ -37,7 +37,7 @@ pub struct WhisperModelInfo {
 }
 
 impl DownloadProgress {
-    fn new(downloaded: u64, total: Option<u64>) -> Self {
+    pub(crate) fn new(downloaded: u64, total: Option<u64>) -> Self {
         let percent = total.filter(|value| *value > 0).map(|value| {
             ((downloaded as f64 / value as f64) * 100.0).min(100.0) as f32
         });
@@ -77,7 +77,11 @@ pub fn model_path_for(settings: &AppSettings, kind: WhisperModelKind) -> Result<
 }
 
 pub fn resolve_model_path(settings: &AppSettings) -> Result<PathBuf, ConfigError> {
-    model_path_for(settings, settings.local_whisper_model)
+    let whisper = settings
+        .local_stt_model
+        .whisper_kind()
+        .ok_or_else(|| ConfigError::Read("selected model is not a Whisper model".to_string()))?;
+    model_path_for(settings, whisper)
 }
 
 pub fn model_exists(path: &Path) -> bool {
@@ -85,7 +89,10 @@ pub fn model_exists(path: &Path) -> bool {
 }
 
 pub fn list_models(settings: &AppSettings) -> Result<Vec<WhisperModelInfo>, ConfigError> {
-    let selected = settings.local_whisper_model;
+    let selected = settings
+        .local_stt_model
+        .whisper_kind()
+        .unwrap_or(WhisperModelKind::Base);
     WhisperModelKind::all()
         .into_iter()
         .map(|kind| {

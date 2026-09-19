@@ -112,6 +112,12 @@ export async function runStartupUpdateCheck(
     return;
   }
 
+  if (result.status === "error") {
+    console.warn("update check failed:", result.message);
+    renderBanner(host, { phase: "error", message: result.message });
+    return;
+  }
+
   pendingUpdate = null;
   host.hidden = true;
   host.innerHTML = "";

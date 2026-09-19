@@ -45,7 +45,9 @@ if (Test-Path $sigSource) {
         }
     }
     $latestJson = Join-Path $versionOut "latest.json"
-    ($manifest | ConvertTo-Json -Depth 6) | Set-Content -Path $latestJson -Encoding UTF8
+    $jsonText = ($manifest | ConvertTo-Json -Depth 6)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($latestJson, $jsonText, $utf8NoBom)
     Write-Host "Release manifest: $latestJson"
 } else {
     Write-Warning "No .sig file; run tauri build with updater signing env configured."

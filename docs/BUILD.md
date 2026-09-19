@@ -137,8 +137,13 @@ Portable Vulkan SDK: положите `vulkan_sdk.exe` в `.tools/` — расп
 | `local-llm` | Локальный LLM (CPU) |
 | `local-llm-vulkan` | LLM + Vulkan GPU |
 | `local-llm-cuda` | LLM + CUDA GPU |
+| `local-sherpa-stt` | Parakeet / Qwen3-ASR (sherpa-onnx, CPU) |
+| `local-sherpa-directml` | sherpa + DirectML (Windows) |
+| `local-sherpa-cuda` | sherpa + CUDA |
 
-Default в `Cargo.toml`: `local-whisper` + `local-llm`. GPU-варианты добавляет скрипт сборки.
+Default в `Cargo.toml`: `local-whisper` + `local-llm` + `local-sherpa-stt`. GPU-варианты добавляет скрипт сборки.
+
+Модели sherpa скачиваются по запросу (`.tar.bz2` из [релизов k2-fsa](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)) в `{models}/sherpa/…`. EP: CoreML (Apple Silicon), DirectML/CUDA при соответствующих features, иначе CPU.
 
 ---
 
@@ -151,6 +156,7 @@ Default в `Cargo.toml`: `local-whisper` + `local-llm`. GPU-варианты д�
 | `VEYRO_DISABLE_GPU=1` | Whisper и LLM на CPU (без Vulkan/CUDA) |
 | `VEYRO_DISABLE_LOCAL_LLM=1` | Без локального LLM (нет «Оптимизация (ИИ)» offline) |
 | `VEYRO_DISABLE_LOCAL_WHISPER=1` | Без локального Whisper (только OpenAI STT) |
+| `VEYRO_DISABLE_SHERPA_STT=1` | Без sherpa-onnx (Parakeet / Qwen3); только Whisper локально |
 | `VEYRO_ALLOW_CUDA=1` | Разрешить авто-выбор CUDA вместо Vulkan (NVIDIA) |
 | `VEYRO_CMAKE_PARALLEL` | Параллелизм cmake для llama.cpp (по умолчанию `1`) |
 | `VEYRO_CARGO_TARGET_DIR` | Переопределить каталог сборки (по умолчанию `C:\veyro-target`) |
@@ -251,6 +257,7 @@ npx tauri icon src-tauri/icons/icon.png
 | `VEYRO_DISABLE_GPU` | CPU вместо GPU |
 | `VEYRO_DISABLE_LOCAL_LLM` | Без локального LLM |
 | `VEYRO_DISABLE_LOCAL_WHISPER` | Без локального Whisper |
+| `VEYRO_DISABLE_SHERPA_STT` | Без sherpa-onnx (Parakeet / Qwen3) |
 | `VEYRO_ALLOW_CUDA=1` | Auto-CUDA (NVIDIA) |
 | `VULKAN_SDK` | Путь к Vulkan SDK |
 | `CUDA_PATH` | Путь к CUDA Toolkit |

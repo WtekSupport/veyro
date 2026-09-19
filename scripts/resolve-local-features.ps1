@@ -51,6 +51,13 @@ function Resolve-LocalFeatures {
         $parts += $llm
     }
 
+    if ($env:VEYRO_DISABLE_SHERPA_STT -ne "1") {
+        $parts += "local-sherpa-stt"
+        if ($IsWindows -and $env:VEYRO_DISABLE_GPU -ne "1") {
+            $parts += "local-sherpa-directml"
+        }
+    }
+
     if ($parts.Count -eq 0) {
         Write-Warning "All local features disabled - building cloud-only (OpenAI) stack."
         return ""
@@ -70,9 +77,19 @@ function Get-LlamaCppBuildParallelism {
 }
 
 function Set-LlamaCppBuildParallelism {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
+    )
+
+    . (Join-Path $PSScriptRoot "enable-serial-cmake-wrapper.ps1")
+    Enable-SerialCmakeWrapper -RepoRoot $RepoRoot
+
     $parallel = Get-LlamaCppBuildParallelism
     $env:CMAKE_BUILD_PARALLEL_LEVEL = $parallel
     $env:NUM_JOBS = $parallel
+    $env:MSBUILDDISABLENODREUSE = "1"
     Write-Host "CMake/Cargo parallel jobs: $parallel (override with VEYRO_CMAKE_PARALLEL)"
+    Write-Host "Serial MSBuild shim: $(Join-Path $RepoRoot '.tools\veyro-cmake-wrapper\cmake.bat')"
     return $parallel
 }

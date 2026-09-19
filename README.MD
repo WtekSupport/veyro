@@ -98,7 +98,7 @@ The **Status** tab shows an activity log and diagnostics (mic, API, models, queu
 ## Privacy
 
 - OpenAI API keys are stored in the **OS secure store** (Windows Credential Manager, macOS Keychain, Linux Secret Service), not in plain text.
-- With **local Whisper** and **local LLM**, speech and text stay on your computer.
+- With **local speech models** (Whisper, Parakeet TDT, Qwen3-ASR via sherpa-onnx) and **local LLM**, speech and text stay on your computer.
 - Settings live in your user profile (`AppData\Veyro` on Windows, equivalent paths on macOS and Linux).
 
 ---

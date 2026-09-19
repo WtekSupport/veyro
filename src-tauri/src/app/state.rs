@@ -122,6 +122,14 @@ pub struct DiagnosticsSnapshot {
     pub local_llm_gpu_compiled: bool,
     pub local_llm_ready: bool,
     pub whisper_loaded: bool,
+    #[serde(default)]
+    pub local_stt_loaded: bool,
+    #[serde(default)]
+    pub local_stt_engine: String,
+    #[serde(default)]
+    pub local_stt_model: String,
+    #[serde(default)]
+    pub sherpa_stt_compiled: bool,
     pub llm_loaded: bool,
     pub settings_webview_alive: bool,
     pub about_webview_alive: bool,

@@ -15,7 +15,7 @@ import {
   prewarmLocalModels,
   setApiKey,
   downloadLlmModel,
-  downloadWhisperModel,
+  downloadLocalSttModel,
   getLlmModelsDir,
   getLlmModelStatus,
   getDictionaryPath,
@@ -24,7 +24,7 @@ import {
   listAiSkills,
   listLlmModels,
   listTranscriptionLanguages,
-  listWhisperModels,
+  listLocalSttModels,
   openAiSkillsFolder,
   openTranscriptionDictionaryFolder,
   pickAndImportAiSkill,
@@ -41,7 +41,7 @@ import {
   type SettingsPatch,
   type LlmModelKind,
   type TextProcessingMode,
-  type WhisperModelKind,
+  type LocalSttModelKind,
   subscribe,
   type ActivityLogEntry,
   type StatusSnapshot,
@@ -85,6 +85,7 @@ import {
   runStartupUpdateCheck,
 } from "./components/update-banner";
 import {
+  patchLiveStatusUi,
   renderCompactDiagnostics,
   renderCompactStatusBar,
   renderErrorBanner,
@@ -226,7 +227,11 @@ function render(): void {
               ${renderTabBar(activeTab)}
               ${renderSettingsForm(formValues, devices, activeTab, activityLog, whisperModelDownload, whisperModels, aiSkills, diagnostics, llmModelDownload, llmModels, getState().transcriptionLanguages)}
             </section>`
-            : ""
+            : settings
+              ? `<section class="panel"><p class="hint">${escapeHtml(t("status.loading"))}</p></section>`
+              : !getState().loading
+                ? `<section class="panel"><p class="hint">${escapeHtml(lastError?.message ?? t("errors.bootstrap"))}</p></section>`
+                : ""
       }
     </main>
   `;
@@ -526,21 +531,21 @@ function bindHomemakerEvents(form: HTMLFormElement): void {
         return;
       }
 
-      const model = setup.local_whisper_model;
+      const model = setup.local_stt_model;
       patchState({
         whisperModelDownload: { downloaded: 0, total: null, percent: null },
         lastError: null,
       });
 
       const current = getState().settings;
-      if (current && current.local_whisper_model !== model) {
-        setSettings(await updateSettings({ local_whisper_model: model }));
+      if (current && current.local_stt_model !== model) {
+        setSettings(await updateSettings({ local_stt_model: model }));
       }
 
-      await downloadWhisperModel(model);
+      await downloadLocalSttModel(model);
       patchState({
         whisperModel: await getWhisperModelStatus(),
-        whisperModels: await listWhisperModels(),
+        whisperModels: await listLocalSttModels(),
         whisperModelDownload: null,
       });
       await refreshHomemakerLocalSetup();
@@ -594,32 +599,52 @@ function bindHomemakerEvents(form: HTMLFormElement): void {
   });
 }
 
-function bindTabKeyboardNav(): void {
-  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab"));
-  if (tabs.length === 0) {
+let expertTabListenersBound = false;
+
+function bindExpertTabListeners(): void {
+  const root = document.querySelector<HTMLDivElement>("#app");
+  if (!root || expertTabListenersBound) {
     return;
   }
+  expertTabListenersBound = true;
 
-  const activeIndex = Math.max(
-    0,
-    tabs.findIndex((tab) => tab.classList.contains("active")),
-  );
-  tabs.forEach((tab, index) => {
-    tab.tabIndex = index === activeIndex ? 0 : -1;
+  root.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const button = target.closest<HTMLButtonElement>(".tab[data-tab]");
+    if (!button || !root.contains(button)) {
+      return;
+    }
+    const tab = button.dataset.tab as SettingsTab | undefined;
+    if (!tab) {
+      return;
+    }
+    setActiveTab(tab);
+    if (tab === "advanced") {
+      void refreshDiagnostics();
+    }
   });
 
-  tabs.forEach((tab, index) => {
-    tab.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-        return;
-      }
-
-      event.preventDefault();
-      const direction = event.key === "ArrowRight" ? 1 : -1;
-      const nextIndex = (index + direction + tabs.length) % tabs.length;
-      tabs[nextIndex]?.click();
-      tabs[nextIndex]?.focus();
-    });
+  root.addEventListener("keydown", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.matches(".tab[data-tab]")) {
+      return;
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>(".tab[data-tab]"));
+    const index = tabs.indexOf(target);
+    if (index < 0) {
+      return;
+    }
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const next = tabs[(index + direction + tabs.length) % tabs.length];
+    next?.click();
+    next?.focus();
   });
 }
 
@@ -650,19 +675,6 @@ function bindEvents(): void {
     return;
   }
 
-  document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
-    button.addEventListener("click", () => {
-      const tab = button.dataset.tab as SettingsTab | undefined;
-      if (tab) {
-        setActiveTab(tab);
-        if (tab === "advanced") {
-          void refreshDiagnostics();
-        }
-      }
-    });
-  });
-  bindTabKeyboardNav();
-
   const form = document.querySelector<HTMLFormElement>("#settings-form");
   if (!form) {
     return;
@@ -682,8 +694,8 @@ function bindEvents(): void {
     }
 
     const model =
-      (form.querySelector<HTMLSelectElement>('select[name="local_whisper_model"]')?.value ??
-        "base") as WhisperModelKind;
+      (form.querySelector<HTMLSelectElement>('select[name="local_stt_model"]')?.value ??
+        "base") as LocalSttModelKind;
 
     patchState({
       whisperModelDownload: { downloaded: 0, total: null, percent: null },
@@ -692,16 +704,16 @@ function bindEvents(): void {
 
     const current = getState().settings;
     const persistModel =
-      current && current.local_whisper_model !== model
-        ? updateSettings({ local_whisper_model: model }).then(setSettings)
+      current && current.local_stt_model !== model
+        ? updateSettings({ local_stt_model: model }).then(setSettings)
         : Promise.resolve();
 
     void persistModel
-      .then(() => downloadWhisperModel(model))
+      .then(() => downloadLocalSttModel(model))
       .then(async () => {
         patchState({
           whisperModel: await getWhisperModelStatus(),
-          whisperModels: await listWhisperModels(),
+          whisperModels: await listLocalSttModels(),
           whisperModelDownload: null,
         });
       })
@@ -828,7 +840,7 @@ function bindEvents(): void {
         setSettings(nextSettings);
         patchState({
           whisperModelsDir: await getWhisperModelsDir(),
-          whisperModels: await listWhisperModels(),
+          whisperModels: await listLocalSttModels(),
           whisperModel: await getWhisperModelStatus(),
           lastError: null,
         });
@@ -1019,13 +1031,13 @@ function bindEvents(): void {
         }
         if (
           element instanceof HTMLSelectElement &&
-          element.name === "local_whisper_model"
+          element.name === "local_stt_model"
         ) {
           const current = getState().settings;
           if (current) {
             const baseline = current;
-            const model = element.value as WhisperModelKind;
-            setSettings({ ...current, local_whisper_model: model });
+            const model = element.value as LocalSttModelKind;
+            setSettings({ ...current, local_stt_model: model });
             void flushPersistSettings({ compareWith: baseline });
           }
           return;
@@ -1102,23 +1114,51 @@ async function refreshDiagnostics(): Promise<void> {
   patchState({ diagnostics: await getDiagnostics() });
 }
 
-async function bootstrap(): Promise<void> {
-  subscribeUi(() => render());
-  subscribeLocale(() => render());
-  startMicLevelMonitor();
-  startVadThresholdMonitor();
+const BUSY_INVOKE_RE = /busy|try again/i;
 
+async function invokeWithRetry<T>(
+  fn: () => Promise<T>,
+  attempts = 40,
+  delayMs = 250,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!BUSY_INVOKE_RE.test(message) || attempt === attempts - 1) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
+async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise<void> {
   try {
-    const [
-      status,
-      settings,
+    const apiKeyConfigured = await invokeWithRetry(() => hasApiKey());
+
+    const [devices, transcriptionLanguages, whisperModels, diagnostics] = await Promise.all([
+      invokeWithRetry(() => getDevices()),
+      invokeWithRetry(() => listTranscriptionLanguages()),
+      invokeWithRetry(() => listLocalSttModels()),
+      invokeWithRetry(() => getDiagnostics()),
+    ]);
+
+    patchState({
       devices,
-      diagnostics,
-      apiKeyConfigured,
-      activityLog,
-      whisperModel,
       transcriptionLanguages,
       whisperModels,
+      diagnostics,
+      hasApiKey: apiKeyConfigured,
+    });
+
+    const [
+      activityLog,
+      whisperModel,
       aiSkills,
       whisperModelsDir,
       dictionaryPath,
@@ -1127,40 +1167,30 @@ async function bootstrap(): Promise<void> {
       llmModelsDir,
       homemakerHotkeyPresets,
     ] = await Promise.all([
-      getStatus(),
-      getSettings(),
-      getDevices(),
-      getDiagnostics(),
-      hasApiKey(),
-      getActivityLog(),
-      getWhisperModelStatus(),
-      listTranscriptionLanguages(),
-      listWhisperModels(),
-      listAiSkills(),
-      getWhisperModelsDir(),
-      getDictionaryPath(),
-      getLlmModelStatus(),
-      listLlmModels(),
-      getLlmModelsDir(),
-      getHomemakerHotkeyPresets().catch(() => [...FALLBACK_HOMEMAKER_HOTKEY_PRESETS]),
+      invokeWithRetry(() => getActivityLog()),
+      invokeWithRetry(() => getWhisperModelStatus()).catch(() => null),
+      invokeWithRetry(() => listAiSkills()).catch(() => []),
+      invokeWithRetry(() => getWhisperModelsDir()).catch(() => ""),
+      invokeWithRetry(() => getDictionaryPath()).catch(() => ""),
+      invokeWithRetry(() => getLlmModelStatus()).catch(() => null),
+      invokeWithRetry(() => listLlmModels()).catch(() => []),
+      invokeWithRetry(() => getLlmModelsDir()).catch(() => ""),
+      invokeWithRetry(() => getHomemakerHotkeyPresets()).catch(() => [
+        ...FALLBACK_HOMEMAKER_HOTKEY_PRESETS,
+      ]),
     ]);
 
-    setLocale(settings.ui_locale ?? "en");
-
-    let effectiveSettings = settings;
-    if (!apiKeyConfigured && settings.transcription_provider === "openai") {
-      effectiveSettings = await updateSettings({ transcription_provider: "local" });
+    let effectiveSettings = initialSettings;
+    if (!apiKeyConfigured && initialSettings.transcription_provider === "openai") {
+      effectiveSettings = await invokeWithRetry(() =>
+        updateSettings({ transcription_provider: "local" }),
+      );
     }
 
     patchState({
-      status,
       settings: effectiveSettings,
-      devices,
-      diagnostics,
-      hasApiKey: apiKeyConfigured,
       activityLog,
       whisperModel,
-      whisperModels,
       whisperModelsDir,
       dictionaryPath,
       llmModel,
@@ -1168,9 +1198,6 @@ async function bootstrap(): Promise<void> {
       llmModelsDir,
       aiSkills,
       homemakerHotkeyPresets,
-      transcriptionLanguages,
-      loading: false,
-      lastError: null,
     });
 
     if (isHomemakerMode(effectiveSettings)) {
@@ -1185,6 +1212,37 @@ async function bootstrap(): Promise<void> {
       effectiveSettings.check_updates_on_startup ?? true,
     );
   } catch (error) {
+    setError({
+      code: "bootstrap",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function bootstrap(): Promise<void> {
+  bindExpertTabListeners();
+  subscribeUi(() => render());
+  subscribeLocale(() => render());
+  startMicLevelMonitor();
+  startVadThresholdMonitor();
+
+  try {
+    const [status, settings] = await Promise.all([
+      invokeWithRetry(() => getStatus()),
+      invokeWithRetry(() => getSettings()),
+    ]);
+
+    setLocale(settings.ui_locale ?? "en");
+
+    patchState({
+      status,
+      settings,
+      loading: false,
+      lastError: null,
+    });
+
+    void loadBootstrapSecondaryData(settings);
+  } catch (error) {
     patchState({ loading: false });
     setError({
       code: "bootstrap",
@@ -1194,7 +1252,6 @@ async function bootstrap(): Promise<void> {
 
   await subscribe<{ status: StatusSnapshot }>(EVENTS.stateChanged, (payload) => {
     setStatus(payload.status);
-    void refreshDiagnostics();
   });
 
   await subscribe<import("./api").ErrorPayload>(EVENTS.error, (payload) => {
@@ -1216,7 +1273,11 @@ async function bootstrap(): Promise<void> {
         previous && raw.startsWith(previous.trim())
           ? ensureSpacesAfterPunctuation(raw)
           : mergeTranscriptChunks(previous, raw);
-      patchState({ partialTranscript: merged });
+      patchState({ partialTranscript: merged }, { render: false });
+      const currentStatus = getState().status;
+      if (currentStatus) {
+        patchLiveStatusUi(currentStatus, merged);
+      }
     },
   );
 
