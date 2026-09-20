@@ -94,8 +94,15 @@ if ($pull -and $pull.state -eq "open") {
     $sha = $pull.head.sha
     $deadline = (Get-Date).AddMinutes(25)
     while ((Get-Date) -lt $deadline) {
-        $runs = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/commits/$sha/check-runs?per_page=30"
-        $required = @($runs.check_runs | Where-Object { $_.name -in @("rust", "frontend") })
+        $runs = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/commits/$sha/check-runs?per_page=100"
+        $required = @(
+            $runs.check_runs |
+                Where-Object { $_.name -in @("rust", "frontend") } |
+                Group-Object -Property name |
+                ForEach-Object {
+                    $_.Group | Sort-Object { [datetime]$_.started_at } -Descending | Select-Object -First 1
+                }
+        )
         if ($required.Count -eq 0) {
             $combined = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/commits/$sha/status"
             Write-Host "Checks: combined=$($combined.state)"
