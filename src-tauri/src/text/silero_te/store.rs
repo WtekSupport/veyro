@@ -46,8 +46,7 @@ pub fn resolve_assets(settings: &AppSettings) -> Result<SileroTeAssets, String> 
     }
 
     Err(format!(
-        "Silero TE model files not found (expected {} under {:?} or app resources)",
-        MODEL_FILE, user_dir
+        "Silero TE model files not found (expected {MODEL_FILE} under {user_dir:?} or app resources)"
     ))
 }
 
