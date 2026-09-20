@@ -8,6 +8,7 @@ pub mod lang_resolve;
 pub mod normalize;
 pub mod numbers;
 pub mod pause_punctuation;
+pub mod silero_te;
 pub mod spoken_punctuation;
 pub mod optimization_prompt;
 pub mod pipeline;

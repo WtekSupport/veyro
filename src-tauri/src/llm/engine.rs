@@ -83,6 +83,14 @@ pub struct LlmEngine {
     inner: Arc<Mutex<LlmEngineState>>,
 }
 
+impl Drop for LlmEngine {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.inner) == 1 && self.is_ready() {
+            self.unload();
+        }
+    }
+}
+
 enum LlmEngineState {
     Unloaded {
         reason: Option<String>,

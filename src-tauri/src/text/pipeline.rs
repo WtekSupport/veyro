@@ -7,12 +7,13 @@ use crate::text::dictionary::{load_dictionary, protected_terms, Dictionary};
 use crate::text::enter_trigger::apply_enter_trigger;
 use crate::text::normalize::{
     apply_basic_cleanup, apply_optimization_paragraphs, apply_original, apply_spoken_punctuation,
-    clean_raw_transcription_with_dictionary, ensure_spaces_after_punctuation,
+    clean_raw_transcription, clean_raw_transcription_with_dictionary,
+    ensure_spaces_after_punctuation,
     ensure_trailing_space_after_terminal_punctuation,
 };
 use crate::text::numbers::apply_numbers_as_words;
 use crate::text::ru_numeral_genitive::apply_russian_numeral_inflection;
-use crate::text::pause_punctuation::apply_pause_punctuation;
+use crate::text::silero_te::{apply_if_enabled, should_apply_silero_te};
 use crate::text::rewrite::rewrite_transcription;
 use crate::timed_text::TimedTextSegment;
 
@@ -90,11 +91,13 @@ pub fn process_transcription_immediate_sync(
         .unwrap_or_default();
     let postprocess_lang = settings.postprocess_language(whisper_detected_language);
 
-    let source_text = if should_apply_pause_punctuation(settings, timed_segments) {
-        apply_pause_punctuation(timed_segments.unwrap_or_default())
+    let stripped = clean_raw_transcription(raw);
+    let source_text = if should_apply_silero_te(settings) {
+        apply_if_enabled(&stripped, settings, &postprocess_lang)
     } else {
-        raw.to_string()
+        stripped
     };
+    let _ = timed_segments;
 
     let (raw, press_enter) = prepare_transcription_for_processing(
         &source_text,
@@ -190,25 +193,6 @@ fn apply_mode_cleanup(raw: &str, processing_mode: TextProcessingMode) -> String 
         mode if mode.uses_ai() => apply_basic_cleanup(raw),
         _ => apply_basic_cleanup(raw),
     }
-}
-
-fn should_apply_pause_punctuation(
-    settings: &AppSettings,
-    timed_segments: Option<&[TimedTextSegment]>,
-) -> bool {
-    if !settings.auto_punctuation_from_pauses {
-        return false;
-    }
-    if settings.transcription_provider != "local" {
-        return false;
-    }
-    if !matches!(
-        settings.immediate_transcription_mode(),
-        TextProcessingMode::Original | TextProcessingMode::Basic
-    ) {
-        return false;
-    }
-    timed_segments.is_some_and(|segments| segments.len() >= 2)
 }
 
 fn prepare_transcription_for_processing(
@@ -362,28 +346,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pause_punctuation_in_basic_mode() {
-        let settings = AppSettings {
-            text_processing_mode: TextProcessingMode::Basic,
-            transcription_provider: "local".to_string(),
-            auto_punctuation_from_pauses: true,
-            ..Default::default()
-        };
-        let segments = [
-            seg("первое", 0, 400),
-            seg("второе", 1400, 1800),
-        ];
-        let processed = process_with_segments("первое второе", &segments, &settings).await;
-        assert_eq!(processed.text, "Первое. второе. ");
-    }
-
-    #[tokio::test]
-    async fn pause_punctuation_works_with_ptt_ai_selected() {
+    async fn silero_te_skipped_in_optimization_mode() {
         let settings = AppSettings {
             push_to_talk: true,
             text_processing_mode: TextProcessingMode::Optimization,
             transcription_provider: "local".to_string(),
-            auto_punctuation_from_pauses: true,
+            silero_te: true,
             ..Default::default()
         };
         let segments = [
@@ -391,7 +359,7 @@ mod tests {
             seg("второе", 1400, 1800),
         ];
         let processed = process_with_segments("первое второе", &segments, &settings).await;
-        assert_eq!(processed.text, "Первое. второе. ");
+        assert_eq!(processed.text, "Первое второе");
     }
 
     #[tokio::test]

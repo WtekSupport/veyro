@@ -1,5 +1,6 @@
 import {
   AudioLines,
+  AudioWaveform,
   Bell,
   Bot,
   Download,
@@ -63,9 +64,14 @@ export function iconDiagCallbacks(): string {
   return icon(Zap);
 }
 
-/** Local Whisper model loaded. */
+/** Local speech model loaded (Whisper / sherpa). */
 export function iconDiagWhisper(): string {
   return icon(MicAudioLines);
+}
+
+/** Voice activity detection (continuous mode). */
+export function iconDiagVad(): string {
+  return icon(AudioWaveform);
 }
 
 /** Text optimization / custom skill mode. */

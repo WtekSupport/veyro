@@ -1,6 +1,11 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window};
+use serde::Serialize;
+use tauri::webview::PageLoadEvent;
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window};
+
+use crate::app::events::OVERLAY_LISTENING;
 use tracing::{debug, warn};
 
 use crate::app::info;
@@ -23,6 +28,27 @@ const INIT_WINDOW_HEIGHT: f64 = 132.0;
 const OVERLAY_WINDOW_WIDTH: f64 = 280.0;
 const OVERLAY_WINDOW_HEIGHT: f64 = 56.0;
 const OVERLAY_CORNER_MARGIN: f64 = 16.0;
+
+static OVERLAY_PENDING_LISTENING: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Serialize)]
+struct OverlayListeningPayload {
+    active: bool,
+}
+
+pub fn sync_overlay_listening(window: &WebviewWindow, active: bool) {
+    let _ = window.emit(
+        OVERLAY_LISTENING,
+        OverlayListeningPayload { active },
+    );
+    let hidden = !active;
+    let script = format!(
+        "(function(){{var r=document.querySelector('[data-overlay-rec]');if(!r)return;r.hidden={hidden};r.setAttribute('aria-hidden','{aria}');}})()",
+        hidden = hidden,
+        aria = if active { "false" } else { "true" },
+    );
+    let _ = window.eval(&script);
+}
 
 fn settings_ui_locale(app: &AppHandle) -> UiLocale {
     app.try_state::<Arc<AppContext>>()
@@ -54,6 +80,7 @@ pub fn configure_window(app: &AppHandle, window: &WebviewWindow) {
 pub fn configure_window_for_ui_mode(window: &WebviewWindow, ui_mode: UiMode) {
     let _ = window.set_resizable(false);
     let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
     let height = match ui_mode {
         UiMode::Expert => WINDOW_HEIGHT_EXPERT,
         UiMode::Homemaker => WINDOW_HEIGHT_HOMEMAKER,
@@ -72,6 +99,7 @@ pub fn configure_main_window_for_ui_mode(app: &AppHandle, ui_mode: UiMode) {
 pub fn configure_about_window(window: &WebviewWindow) {
     let _ = window.set_resizable(false);
     let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
     enforce_window_size(window, ABOUT_WINDOW_WIDTH, ABOUT_WINDOW_HEIGHT);
 }
 
@@ -110,13 +138,32 @@ pub fn configure_init_window(window: &WebviewWindow) {
     enforce_window_size(window, INIT_WINDOW_WIDTH, INIT_WINDOW_HEIGHT);
 }
 
+fn ensure_init_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(INIT_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    WebviewWindowBuilder::new(app, INIT_WINDOW_LABEL, WebviewUrl::App("init.html".into()))
+        .title("Veyro")
+        .inner_size(INIT_WINDOW_WIDTH, INIT_WINDOW_HEIGHT)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .visible(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .center()
+        .build()
+        .map_err(|error| format!("failed to create init window: {error}"))
+}
+
 pub fn show_init_window(app: &AppHandle) {
     if !is_initializing(app) {
         hide_init_window(app);
         return;
     }
 
-    let Some(window) = app.get_webview_window(INIT_WINDOW_LABEL) else {
+    let Ok(window) = ensure_init_window(app) else {
         debug!("init window not found");
         return;
     };
@@ -137,6 +184,7 @@ pub fn hide_init_window(app: &AppHandle) {
         return;
     };
     let _ = window.hide();
+    destroy_idle_init_webview(app);
 }
 
 fn ensure_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -162,6 +210,7 @@ fn ensure_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .center()
     .visible(false)
     .skip_taskbar(true)
+    .always_on_top(true)
     .build()
     .map_err(|error| format!("failed to create settings window: {error}"))?;
 
@@ -178,6 +227,99 @@ pub fn destroy_settings_webview(app: &AppHandle) {
 pub fn destroy_about_webview(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(ABOUT_WINDOW_LABEL) {
         let _ = window.destroy();
+    }
+}
+
+fn destroy_idle_init_webview(app: &AppHandle) {
+    if is_initializing(app) {
+        return;
+    }
+    let Some(init) = app.get_webview_window(INIT_WINDOW_LABEL) else {
+        return;
+    };
+    if init.is_visible().unwrap_or(false) {
+        return;
+    }
+    let _ = init.destroy();
+    log_webview_released(app, INIT_WINDOW_LABEL);
+}
+
+fn destroy_idle_overlay_webview(app: &AppHandle) {
+    let Some(overlay) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
+        return;
+    };
+    if overlay.is_visible().unwrap_or(false) {
+        return;
+    }
+    let _ = overlay.destroy();
+    log_webview_released(app, OVERLAY_WINDOW_LABEL);
+}
+
+fn log_webview_released(app: &AppHandle, window_label: &str) {
+    if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
+        ctx.record_activity(
+            Some(app),
+            crate::app::activity_log::ActivityLevel::Info,
+            "activity.memory.webview_destroyed",
+            serde_json::json!({ "window": window_label }),
+        );
+    }
+}
+
+/// Destroy tray-idle WebViews after the current window event finishes (never destroy `self` synchronously in handlers).
+fn schedule_tray_webview_release(app: &AppHandle) {
+    let app = app.clone();
+    let runner = app.clone();
+    let _ = runner.run_on_main_thread(move || {
+        release_main_ui_webviews(&app);
+    });
+}
+
+fn schedule_about_webview_release(app: &AppHandle) {
+    let app = app.clone();
+    let runner = app.clone();
+    let _ = runner.run_on_main_thread(move || {
+        destroy_about_webview(&app);
+        log_webview_released(&app, ABOUT_WINDOW_LABEL);
+    });
+}
+
+/// Tear down settings/about (and hidden init) WebViews while the app stays in the tray.
+pub fn release_main_ui_webviews(app: &AppHandle) {
+    let had_main = app.get_webview_window(SETTINGS_WINDOW_LABEL).is_some();
+    let had_about = app.get_webview_window(ABOUT_WINDOW_LABEL).is_some();
+
+    // About is created with main as parent — tear down child before parent.
+    destroy_about_webview(app);
+    destroy_settings_webview(app);
+    destroy_idle_init_webview(app);
+    destroy_idle_overlay_webview(app);
+
+    if had_main {
+        log_webview_released(app, SETTINGS_WINDOW_LABEL);
+    }
+    if had_about {
+        log_webview_released(app, ABOUT_WINDOW_LABEL);
+    }
+}
+
+pub fn maybe_release_webviews_if_minimized(window: &Window) {
+    let label = window.label();
+    if label != SETTINGS_WINDOW_LABEL && label != ABOUT_WINDOW_LABEL {
+        return;
+    }
+    if !window.is_minimized().unwrap_or(false) {
+        return;
+    }
+
+    let app = window.app_handle();
+    let _ = window.hide();
+    let _ = window.set_skip_taskbar(true);
+
+    if label == SETTINGS_WINDOW_LABEL {
+        schedule_tray_webview_release(&app);
+    } else {
+        schedule_about_webview_release(&app);
     }
 }
 
@@ -206,10 +348,8 @@ pub fn show_settings_window(app: &AppHandle) {
     #[cfg(windows)]
     activate_window(&window);
 
-    // Brief always-on-top helps after text injection steals foreground on Windows.
     let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
-    let _ = window.set_always_on_top(false);
 }
 
 fn ensure_about_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -274,7 +414,6 @@ pub fn show_about_window(app: &AppHandle) -> Result<(), String> {
 
     let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
-    let _ = window.set_always_on_top(false);
     Ok(())
 }
 
@@ -285,30 +424,15 @@ pub fn hide_settings_window(window: &Window) {
     let _ = window.set_skip_taskbar(true);
 
     if window.label() == SETTINGS_WINDOW_LABEL {
-        destroy_settings_webview(app);
-        if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
-            ctx.record_activity(
-                Some(app),
-                crate::app::activity_log::ActivityLevel::Info,
-                "activity.memory.webview_destroyed",
-                serde_json::json!({ "window": SETTINGS_WINDOW_LABEL }),
-            );
-        }
+        schedule_tray_webview_release(&app);
     } else if window.label() == ABOUT_WINDOW_LABEL {
-        destroy_about_webview(app);
-        if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
-            ctx.record_activity(
-                Some(app),
-                crate::app::activity_log::ActivityLevel::Info,
-                "activity.memory.webview_destroyed",
-                serde_json::json!({ "window": ABOUT_WINDOW_LABEL }),
-            );
-        }
+        schedule_about_webview_release(&app);
     }
 }
 
 pub fn configure_overlay_window(window: &WebviewWindow) {
     let _ = window.set_decorations(false);
+    #[cfg(not(windows))]
     let _ = window.set_always_on_top(true);
     let _ = window.set_skip_taskbar(true);
     let _ = window.set_ignore_cursor_events(true);
@@ -321,22 +445,114 @@ pub fn configure_overlay_window(window: &WebviewWindow) {
     configure_overlay_extended_style(window);
 }
 
+/// Hidden WebView for REC indicator (avoids creating the window during fullscreen capture).
+pub fn prewarm_recording_overlay(app: &AppHandle) {
+    let _ = ensure_overlay_window(app);
+}
+
+fn ensure_overlay_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        OVERLAY_WINDOW_LABEL,
+        WebviewUrl::App("overlay.html".into()),
+    )
+    .title("Veyro Recording")
+    .inner_size(OVERLAY_WINDOW_WIDTH, OVERLAY_WINDOW_HEIGHT)
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .visible(false)
+    .skip_taskbar(true)
+    .on_page_load(|window, payload| {
+        if payload.event() == PageLoadEvent::Finished
+            && OVERLAY_PENDING_LISTENING.load(Ordering::Relaxed)
+        {
+            sync_overlay_listening(&window, true);
+        }
+    })
+    .build()
+    .map_err(|error| format!("failed to create overlay window: {error}"))?;
+
+    configure_overlay_window(&window);
+    Ok(window)
+}
+
 pub fn show_overlay_recording(app: &AppHandle) -> Result<(), String> {
-    let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
-        return Err("overlay window not found".to_string());
-    };
+    OVERLAY_PENDING_LISTENING.store(true, Ordering::Relaxed);
+    let window = ensure_overlay_window(app)?;
 
     configure_overlay_window(&window);
     position_overlay_corner(&window);
-    let _ = window.show();
-    let _ = window.set_always_on_top(true);
+    show_overlay_without_activation(&window);
+    sync_overlay_listening(&window, true);
     Ok(())
 }
 
 pub fn hide_overlay(app: &AppHandle) {
+    OVERLAY_PENDING_LISTENING.store(false, Ordering::Relaxed);
     let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
         return;
     };
+    sync_overlay_listening(&window, false);
+    hide_overlay_without_activation(&window);
+}
+
+#[cfg(windows)]
+fn show_overlay_without_activation(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+        SW_SHOWNOACTIVATE,
+    };
+
+    configure_overlay_extended_style(window);
+    let Ok(raw) = window.hwnd() else {
+        let _ = window.show();
+        let _ = window.set_always_on_top(true);
+        return;
+    };
+    let hwnd = HWND(raw.0 as _);
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn show_overlay_without_activation(window: &WebviewWindow) {
+    let _ = window.show();
+    let _ = window.set_always_on_top(true);
+}
+
+#[cfg(windows)]
+fn hide_overlay_without_activation(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+
+    if let Ok(raw) = window.hwnd() {
+        unsafe {
+            let _ = ShowWindow(HWND(raw.0 as _), SW_HIDE);
+        }
+    } else {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_overlay_without_activation(window: &WebviewWindow) {
     let _ = window.hide();
 }
 
@@ -344,12 +560,13 @@ fn position_overlay_corner(window: &WebviewWindow) {
     let monitor = overlay_target_monitor(window);
     if let Some(monitor) = monitor {
         let size = monitor.size();
+        let origin = monitor.position();
         let scale = monitor.scale_factor();
         let width = OVERLAY_WINDOW_WIDTH * scale;
         let height = OVERLAY_WINDOW_HEIGHT * scale;
         let margin = OVERLAY_CORNER_MARGIN * scale;
-        let x = size.width as f64 - width - margin;
-        let y = size.height as f64 - height - margin;
+        let x = origin.x as f64 + size.width as f64 - width - margin;
+        let y = origin.y as f64 + size.height as f64 - height - margin;
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
             x: x.round() as i32,
             y: y.round() as i32,
@@ -366,7 +583,10 @@ fn overlay_target_monitor(window: &WebviewWindow) -> Option<tauri::Monitor> {
 
 #[cfg(windows)]
 fn foreground_monitor(window: &WebviewWindow) -> Option<tauri::Monitor> {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
+    };
 
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.0.is_null() {
@@ -382,7 +602,17 @@ fn foreground_monitor(window: &WebviewWindow) -> Option<tauri::Monitor> {
         return window.current_monitor().ok().flatten();
     }
 
-    window.primary_monitor().ok().flatten()
+    let mut rect = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(hwnd, &mut rect);
+    }
+    let x = ((rect.left + rect.right) / 2) as f64;
+    let y = ((rect.top + rect.bottom) / 2) as f64;
+    window
+        .monitor_from_point(x, y)
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
 }
 
 #[cfg(not(windows))]

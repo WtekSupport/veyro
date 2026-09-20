@@ -1,0 +1,37 @@
+﻿# GitHub "Source code (zip/tar.gz)" on Releases uses git archive.
+# Installers are published as release Assets only; see SOURCE-ARCHIVE.txt.
+.cursor export-ignore
+.github export-ignore
+.tools export-ignore
+.vscode export-ignore
+dist export-ignore
+docs export-ignore
+githooks export-ignore
+landingpage export-ignore
+node_modules export-ignore
+release export-ignore
+scripts export-ignore
+src export-ignore
+src-tauri export-ignore
+todo export-ignore
+.env.example export-ignore
+.gitignore export-ignore
+about.html export-ignore
+CHANGELOG.md export-ignore
+CODE_OF_CONDUCT.md export-ignore
+CONTRIBUTING.md export-ignore
+index.html export-ignore
+init.html export-ignore
+LICENSE export-ignore
+overlay.html export-ignore
+package-lock.json export-ignore
+package.json export-ignore
+README.MD export-ignore
+skill-import.html export-ignore
+tool-audio-srt.html export-ignore
+tool-voice-files.html export-ignore
+tools.html export-ignore
+tsconfig.json export-ignore
+version.json export-ignore
+vite.config.ts export-ignore
+_dev-monitor.log export-ignore

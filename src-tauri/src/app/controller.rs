@@ -109,6 +109,7 @@ impl AppController {
         let previous_vad_pre = self.settings.vad_pre_speech_buffer_ms;
         let previous_vad_min = self.settings.vad_minimum_speech_ms;
         let previous_vad_max = self.settings.vad_maximum_segment_ms;
+        let previous_vad_engine = self.settings.vad_engine;
         let previous_vad_threshold_mode = self.settings.vad_threshold_mode;
         let previous_vad_voice_threshold = self.settings.vad_voice_threshold_percent;
         let previous_vad_auto_threshold = self.settings.vad_auto_threshold_percent;
@@ -157,6 +158,7 @@ impl AppController {
             || previous_vad_pre != self.settings.vad_pre_speech_buffer_ms
             || previous_vad_min != self.settings.vad_minimum_speech_ms
             || previous_vad_max != self.settings.vad_maximum_segment_ms
+            || previous_vad_engine != self.settings.vad_engine
             || previous_vad_threshold_mode != self.settings.vad_threshold_mode
             || previous_vad_voice_threshold != self.settings.vad_voice_threshold_percent
             || previous_vad_auto_threshold != self.settings.vad_auto_threshold_percent
