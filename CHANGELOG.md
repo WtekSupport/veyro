@@ -12,6 +12,10 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.18] — 2026-09-20
+
+- **Windows (Silero TE):** Bundle libtorch runtime DLLs (`c10.dll`, `torch_cpu.dll`, MKL/OpenMP, etc.) next to the app and in NSIS/portable builds via `stage-libtorch-dlls.ps1` — fixes startup error when Silero TE is enabled.
+
 ## [1.8.17] — 2026-09-20
 
 - **Silero TE punctuation:** Optional on-device text enhancement (Silero TE via libtorch) replaces pause-based comma/period inference; bundled JIT assets, idle unload, setting **Silero TE** (migrates from legacy pause punctuation). Export script: `scripts/extract-silero-te.py`.

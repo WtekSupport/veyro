@@ -1,0 +1,6 @@
+﻿Veyro does not publish source code on GitHub Releases.
+
+Download the built installers from this release's Assets (setup.exe, portable.zip, latest.json).
+
+Source is available from the repository: https://github.com/WtekSupport/veyro
+
