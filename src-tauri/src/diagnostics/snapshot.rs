@@ -4,7 +4,8 @@ use crate::app::context::AppContext;
 use crate::app::memory::collect_memory_snapshot;
 use crate::app::state::DiagnosticsSnapshot;
 use crate::settings::{
-    has_api_key, local_llm_compiled, local_llm_gpu_compiled, sherpa_stt_compiled,
+    effective_vad_engine, has_api_key, local_llm_compiled, local_llm_gpu_compiled,
+    sherpa_stt_compiled, vad_silero_compiled, vad_silero_runtime_available,
     whisper_gpu_compiled, whisper_local_compiled, LocalSttEngine,
 };
 use crate::transcription::model_store::whisper_backend_label;
@@ -72,6 +73,9 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
             },
             local_stt_model: controller.settings().local_stt_model.as_api_str().to_string(),
             sherpa_stt_compiled: sherpa_stt_compiled(),
+            vad_engine: effective_vad_engine(controller.settings().vad_engine).as_str().to_string(),
+            vad_silero_compiled: vad_silero_compiled(),
+            vad_silero_runtime_ok: vad_silero_runtime_available(),
             llm_loaded: memory.llm_loaded,
             settings_webview_alive: memory.settings_webview_alive,
             about_webview_alive: memory.about_webview_alive,
@@ -113,6 +117,9 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
         local_stt_engine: "unknown".to_string(),
         local_stt_model: "unknown".to_string(),
         sherpa_stt_compiled: sherpa_stt_compiled(),
+        vad_engine: "unknown".to_string(),
+        vad_silero_compiled: vad_silero_compiled(),
+        vad_silero_runtime_ok: false,
         llm_loaded: memory.llm_loaded,
         settings_webview_alive: memory.settings_webview_alive,
         about_webview_alive: memory.about_webview_alive,

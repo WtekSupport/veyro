@@ -210,46 +210,48 @@ fn join_vad_worker(handle: Option<std::thread::JoinHandle<()>>) {
     }
 }
 
+pub(crate) fn spawn_prewarm_local_models_if_enabled(
+    ctx: Arc<AppContext>,
+    app: Option<AppHandle>,
+    settings: AppSettings,
+) {
+    if settings.prewarm_local_models_at_startup {
+        spawn_prewarm_local_models(ctx, app, settings);
+    }
+}
+
 pub(crate) fn spawn_prewarm_local_models(
     ctx: Arc<AppContext>,
     app: Option<AppHandle>,
     settings: AppSettings,
 ) {
-    let prewarm_whisper = crate::app::memory::needs_whisper_prewarm(&settings);
+    let prewarm_stt = crate::app::memory::needs_local_stt(&settings)
+        && crate::app::memory::selected_local_stt_ready(&settings);
     let prewarm_llm = crate::llm::model_store::needs_local_llm(&settings);
 
-    if !prewarm_whisper && !prewarm_llm {
+    if !prewarm_stt && !prewarm_llm {
         return;
     }
 
     tauri::async_runtime::spawn(async move {
-        if prewarm_whisper {
-            #[cfg(feature = "local-whisper")]
-            let whisper_ready = model_store::resolve_model_path(&settings)
-                .ok()
-                .is_some_and(|path| model_store::model_exists(&path));
-            #[cfg(not(feature = "local-whisper"))]
-            let whisper_ready = false;
-
-            if whisper_ready {
-                match ctx.runtime.prewarm_transcriber().await {
-                    Ok(()) => {
-                        ctx.record_activity(
-                            app.as_ref(),
-                            ActivityLevel::Info,
-                            "activity.model.prewarm_done",
-                            json!({}),
-                        );
-                    }
-                    Err(error) => {
-                        tracing::warn!("whisper prewarm failed: {error}");
-                        ctx.record_activity(
-                            app.as_ref(),
-                            ActivityLevel::Warn,
-                            "activity.model.prewarm_failed",
-                            json!({ "error": error.to_string() }),
-                        );
-                    }
+        if prewarm_stt {
+            match ctx.runtime.prewarm_transcriber().await {
+                Ok(()) => {
+                    ctx.record_activity(
+                        app.as_ref(),
+                        ActivityLevel::Info,
+                        "activity.model.prewarm_done",
+                        json!({}),
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!("local STT prewarm failed: {error}");
+                    ctx.record_activity(
+                        app.as_ref(),
+                        ActivityLevel::Warn,
+                        "activity.model.prewarm_failed",
+                        json!({ "error": error.to_string() }),
+                    );
                 }
             }
         }
@@ -529,7 +531,7 @@ async fn update_settings(
             hotkey: plan.settings.global_hotkey.clone(),
             #[cfg(not(windows))]
             game_mode: plan.settings.hotkey_game_mode,
-            block_system: plan.settings.hotkey_block_system,
+            block_system: plan.settings.effective_hotkey_block_system(),
             ptt_hold: hook_ptt_hold,
         };
         if let Err(error) = game_input::update_config(&app, config) {
@@ -538,7 +540,7 @@ async fn update_settings(
                 &app,
                 &plan.settings.global_hotkey,
                 plan.settings.hotkey_game_mode,
-                plan.settings.hotkey_block_system,
+                plan.settings.effective_hotkey_block_system(),
             );
         }
     } else if plan.reregister_hotkey {
@@ -546,7 +548,7 @@ async fn update_settings(
             &app,
             &plan.settings.global_hotkey,
             plan.settings.hotkey_game_mode,
-            plan.settings.hotkey_block_system,
+            plan.settings.effective_hotkey_block_system(),
         );
     }
 
@@ -612,10 +614,13 @@ async fn update_settings(
                 Some(background_app.clone()),
                 post_settings.microphone_device.clone(),
             );
-            if crate::app::memory::needs_whisper_prewarm(&post_settings)
-                || crate::app::memory::needs_llm_prewarm(&post_settings)
-            {
-                spawn_prewarm_local_models(ctx.clone(), Some(background_app), post_settings);
+            let model_identity_changed = reload_whisper || reload_llm;
+            if !model_identity_changed {
+                spawn_prewarm_local_models_if_enabled(
+                    ctx.clone(),
+                    Some(background_app),
+                    post_settings,
+                );
             }
         }
     });
@@ -629,6 +634,12 @@ async fn update_settings(
     apply_window_locale(&app, plan.settings.ui_locale);
     window::configure_main_window_for_ui_mode(&app, plan.settings.ui_mode);
     tray::menu::refresh_tray_menu(&app);
+    if plan.settings.recording_indicator {
+        let overlay_prewarm = app.clone();
+        let _ = app.clone().run_on_main_thread(move || {
+            window::prewarm_recording_overlay(&overlay_prewarm);
+        });
+    }
     let _ = app.emit("app://settings-changed", &plan.settings);
     Ok(plan.settings)
 }
@@ -688,7 +699,7 @@ async fn recover_engine(
         Some(app.clone()),
         settings.microphone_device.clone(),
     );
-    spawn_prewarm_local_models(ctx.clone(), Some(app.clone()), settings.clone());
+    spawn_prewarm_local_models_if_enabled(ctx.clone(), Some(app.clone()), settings.clone());
 
     ctx.controller
         .lock()
@@ -1391,9 +1402,13 @@ pub fn run() {
             open_about_window,
             get_homemaker_local_setup,
             get_homemaker_hotkey_presets,
+            diagnostics::resource_stats::set_resource_stats_enabled,
+            diagnostics::resource_stats::get_app_stats,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            diagnostics::start_stats_loop(handle.clone());
 
             notify::init_platform();
 
@@ -1444,20 +1459,13 @@ pub fn run() {
             }
 
             context.wire_audio_callbacks(&handle);
+            crate::app::model_idle::start_model_idle_watchdog(handle.clone(), context.clone());
             tray::setup_tray(&handle)?;
             crate::game_input::report_startup_elevation(&handle);
             apply_window_locale(&handle, settings.ui_locale);
 
             if !crate::llm::model_store::needs_local_llm(&settings) {
                 context.sync_llm_engine(&settings);
-            }
-
-            if let Some(window) = handle.get_webview_window(window::OVERLAY_WINDOW_LABEL) {
-                window::configure_overlay_window(&window);
-            }
-
-            if let Some(window) = handle.get_webview_window(window::INIT_WINDOW_LABEL) {
-                window::configure_init_window(&window);
             }
 
             if let Ok(resource_dir) = handle.path().resource_dir() {
@@ -1496,10 +1504,22 @@ pub fn run() {
                     }
                 }
 
-                spawn_prewarm_local_models(ctx, Some(startup_handle), startup_settings);
+                spawn_prewarm_local_models_if_enabled(ctx, Some(startup_handle), startup_settings);
             });
 
             tray::menu::refresh_tray_menu(&handle);
+
+            if let Ok(resource_dir) = handle.path().resource_dir() {
+                crate::text::silero_te::store::set_bundled_dir(resource_dir.join("silero-te"));
+            }
+
+            if settings.recording_indicator {
+                let overlay_prewarm = handle.clone();
+                let _ = handle.clone().run_on_main_thread(move || {
+                    window::prewarm_recording_overlay(&overlay_prewarm);
+                });
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1514,7 +1534,16 @@ pub fn run() {
                         let _ = window.hide();
                     }
                 }
+                tauri::WindowEvent::Focused(focused) => {
+                    if !focused {
+                        window::maybe_release_webviews_if_minimized(window);
+                    }
+                }
                 tauri::WindowEvent::Resized(_) => {
+                    window::maybe_release_webviews_if_minimized(window);
+                    if window.is_minimized().unwrap_or(false) {
+                        return;
+                    }
                     let app = window.app_handle();
                     if window.label() == window::SETTINGS_WINDOW_LABEL {
                         if let Some(webview) = app.get_webview_window(window::SETTINGS_WINDOW_LABEL) {
@@ -1541,9 +1570,18 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, event| {
-            if let tauri::RunEvent::Exit = event {
-                game_input::unregister();
-                hotkey::capslock::restore_on_exit();
+            match event {
+                tauri::RunEvent::ExitRequested { api, code, .. } => {
+                    // Keep running in the tray after all WebViews are destroyed; allow Quit/updater restart.
+                    if code.is_none() {
+                        api.prevent_exit();
+                    }
+                }
+                tauri::RunEvent::Exit => {
+                    game_input::unregister();
+                    hotkey::capslock::restore_on_exit();
+                }
+                _ => {}
             }
         });
 }

@@ -1,7 +1,7 @@
 {
   "name": "veyro",
   "private": true,
-  "version": "1.8.8",
+  "version": "1.8.16",
   "type": "module",
   "scripts": {
     "prepare": "node scripts/ensure-git-hooks.mjs",

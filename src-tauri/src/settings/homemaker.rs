@@ -82,9 +82,9 @@ pub fn normalize_homemaker_settings(settings: &mut AppSettings) -> bool {
             settings.text_processing_mode,
             TextProcessingMode::Original | TextProcessingMode::Basic
         )
-        && !settings.auto_punctuation_from_pauses
+        && !settings.silero_te
     {
-        settings.auto_punctuation_from_pauses = true;
+        settings.silero_te = true;
         changed = true;
     }
 
@@ -237,17 +237,17 @@ mod tests {
     }
 
     #[test]
-    fn homemaker_enables_pause_punctuation_for_local_basic() {
+    fn homemaker_enables_silero_te_for_local_basic() {
         let mut settings = AppSettings {
             ui_mode: UiMode::Homemaker,
             transcription_provider: "local".to_string(),
             text_rewrite_provider: TextRewriteProvider::Local,
             text_processing_mode: TextProcessingMode::Basic,
-            auto_punctuation_from_pauses: false,
+            silero_te: false,
             ..Default::default()
         };
         assert!(normalize_homemaker_settings(&mut settings));
-        assert!(settings.auto_punctuation_from_pauses);
+        assert!(settings.silero_te);
     }
 
 }

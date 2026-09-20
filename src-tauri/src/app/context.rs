@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicU32, Ordering},
     Arc, Mutex, RwLock,
 };
 
@@ -18,7 +18,8 @@ use crate::audio::monitor::MicMonitor;
 use crate::audio::pipeline::AudioPipeline;
 use crate::injection::TextInjector;
 use crate::app::controller::SettingsUpdatePlan;
-use crate::app::memory::{collect_memory_snapshot, needs_whisper_prewarm, MemorySnapshot};
+use crate::app::model_idle::{dictation_activity_now_ms, note_dictation_activity};
+use crate::app::memory::{collect_memory_snapshot, needs_local_stt, MemorySnapshot};
 use crate::llm::LlmEngine;
 use crate::llm::model_store::needs_local_llm;
 use crate::settings::{has_api_key, AppSettings};
@@ -40,6 +41,7 @@ pub struct AppContext {
     pub mic_level: Arc<AtomicU32>,
     pub mic_monitor: MicMonitor,
     pub llm_engine: Arc<RwLock<LlmEngine>>,
+    pub llm_dictation_activity_ms: Arc<AtomicU64>,
     pub streaming_preview: StreamingPreview,
     pub live_dictation: LiveDictationSession,
     pub ptt_postprocess: PttPostprocessSession,
@@ -57,6 +59,8 @@ impl AppContext {
         let root_cancel = CancellationToken::new();
         let activity_log = Arc::new(ActivityLog::new());
         let llm_engine = Arc::new(RwLock::new(LlmEngine::unloaded(None)));
+        let llm_dictation_activity_ms =
+            Arc::new(AtomicU64::new(dictation_activity_now_ms()));
         let runtime = Arc::new(PipelineRuntime::new(
             transcriber,
             injector,
@@ -67,6 +71,7 @@ impl AppContext {
                 .read()
                 .map(|guard| guard.clone())
                 .unwrap_or_else(|poisoned| poisoned.into_inner().clone()),
+            Arc::clone(&llm_dictation_activity_ms),
         ));
         let mic_monitor = MicMonitor::new();
         let mut audio = AudioPipeline::new(settings.vad_config());
@@ -86,6 +91,7 @@ impl AppContext {
             activity_log,
             ptt_lock: Mutex::new(()),
             llm_engine: llm_engine.clone(),
+            llm_dictation_activity_ms,
             streaming_preview: StreamingPreview::new(),
             live_dictation: LiveDictationSession::new(),
             ptt_postprocess: PttPostprocessSession::new(),
@@ -102,8 +108,8 @@ impl AppContext {
             .try_lock()
             .ok()
             .map(|controller| {
-                controller.settings().live_dictation_field_indicator
-                    && controller.settings().ptt_hold
+                let settings = controller.settings();
+                settings.push_to_talk && settings.ptt_hold
             })
             .unwrap_or(false);
         self.live_dictation.start(field_indicator);
@@ -137,13 +143,14 @@ impl AppContext {
     }
 
     pub fn sync_llm_engine(&self, settings: &AppSettings) {
-        Self::sync_llm_engine_owned(settings, &self.llm_engine, &self.runtime);
+        Self::sync_llm_engine_owned(settings, &self.llm_engine, &self.runtime, false);
     }
 
     fn sync_llm_engine_owned(
         settings: &AppSettings,
         llm_engine: &Arc<RwLock<LlmEngine>>,
         runtime: &Arc<PipelineRuntime>,
+        defer_load: bool,
     ) {
         if needs_local_llm(settings) {
             let previous = llm_engine.write().ok().map(|mut guard| {
@@ -158,7 +165,13 @@ impl AppContext {
                 }
             }
 
-            let engine = LlmEngine::from_settings(settings);
+            let engine = if defer_load {
+                LlmEngine::unloaded(Some(
+                    "local LLM unloaded; will load on first rewrite".to_string(),
+                ))
+            } else {
+                LlmEngine::from_settings(settings)
+            };
             if let Ok(mut guard) = llm_engine.write() {
                 *guard = engine.clone();
             }
@@ -210,7 +223,7 @@ impl AppContext {
             let _ = self.rotate_transcriber_cancel();
             self.unload_transcriber().await;
             self.reload_transcriber(settings);
-        } else if !needs_whisper_prewarm(settings) && whisper_was_loaded {
+        } else if !needs_local_stt(settings) && whisper_was_loaded {
             let _ = self.rotate_transcriber_cancel();
             self.unload_transcriber().await;
         }
@@ -219,8 +232,14 @@ impl AppContext {
             let settings = settings.clone();
             let llm_engine = Arc::clone(&self.llm_engine);
             let runtime = Arc::clone(&self.runtime);
+            let defer_llm_load = plan.reload_llm_engine;
             if tokio::task::spawn_blocking(move || {
-                AppContext::sync_llm_engine_owned(&settings, &llm_engine, &runtime);
+                AppContext::sync_llm_engine_owned(
+                    &settings,
+                    &llm_engine,
+                    &runtime,
+                    defer_llm_load,
+                );
             })
             .await
             .is_err()
@@ -237,7 +256,7 @@ impl AppContext {
                 Value::Object(Default::default()),
             );
         }
-        if whisper_was_loaded && !needs_whisper_prewarm(settings) {
+        if whisper_was_loaded && !needs_local_stt(settings) {
             self.record_activity(
                 app,
                 ActivityLevel::Info,
@@ -271,6 +290,7 @@ impl AppContext {
         message_key: &str,
         message_args: Value,
     ) {
+        note_dictation_activity(&self.llm_dictation_activity_ms, message_key);
         self.activity_log.push(level, message_key, message_args);
 
         if let Some(app) = app {
@@ -312,12 +332,18 @@ impl AppContext {
             );
 
             let settings = controller.settings().clone();
+            ctx.spawn_local_stt_load_in_background(&settings);
             let ptt_streaming = settings.push_to_talk
                 && controller.is_push_to_talk_active()
                 && settings.ptt_hold;
             let stream_live = !controller.status().ptt_hold;
+            let was_ready = controller.status().state == crate::app::state::AppState::Ready;
             let _ = controller.on_speech_started(&app_handle);
             drop(controller);
+
+            if was_ready && settings.recording_indicator {
+                crate::game_input::overlay::router::show_recording_overlay(&app_handle);
+            }
 
             if stream_live || ptt_streaming {
                 crate::injection::focus_target::capture_injection_target();

@@ -1,14 +1,13 @@
-use webrtc_vad::{Vad, VadMode};
-
 use crate::audio::resampler::{MonoResampler, TARGET_SAMPLE_RATE};
-use crate::vad::threshold::peak_level_percent;
 use crate::audio::ring_buffer::RingBuffer;
 use crate::audio::segment::AudioSegment;
-
+use super::analyzer::VoiceAnalyzer;
 use super::config::VadConfig;
 
-const FRAME_MS: u32 = 20;
-const FRAME_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize * FRAME_MS as usize) / 1000;
+#[cfg(test)]
+const WEBRTC_FRAME_MS: u32 = 20;
+#[cfg(test)]
+const WEBRTC_FRAME_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize * WEBRTC_FRAME_MS as usize) / 1000;
 
 #[derive(Debug, Clone)]
 pub enum VadEvent {
@@ -24,7 +23,8 @@ enum VadState {
 
 pub struct VadDetector {
     config: VadConfig,
-    vad: Vad,
+    analyzer: VoiceAnalyzer,
+    frame_samples: usize,
     state: VadState,
     pre_buffer: RingBuffer,
     segment: Vec<f32>,
@@ -35,18 +35,21 @@ pub struct VadDetector {
     end_on_silence: bool,
     ptt_recording: bool,
     ptt_capture: Vec<f32>,
-    /// True after a SpeechEnded chunk was delivered while PTT was held (silence/max-length split).
     ptt_subsegments_sent: bool,
 }
 
 impl VadDetector {
     pub fn new(config: VadConfig, source_rate: u32, source_channels: u16) -> Self {
-        let pre_capacity = config.pre_speech_samples(TARGET_SAMPLE_RATE).max(FRAME_SAMPLES);
+        let threshold = config.effective_threshold_percent();
+        let analyzer = VoiceAnalyzer::new(config.engine, threshold);
+        let frame_samples = frame_samples_from_ms(analyzer.frame_ms());
+        let pre_capacity = config.pre_speech_samples(TARGET_SAMPLE_RATE).max(frame_samples);
         let resampler = MonoResampler::new(source_rate, TARGET_SAMPLE_RATE)
             .expect("failed to create mono resampler");
         Self {
+            analyzer,
+            frame_samples,
             config,
-            vad: Vad::new_with_rate_and_mode(webrtc_vad::SampleRate::Rate16kHz, VadMode::Quality),
             state: VadState::Idle,
             pre_buffer: RingBuffer::new(pre_capacity),
             segment: Vec::new(),
@@ -61,14 +64,16 @@ impl VadDetector {
         }
     }
 
+    pub fn frame_samples(&self) -> usize {
+        self.frame_samples
+    }
+
     pub fn set_end_on_silence(&mut self, enabled: bool) {
         self.end_on_silence = enabled;
     }
 
     pub fn set_ptt_recording(&mut self, enabled: bool) {
         self.ptt_recording = enabled;
-        // Keep `ptt_capture` until `flush_ptt()` on release — clearing here made final flush empty
-        // while live previews still read the buffer, so rollback deleted all injected text.
     }
 
     pub fn reset(&mut self) {
@@ -98,8 +103,8 @@ impl VadDetector {
         self.pending.extend_from_slice(&normalized);
         let mut events = Vec::new();
 
-        while self.pending.len() >= FRAME_SAMPLES {
-            let frame: Vec<f32> = self.pending.drain(..FRAME_SAMPLES).collect();
+        while self.pending.len() >= self.frame_samples {
+            let frame: Vec<f32> = self.pending.drain(..self.frame_samples).collect();
             if let Some(event) = self.process_frame(&frame)? {
                 events.push(event);
             }
@@ -124,8 +129,6 @@ impl VadDetector {
     pub fn preview_snapshot(&self) -> Option<AudioSegment> {
         let min_samples = crate::audio::preview::preview_min_samples(TARGET_SAMPLE_RATE);
 
-        // Prefer the active speech segment over the full PTT buffer so Whisper sees less
-        // leading silence and returns partial words sooner during live dictation.
         let segment = if self.state == VadState::Speaking && self.segment.len() >= min_samples {
             AudioSegment::new(self.segment.clone(), TARGET_SAMPLE_RATE, 1)
         } else if self.ptt_recording && self.ptt_capture.len() >= min_samples {
@@ -178,7 +181,7 @@ impl VadDetector {
         let required = self
             .config
             .minimum_speech_samples(TARGET_SAMPLE_RATE)
-            .min(ptt_min_samples.max(FRAME_SAMPLES));
+            .min(ptt_min_samples.max(self.frame_samples));
         if pre.len() >= required {
             self.ptt_recording = false;
             self.reset();
@@ -195,8 +198,8 @@ impl VadDetector {
     fn drain_pending_frames(&mut self) -> Result<(), crate::error::AudioError> {
         let tail = self.resampler.flush()?;
         self.pending.extend_from_slice(&tail);
-        while self.pending.len() >= FRAME_SAMPLES {
-            let frame: Vec<f32> = self.pending.drain(..FRAME_SAMPLES).collect();
+        while self.pending.len() >= self.frame_samples {
+            let frame: Vec<f32> = self.pending.drain(..self.frame_samples).collect();
             let _ = self.process_frame(&frame)?;
         }
         if self.state == VadState::Speaking && !self.pending.is_empty() {
@@ -207,15 +210,20 @@ impl VadDetector {
     }
 
     pub fn set_config(&mut self, config: VadConfig) {
-        self.config = config;
+        let engine_changed = self.config.engine != config.engine;
+        self.config = config.clone();
+        self.analyzer
+            .set_threshold_percent(config.effective_threshold_percent());
+        if engine_changed {
+            self.analyzer
+                .rebuild_engine(config.engine, config.effective_threshold_percent());
+            self.frame_samples = frame_samples_from_ms(self.analyzer.frame_ms());
+        }
     }
 
     fn is_voice_in_frame(&mut self, frame: &[f32]) -> bool {
-        let pcm16 = f32_frame_to_i16(frame);
-        let webrtc_voice = self.vad.is_voice_segment(&pcm16).unwrap_or(false);
-        let peak = peak_level_percent(frame);
-        let threshold = self.config.effective_threshold_percent();
-        webrtc_voice && peak >= threshold
+        let speaking = self.state == VadState::Speaking;
+        self.analyzer.is_voice(frame, speaking)
     }
 
     fn process_frame(&mut self, frame: &[f32]) -> Result<Option<VadEvent>, crate::error::AudioError> {
@@ -238,7 +246,7 @@ impl VadDetector {
                 if is_voice {
                     self.silence_samples = 0;
                 } else {
-                    self.silence_samples += FRAME_SAMPLES;
+                    self.silence_samples += self.frame_samples;
                     if self.end_on_silence
                         && self.silence_samples
                             >= self.config.silence_timeout_samples(TARGET_SAMPLE_RATE)
@@ -256,7 +264,6 @@ impl VadDetector {
                 if self.segment.len() >= self.config.maximum_segment_samples(TARGET_SAMPLE_RATE) {
                     let segment = self.take_segment()?;
                     self.mark_ptt_subsegment_delivered();
-                    // Mid-utterance chunk: keep Speaking so the next samples stay in one session.
                     return Ok(Some(VadEvent::SpeechEnded(segment)));
                 }
             }
@@ -277,22 +284,28 @@ impl VadDetector {
     }
 }
 
-fn f32_frame_to_i16(frame: &[f32]) -> Vec<i16> {
-    frame
-        .iter()
-        .map(|&sample| {
-            let clamped = sample.clamp(-1.0, 1.0);
-            (clamped * i16::MAX as f32) as i16
-        })
-        .collect()
+fn frame_samples_from_ms(frame_ms: u32) -> usize {
+    (TARGET_SAMPLE_RATE as usize * frame_ms as usize) / 1000
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{VadEngine, VadThresholdMode};
+
+    fn test_config() -> VadConfig {
+        VadConfig {
+            engine: VadEngine::WebRtc,
+            ..Default::default()
+        }
+    }
+
+    fn frame_len() -> usize {
+        WEBRTC_FRAME_SAMPLES
+    }
 
     fn sine_frame(amplitude: f32) -> Vec<f32> {
-        (0..FRAME_SAMPLES)
+        (0..frame_len())
             .map(|i| {
                 let t = i as f32 / TARGET_SAMPLE_RATE as f32;
                 amplitude * (2.0 * std::f32::consts::PI * 440.0 * t).sin()
@@ -301,12 +314,12 @@ mod tests {
     }
 
     fn silence_frame() -> Vec<f32> {
-        vec![0.0; FRAME_SAMPLES]
+        vec![0.0; frame_len()]
     }
 
     #[test]
     fn silence_does_not_emit_segment() {
-        let mut detector = VadDetector::new(VadConfig::default(), TARGET_SAMPLE_RATE, 1);
+        let mut detector = VadDetector::new(test_config(), TARGET_SAMPLE_RATE, 1);
         for _ in 0..20 {
             let events = detector.push_samples(&silence_frame()).unwrap();
             assert!(events.is_empty());
@@ -317,6 +330,7 @@ mod tests {
     fn silence_does_not_end_when_disabled() {
         let mut detector = VadDetector::new(
             VadConfig {
+                engine: VadEngine::WebRtc,
                 minimum_speech_ms: 100,
                 silence_timeout_ms: 100,
                 ..Default::default()
@@ -337,6 +351,7 @@ mod tests {
     fn speech_start_and_end_transitions() {
         let mut detector = VadDetector::new(
             VadConfig {
+                engine: VadEngine::WebRtc,
                 minimum_speech_ms: 100,
                 silence_timeout_ms: 100,
                 ..Default::default()
@@ -372,6 +387,7 @@ mod tests {
     fn ptt_flush_after_subsegment_does_not_replay_full_capture() {
         let mut detector = VadDetector::new(
             VadConfig {
+                engine: VadEngine::WebRtc,
                 minimum_speech_ms: 100,
                 silence_timeout_ms: 100,
                 ..Default::default()
@@ -405,7 +421,7 @@ mod tests {
 
     #[test]
     fn ptt_flush_returns_full_capture_while_recording() {
-        let mut detector = VadDetector::new(VadConfig::default(), TARGET_SAMPLE_RATE, 1);
+        let mut detector = VadDetector::new(test_config(), TARGET_SAMPLE_RATE, 1);
         detector.set_ptt_recording(true);
         detector.set_end_on_silence(false);
 
@@ -423,10 +439,9 @@ mod tests {
 
     #[test]
     fn peak_gate_blocks_quiet_frames() {
-        use crate::settings::VadThresholdMode;
-
         let mut detector = VadDetector::new(
             VadConfig {
+                engine: VadEngine::WebRtc,
                 threshold_mode: VadThresholdMode::Manual,
                 voice_threshold_percent: 95,
                 ..Default::default()
@@ -450,6 +465,7 @@ mod tests {
     fn long_speech_splits_at_maximum_segment() {
         let mut detector = VadDetector::new(
             VadConfig {
+                engine: VadEngine::WebRtc,
                 minimum_speech_ms: 100,
                 maximum_segment_ms: 500,
                 ..Default::default()
@@ -471,6 +487,51 @@ mod tests {
         assert!(
             detector.is_speaking(),
             "mid-utterance split should keep the session active"
+        );
+    }
+
+    #[cfg(feature = "vad-silero")]
+    #[test]
+    fn silero_accepts_loud_sine() {
+        let mut detector = VadDetector::new(
+            VadConfig {
+                engine: VadEngine::Silero,
+                voice_threshold_percent: 3,
+                threshold_mode: VadThresholdMode::Manual,
+                minimum_speech_ms: 100,
+                silence_timeout_ms: 200,
+                ..Default::default()
+            },
+            TARGET_SAMPLE_RATE,
+            1,
+        );
+        if !crate::vad::silero_runtime_available() {
+            return;
+        }
+        let frame_len = detector.frame_samples();
+        let mut started = false;
+        let mut sample_offset = 0usize;
+        for _ in 0..30 {
+            let loud: Vec<f32> = (0..frame_len)
+                .map(|i| {
+                    let n = sample_offset + i;
+                    let t = n as f32 / TARGET_SAMPLE_RATE as f32;
+                    let v = (2.0 * std::f32::consts::PI * 220.0 * t).sin() * 0.4
+                        + (2.0 * std::f32::consts::PI * 700.0 * t).sin() * 0.25
+                        + (2.0 * std::f32::consts::PI * 1900.0 * t).sin() * 0.1;
+                    v.clamp(-1.0, 1.0)
+                })
+                .collect();
+            sample_offset += frame_len;
+            for event in detector.push_samples(&loud).unwrap() {
+                if matches!(event, VadEvent::SpeechStarted) {
+                    started = true;
+                }
+            }
+        }
+        assert!(
+            started,
+            "Silero should detect voiced multi-tone stream as speech"
         );
     }
 }

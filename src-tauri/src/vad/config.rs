@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use crate::settings::VadThresholdMode;
+use crate::settings::{VadEngine, VadThresholdMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VadConfig {
+    #[serde(default)]
+    pub engine: VadEngine,
     pub pre_speech_buffer_ms: u32,
     pub minimum_speech_ms: u32,
     pub silence_timeout_ms: u32,
@@ -16,6 +18,7 @@ pub struct VadConfig {
 impl Default for VadConfig {
     fn default() -> Self {
         Self {
+            engine: VadEngine::Silero,
             pre_speech_buffer_ms: 300,
             minimum_speech_ms: 250,
             silence_timeout_ms: 700,

@@ -16,6 +16,9 @@ export function renderDiagnostics(diagnostics: DiagnosticsSnapshot | null): stri
         <li><span>Injection</span><strong>${diagnostics.injection_available ? diagnostics.injection_backend : "Unavailable"}</strong></li>
         <li><span>API key</span><strong>${diagnostics.has_api_key ? "Configured" : "Missing"}</strong></li>
         <li><span>Microphone</span><strong>${escapeHtml(diagnostics.microphone_device ?? "Default")}</strong></li>
+        <li><span>VAD engine</span><strong>${escapeHtml(diagnostics.vad_engine ?? "unknown")}</strong></li>
+        <li><span>Silero VAD compiled</span><strong>${diagnostics.vad_silero_compiled ? "Yes" : "No"}</strong></li>
+        <li><span>Silero VAD runtime</span><strong>${diagnostics.vad_silero_runtime_ok ? "OK" : "No"}</strong></li>
         <li><span>Whisper in RAM</span><strong>${diagnostics.whisper_loaded ? "Yes" : "No"}</strong></li>
         <li><span>LLM in RAM</span><strong>${diagnostics.llm_loaded ? "Yes" : "No"}</strong></li>
         <li><span>Settings WebView</span><strong>${diagnostics.settings_webview_alive ? "Alive" : "Destroyed"}</strong></li>

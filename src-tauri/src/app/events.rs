@@ -8,6 +8,8 @@ use crate::error::ErrorPayload;
 pub const STATE_CHANGED: &str = "app://state-changed";
 pub const LISTENING_STARTED: &str = "app://listening-started";
 pub const LISTENING_STOPPED: &str = "app://listening-stopped";
+/// Targeted at the recording overlay webview (reliable after lazy create / page load).
+pub const OVERLAY_LISTENING: &str = "app://overlay-listening";
 pub const TRANSCRIPTION_STARTED: &str = "app://transcription-started";
 pub const TRANSCRIPTION_PARTIAL: &str = "app://transcription-partial";
 pub const TRANSCRIPTION_PARTIAL_CLEAR: &str = "app://transcription-partial-clear";
