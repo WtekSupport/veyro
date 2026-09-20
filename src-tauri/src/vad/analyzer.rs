@@ -8,6 +8,7 @@ use webrtc_vad::{Vad, VadMode};
 use crate::settings::VadEngine;
 use crate::vad::threshold::peak_level_percent;
 
+#[cfg(feature = "vad-silero")]
 pub static SILERO_RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 /// Peak below this (in idle) skips Silero when WebRTC is also silent.
