@@ -1,34 +1,54 @@
 import {
   calibrateVadThreshold,
-  ensureMicMonitor,
-  getMicMonitorSnapshot,
+  type VadEngine,
   type VadThresholdMode,
 } from "../api";
-import { t } from "../i18n";
+import { t, vadEngineShortLabel } from "../i18n";
+import { notifyVadMicDeviceChanged } from "./vad-monitor";
 
-const POLL_MS = 80;
-
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-let monitorArmed = false;
 let calibrating = false;
+
+export { notifyVadMicDeviceChanged };
 
 export function renderVadThresholdPanel(
   mode: VadThresholdMode,
   manualThreshold: number,
   autoThreshold: number,
-  pushToTalk: boolean,
+  vadEngine: VadEngine = "silero",
+  sileroAvailable = true,
+  activeVadEngine?: string,
 ): string {
-  const hidden = pushToTalk ? "hidden" : "";
   const effective = mode === "auto" ? autoThreshold : manualThreshold;
+  const vadChipEngine = activeVadEngine ?? vadEngine;
 
   return `
-    <section class="vad-threshold-panel continuous-only" data-vad-threshold-panel ${hidden}>
+    <section class="vad-threshold-panel" data-vad-threshold-panel>
       <div class="vad-threshold-head">
-        <h3 class="vad-threshold-title">${escapeHtml(t("settings.vadThreshold"))}</h3>
+        <div class="vad-threshold-title-row">
+          <h3 class="vad-threshold-title">${escapeHtml(t("settings.vadThreshold"))}</h3>
+          ${renderVadActiveChip(vadChipEngine)}
+        </div>
         <span class="vad-threshold-speech" data-vad-speech-indicator hidden>
           ${escapeHtml(t("settings.vadSpeechDetected"))}
         </span>
       </div>
+
+      <label class="field">
+        <span>${escapeHtml(t("settings.vadEngine"))}</span>
+        <select name="vad_engine" class="select-input">
+          <option value="silero" ${vadEngine === "silero" ? "selected" : ""} ${sileroAvailable ? "" : "disabled"}>
+            ${escapeHtml(t("settings.vadEngineSilero"))}
+          </option>
+          <option value="webrtc" ${vadEngine === "webrtc" ? "selected" : ""}>
+            ${escapeHtml(t("settings.vadEngineWebRtc"))}
+          </option>
+        </select>
+        ${
+          sileroAvailable
+            ? ""
+            : `<p class="field-hint">${escapeHtml(t("settings.vadEngineSileroUnavailable"))}</p>`
+        }
+      </label>
 
       <div class="vad-threshold-mode">
         <label class="vad-threshold-mode-option">
@@ -49,21 +69,6 @@ export function renderVadThresholdPanel(
           />
           <span>${escapeHtml(t("settings.vadThresholdManual"))}</span>
         </label>
-      </div>
-
-      <div class="vad-threshold-graph-wrap">
-        <canvas
-          class="vad-threshold-graph"
-          data-vad-graph
-          width="560"
-          height="120"
-          aria-label="${escapeHtml(t("settings.vadThreshold"))}"
-        ></canvas>
-        <div
-          class="vad-threshold-line"
-          data-vad-threshold-line
-          style="bottom: ${effective}%"
-        ></div>
       </div>
 
       <div class="vad-threshold-controls">
@@ -100,7 +105,6 @@ export function renderVadThresholdPanel(
             ${escapeHtml(t("settings.vadCalibrate"))}
           </button>
           <p class="field-hint vad-threshold-hint">${escapeHtml(t("settings.vadThresholdHint"))}</p>
-          <p class="field-hint">${escapeHtml(t("settings.vadAdvancedHint"))}</p>
         </div>
       </div>
 
@@ -120,6 +124,12 @@ export function bindVadThresholdPanel(
 
   const slider = panel.querySelector<HTMLInputElement>("[data-vad-threshold-slider]");
   const calibrateButton = panel.querySelector<HTMLButtonElement>("[data-vad-calibrate]");
+  panel.querySelector<HTMLSelectElement>('select[name="vad_engine"]')?.addEventListener("change", (event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    updateVadActiveChip(panel, select.value);
+    onChange();
+  });
+
   const modeInputs = panel.querySelectorAll<HTMLInputElement>('input[name="vad_threshold_mode"]');
 
   modeInputs.forEach((input) => {
@@ -140,28 +150,6 @@ export function bindVadThresholdPanel(
   calibrateButton?.addEventListener("click", () => {
     void runCalibration(form, panel);
   });
-}
-
-export function startVadThresholdMonitor(): void {
-  stopVadThresholdMonitor();
-  monitorArmed = false;
-  void armMicMonitor();
-  void refreshVadMonitor();
-  pollTimer = setInterval(() => {
-    void refreshVadMonitor();
-  }, POLL_MS);
-}
-
-export function stopVadThresholdMonitor(): void {
-  if (pollTimer !== undefined) {
-    clearInterval(pollTimer);
-    pollTimer = undefined;
-  }
-}
-
-export function notifyVadMicDeviceChanged(): void {
-  monitorArmed = false;
-  void armMicMonitor();
 }
 
 function syncVadThresholdControls(panel: HTMLElement): void {
@@ -185,7 +173,7 @@ function syncVadThresholdControls(panel: HTMLElement): void {
   }
 
   const effective = mode === "auto" ? autoThreshold : Number(slider?.value ?? 15);
-  setThresholdLine(panel, effective);
+  setThresholdDisplay(panel, effective);
   updateThresholdLabel(panel, mode, effective, autoThreshold, Number(slider?.value ?? 15));
 }
 
@@ -202,20 +190,16 @@ function updateThresholdLineFromSlider(panel: HTMLElement): void {
     return;
   }
   const value = Number(slider.value);
-  setThresholdLine(panel, value);
+  setThresholdDisplay(panel, value);
   const autoThreshold = Number(
     panel.querySelector<HTMLInputElement>("[data-vad-auto-threshold]")?.value ?? 12,
   );
   updateThresholdLabel(panel, "manual", value, autoThreshold, value);
 }
 
-function setThresholdLine(panel: HTMLElement, percent: number): void {
-  const line = panel.querySelector<HTMLElement>("[data-vad-threshold-line]");
+function setThresholdDisplay(panel: HTMLElement, percent: number): void {
   const levelValue = panel.querySelector<HTMLElement>("[data-vad-level-value]");
   const clamped = Math.max(3, Math.min(80, percent));
-  if (line) {
-    line.style.bottom = `${clamped}%`;
-  }
   if (levelValue) {
     levelValue.textContent = `${clamped}%`;
   }
@@ -273,106 +257,22 @@ async function runCalibration(form: HTMLFormElement, panel: HTMLElement): Promis
   }
 }
 
-async function armMicMonitor(): Promise<void> {
-  if (monitorArmed) {
-    return;
-  }
-  try {
-    await ensureMicMonitor();
-    monitorArmed = true;
-  } catch {
-    monitorArmed = false;
-  }
+function renderVadActiveChip(engine: string): string {
+  const short = vadEngineShortLabel(engine);
+  const title = t("settings.vadActiveChipTitle", { engine: short });
+  return `<span class="vad-active-chip" data-vad-active-chip title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(short)}</span>`;
 }
 
-async function refreshVadMonitor(): Promise<void> {
-  const panel = document.querySelector<HTMLElement>("[data-vad-threshold-panel]");
-  if (!panel || panel.hidden) {
+function updateVadActiveChip(panel: HTMLElement, engine: string): void {
+  const chip = panel.querySelector<HTMLElement>("[data-vad-active-chip]");
+  if (!chip) {
     return;
   }
-
-  let snapshot;
-  try {
-    snapshot = await getMicMonitorSnapshot();
-  } catch {
-    return;
-  }
-
-  drawGraph(panel, snapshot.history, snapshot.effective_threshold_percent, snapshot.level_percent);
-
-  const speechIndicator = panel.querySelector<HTMLElement>("[data-vad-speech-indicator]");
-  if (speechIndicator) {
-    speechIndicator.hidden = !snapshot.speech_active;
-  }
-
-  const mode = currentThresholdMode(panel);
-  if (mode === "auto") {
-    const autoInput = panel.querySelector<HTMLInputElement>("[data-vad-auto-threshold]");
-    if (autoInput && Number(autoInput.value) !== snapshot.effective_threshold_percent) {
-      autoInput.value = String(snapshot.effective_threshold_percent);
-    }
-    setThresholdLine(panel, snapshot.effective_threshold_percent);
-    updateThresholdLabel(
-      panel,
-      "auto",
-      snapshot.effective_threshold_percent,
-      snapshot.effective_threshold_percent,
-      Number(panel.querySelector<HTMLInputElement>("[data-vad-threshold-slider]")?.value ?? 15),
-    );
-  }
-}
-
-function drawGraph(
-  panel: HTMLElement,
-  history: number[],
-  threshold: number,
-  currentLevel: number,
-): void {
-  const canvas = panel.querySelector<HTMLCanvasElement>("[data-vad-graph]");
-  if (!canvas) {
-    return;
-  }
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return;
-  }
-
-  const width = canvas.width;
-  const height = canvas.height;
-  ctx.clearRect(0, 0, width, height);
-
-  ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
-  ctx.fillRect(0, height * (1 - threshold / 100), width, height * (threshold / 100));
-
-  const points =
-    history.length > 0
-      ? history
-      : Array.from({ length: 2 }, () => currentLevel);
-
-  ctx.strokeStyle = "rgba(96, 165, 250, 0.9)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-
-  points.forEach((level, index) => {
-    const x = (index / Math.max(points.length - 1, 1)) * (width - 8) + 4;
-    const y = height - (Math.max(0, Math.min(100, level)) / 100) * (height - 8) - 4;
-    if (index === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
-  });
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(250, 204, 21, 0.85)";
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  const thresholdY = height - (threshold / 100) * (height - 8) - 4;
-  ctx.moveTo(0, thresholdY);
-  ctx.lineTo(width, thresholdY);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  const short = vadEngineShortLabel(engine);
+  const title = t("settings.vadActiveChipTitle", { engine: short });
+  chip.textContent = short;
+  chip.title = title;
+  chip.setAttribute("aria-label", title);
 }
 
 function escapeHtml(value: string): string {

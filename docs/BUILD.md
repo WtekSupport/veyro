@@ -70,6 +70,17 @@ npm install
 npm run tauri:dev
 ```
 
+На Windows dev **запускается с правами администратора** (UAC): так Veyro может вводить текст в приложения, которые сами работают «от имени администратора». Подтвердите запрос UAC (из Git Bash он часто всплывает отдельно — смотрите панель задач). Сборка идёт в `C:\veyro-target`.
+
+Если после hot-reload появляется **LNK1120 / unresolved external** (например `AudioPipeline::start_capture_pipeline`), остановите dev и один раз очистите артефакты:
+
+```powershell
+cargo clean -p veyro --manifest-path src-tauri/Cargo.toml
+npm run tauri:dev
+```
+
+Скрипт dev по умолчанию ставит `CARGO_INCREMENTAL=0` на Windows; для более быстрых пересборок можно `VEYRO_CARGO_INCREMENTAL=1`.
+
 ### Release + NSIS-инсталлятор
 
 ```powershell
@@ -141,7 +152,7 @@ Portable Vulkan SDK: положите `vulkan_sdk.exe` в `.tools/` — расп
 | `local-sherpa-directml` | sherpa + DirectML (Windows) |
 | `local-sherpa-cuda` | sherpa + CUDA |
 
-Default в `Cargo.toml`: `local-whisper` + `local-llm` + `local-sherpa-stt`. GPU-варианты добавляет скрипт сборки.
+В `Cargo.toml` **нет default features** — полный локальный стек включают `npm run tauri:dev` / `tauri:build` через `resolve-local-features.ps1` (`--no-default-features --features …`). GPU-варианты (Vulkan/DirectML) подбирает тот же скрипт.
 
 Модели sherpa скачиваются по запросу (`.tar.bz2` из [релизов k2-fsa](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)) в `{models}/sherpa/…`. EP: CoreML (Apple Silicon), DirectML/CUDA при соответствующих features, иначе CPU.
 
@@ -157,6 +168,7 @@ Default в `Cargo.toml`: `local-whisper` + `local-llm` + `local-sherpa-stt`. GPU
 | `VEYRO_DISABLE_LOCAL_LLM=1` | Без локального LLM (нет «Оптимизация (ИИ)» offline) |
 | `VEYRO_DISABLE_LOCAL_WHISPER=1` | Без локального Whisper (только OpenAI STT) |
 | `VEYRO_DISABLE_SHERPA_STT=1` | Без sherpa-onnx (Parakeet / Qwen3); только Whisper локально |
+| `VEYRO_DISABLE_VAD_SILERO=1` | Без Silero VAD (только WebRTC в детекторе речи) |
 | `VEYRO_ALLOW_CUDA=1` | Разрешить авто-выбор CUDA вместо Vulkan (NVIDIA) |
 | `VEYRO_CMAKE_PARALLEL` | Параллелизм cmake для llama.cpp (по умолчанию `1`) |
 | `VEYRO_CARGO_TARGET_DIR` | Переопределить каталог сборки (по умолчанию `C:\veyro-target`) |
@@ -258,6 +270,7 @@ npx tauri icon src-tauri/icons/icon.png
 | `VEYRO_DISABLE_LOCAL_LLM` | Без локального LLM |
 | `VEYRO_DISABLE_LOCAL_WHISPER` | Без локального Whisper |
 | `VEYRO_DISABLE_SHERPA_STT` | Без sherpa-onnx (Parakeet / Qwen3) |
+| `VEYRO_DISABLE_VAD_SILERO` | Без Silero VAD (WebRTC-only) |
 | `VEYRO_ALLOW_CUDA=1` | Auto-CUDA (NVIDIA) |
 | `VULKAN_SDK` | Путь к Vulkan SDK |
 | `CUDA_PATH` | Путь к CUDA Toolkit |

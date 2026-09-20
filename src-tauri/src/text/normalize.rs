@@ -447,6 +447,12 @@ pub fn strip_whisper_hallucinations(text: &str) -> String {
     const MARKERS: &[&str] = &[
         "Редактор субтитров",
         "Субтитры создал",
+        "Субтитры создавал",
+        "Субтитры сделал",
+        "субтитры создавал",
+        "субтитры сделал",
+        "DimaTorzok",
+        "dimatorzok",
         ". Корректор",
         "Корректор:",
         "Subtitles by",
@@ -592,6 +598,27 @@ fn words_within_one_edit(left: &str, right: &str) -> bool {
     edits + (long_chars.len() - long_index) + (short_chars.len() - short_index) <= 1
 }
 
+/// Whisper/Sherpa often emit YouTube-style subtitle credits mentioning DimaTorzok.
+fn is_dimatorzok_subtitle_hallucination(normalized: &str) -> bool {
+    if !normalized.contains("dimatorzok") {
+        return false;
+    }
+    normalized.contains("субтитр")
+        || normalized.len() <= 48
+        || KNOWN_DIMATORZOK_ONLY
+            .iter()
+            .any(|pattern| normalized == *pattern)
+}
+
+const KNOWN_DIMATORZOK_ONLY: &[&str] = &[
+    "субтитрысоздавалdimatorzok",
+    "субтитрысделалdimatorzok",
+    "субтитрысоздалdimatorzok",
+    "субтитрысоздалdimatorzokov",
+    "dimatorzok",
+    "dimatorzokov",
+];
+
 fn is_whisper_hallucination_only(text: &str) -> bool {
     let normalized = alphanumeric_lower(text);
     if normalized.is_empty() {
@@ -602,10 +629,19 @@ fn is_whisper_hallucination_only(text: &str) -> bool {
         return true;
     }
 
+    if is_dimatorzok_subtitle_hallucination(&normalized) {
+        return true;
+    }
+
     const KNOWN_ONLY: &[&str] = &[
         "редакторсубтитровасинецкаякорректораегорова",
         "редакторсубтитровасинецкаякорректоракуликова",
         "субтитрысоздалdimatorzokov",
+        "субтитрысоздавалdimatorzok",
+        "субтитрысделалdimatorzok",
+        "субтитрысоздалdimatorzok",
+        "dimatorzok",
+        "dimatorzokov",
         "subtitlesby",
         "translatedby",
         "amaradotorg",
@@ -889,6 +925,16 @@ mod tests {
     fn strips_subtitle_hallucination_case_insensitive() {
         let raw = "hello редактор субтитров: test";
         assert_eq!(clean_raw_transcription(raw), "hello");
+    }
+
+    #[test]
+    fn strips_dimatorzok_subtitle_variants() {
+        assert!(clean_raw_transcription("Субтитры создавал DimaTorzok").is_empty());
+        assert!(clean_raw_transcription("субтитры сделал DimaTorzok").is_empty());
+        assert_eq!(
+            clean_raw_transcription("Привет мир субтитры сделал DimaTorzok"),
+            "Привет мир"
+        );
     }
 
     #[test]

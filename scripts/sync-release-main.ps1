@@ -94,8 +94,18 @@ if ($pull -and $pull.state -eq "open") {
     $sha = $pull.head.sha
     $deadline = (Get-Date).AddMinutes(25)
     while ((Get-Date) -lt $deadline) {
-        $runs = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/commits/$sha/check-runs?per_page=30"
-        $required = @($runs.check_runs | Where-Object { $_.name -in @("rust", "frontend") })
+        $runs = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/commits/$sha/check-runs?per_page=100"
+        $required = @(
+            $runs.check_runs |
+                Where-Object {
+                    $_.name -in @("rust", "frontend") -and
+                    (-not $_.head_sha -or $_.head_sha -eq $sha)
+                } |
+                Group-Object -Property name |
+                ForEach-Object {
+                    $_.Group | Sort-Object { [datetime]$_.started_at } -Descending | Select-Object -First 1
+                }
+        )
         if ($required.Count -eq 0) {
             $combined = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/commits/$sha/status"
             Write-Host "Checks: combined=$($combined.state)"
@@ -107,8 +117,10 @@ if ($pull -and $pull.state -eq "open") {
             foreach ($r in $required) {
                 Write-Host "  $($r.name): $($r.status) $($r.conclusion)"
             }
-            if ($bad.Count -gt 0) { throw "Required checks failed" }
-            if ($pending.Count -eq 0) { break }
+            if ($pending.Count -eq 0) {
+                if ($bad.Count -gt 0) { throw "Required checks failed" }
+                break
+            }
         }
         Start-Sleep -Seconds 25
     }

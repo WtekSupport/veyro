@@ -2,6 +2,8 @@
 node_modules/
 
 # Local / generated docs (keep BUILD, RELEASE, UPDATER in git)
+
+todo/
 docs/dictionary/
 docs/skills/
 docs/legal/
@@ -27,6 +29,12 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+
+# Silero TE weights (generate via scripts/extract-silero-te.py)
+src-tauri/resources/silero-te/model.pt
+todo/v2_4lang_q.pt
+todo/te_core.pt
+release.py
 
 # Rust / Tauri
 src-tauri/target/

@@ -121,18 +121,23 @@ impl LiveDictationSession {
 
         if injected.is_empty() {
             return injector
-                .insert_text(final_text, settings.injection_mode)
+                .insert_text(final_text, settings.injection_mode_for_host())
                 .await;
         }
 
         let rollback_chars = char_count(&injected);
         if rollback_chars > 0 {
-            delete_backward(injector.clone(), settings.injection_mode, rollback_chars).await?;
+            delete_backward(
+                injector.clone(),
+                settings.injection_mode_for_host(),
+                rollback_chars,
+            )
+            .await?;
         }
 
         if !final_text.is_empty() {
             injector
-                .insert_text(final_text, settings.injection_mode)
+                .insert_text(final_text, settings.injection_mode_for_host())
                 .await?;
         }
 
@@ -175,7 +180,12 @@ impl LiveDictationSession {
             return Ok(());
         }
 
-        delete_backward(injector, settings.injection_mode, char_count(&injected)).await
+        delete_backward(
+            injector,
+            settings.injection_mode_for_host(),
+            char_count(&injected),
+        )
+        .await
     }
 
     fn spawn_animation_thread(&self) {

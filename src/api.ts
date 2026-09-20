@@ -18,6 +18,7 @@ export type InjectionMode = "paste" | "keyboard" | "auto";
 export type UiLocale = "en" | "ru";
 export type UiMode = "expert" | "homemaker";
 export type VadThresholdMode = "auto" | "manual";
+export type VadEngine = "silero" | "webrtc";
 export type HomemakerDataStorage = "cloud" | "local";
 export type TextProcessingMode =
   | "original"
@@ -62,7 +63,9 @@ export interface AppSettings {
   global_hotkey: string;
   push_to_talk: boolean;
   ptt_hold: boolean;
-  live_dictation_field_indicator: boolean;
+  recording_indicator: boolean;
+  /** @deprecated use recording_indicator */
+  live_dictation_field_indicator?: boolean;
   hotkey_game_mode: boolean;
   hotkey_block_system: boolean;
   microphone_device: string | null;
@@ -88,7 +91,7 @@ export interface AppSettings {
   vad_maximum_segment_ms: number;
   injection_mode: InjectionMode;
   spoken_punctuation: boolean;
-  auto_punctuation_from_pauses: boolean;
+  silero_te: boolean;
   text_processing_mode: TextProcessingMode;
   numbers_as_words: boolean;
   emulate_enter: boolean;
@@ -99,11 +102,17 @@ export interface AppSettings {
   show_notifications: boolean;
   log_level: string;
   silence_timeout_ms: number;
+  vad_engine: VadEngine;
   vad_threshold_mode: VadThresholdMode;
   vad_voice_threshold_percent: number;
   vad_auto_threshold_percent: number;
   ui_locale: UiLocale;
   ui_mode: UiMode;
+  /** 0 = never unload local STT on idle */
+  stt_idle_unload_sec: number;
+  /** 0 = never unload local LLM on idle */
+  llm_idle_unload_sec: number;
+  prewarm_local_models_at_startup: boolean;
 }
 
 export interface SettingsPatch {
@@ -111,6 +120,7 @@ export interface SettingsPatch {
   global_hotkey?: string;
   push_to_talk?: boolean;
   ptt_hold?: boolean;
+  recording_indicator?: boolean;
   live_dictation_field_indicator?: boolean;
   hotkey_game_mode?: boolean;
   hotkey_block_system?: boolean;
@@ -138,7 +148,7 @@ export interface SettingsPatch {
   vad_maximum_segment_ms?: number;
   injection_mode?: InjectionMode;
   spoken_punctuation?: boolean;
-  auto_punctuation_from_pauses?: boolean;
+  silero_te?: boolean;
   text_processing_mode?: TextProcessingMode;
   numbers_as_words?: boolean;
   emulate_enter?: boolean;
@@ -149,6 +159,7 @@ export interface SettingsPatch {
   show_notifications?: boolean;
   log_level?: string;
   silence_timeout_ms?: number;
+  vad_engine?: VadEngine;
   vad_threshold_mode?: VadThresholdMode;
   vad_voice_threshold_percent?: number;
   vad_auto_threshold_percent?: number;
@@ -156,6 +167,9 @@ export interface SettingsPatch {
   ui_mode?: UiMode;
   homemaker_data_storage?: HomemakerDataStorage;
   apply_homemaker_local_setup?: boolean;
+  stt_idle_unload_sec?: number;
+  llm_idle_unload_sec?: number;
+  prewarm_local_models_at_startup?: boolean;
 }
 
 export interface HomemakerLocalSetup {
@@ -200,6 +214,9 @@ export interface DiagnosticsSnapshot {
   local_stt_engine: string;
   local_stt_model: string;
   sherpa_stt_compiled: boolean;
+  vad_engine: string;
+  vad_silero_compiled: boolean;
+  vad_silero_runtime_ok: boolean;
   llm_loaded: boolean;
   settings_webview_alive: boolean;
   about_webview_alive: boolean;
@@ -234,6 +251,7 @@ export const EVENTS = {
   stateChanged: "app://state-changed",
   listeningStarted: "app://listening-started",
   listeningStopped: "app://listening-stopped",
+  overlayListening: "app://overlay-listening",
   transcriptionStarted: "app://transcription-started",
   transcriptionPartial: "app://transcription-partial",
   transcriptionPartialClear: "app://transcription-partial-clear",
@@ -247,7 +265,22 @@ export const EVENTS = {
   skillImported: "app://skill-imported",
   skillsChanged: "app://skills-changed",
   settingsChanged: "app://settings-changed",
+  appStats: "app-stats",
 } as const;
+
+export interface AppStats {
+  cpu_percent: number;
+  memory_mb: number;
+  process_count: number;
+}
+
+export async function setResourceStatsEnabled(enabled: boolean): Promise<void> {
+  await invoke<void>("set_resource_stats_enabled", { enabled });
+}
+
+export async function getAppStats(): Promise<AppStats> {
+  return invoke<AppStats>("get_app_stats");
+}
 
 export interface WhisperModelDownloadProgress {
   downloaded: number;

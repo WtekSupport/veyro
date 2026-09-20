@@ -2,18 +2,24 @@
 
 $ErrorActionPreference = "Stop"
 
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+# Dev must run elevated so injected text reaches apps running as administrator.
 . (Join-Path $PSScriptRoot "ensure-admin.ps1") -CallerScript $PSCommandPath -Wait
 
 if ($IsWindows -or $env:OS -like "*Windows*") {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Error "Veyro dev mode requires administrator privileges. Use: npm run tauri:dev"
+        Write-Error @"
+Veyro dev requires administrator privileges (UAC) so dictation can type into elevated applications.
+If you run from Git Bash, accept the UAC prompt (it may appear on another desktop — check the taskbar).
+Or open PowerShell as Administrator, cd to the repo, and run: npm run tauri:dev
+"@
         exit 1
     }
 }
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location -LiteralPath $repoRoot
 
 & node (Join-Path $PSScriptRoot "bump-version.mjs") dev
@@ -68,10 +74,12 @@ $parallel = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
 
 Write-Host "Selected features: $features"
 
-$featureArgs = @("--no-default-features")
-if ($features) {
-    $featureArgs += @("--features", $features)
+if ($null -eq $env:VEYRO_CARGO_INCREMENTAL -and ($IsWindows -or $env:OS -like "*Windows*")) {
+    $env:CARGO_INCREMENTAL = "0"
+    Write-Host "CARGO_INCREMENTAL=0 (override with VEYRO_CARGO_INCREMENTAL=1 for faster incremental dev rebuilds)"
 }
+
+$featureArgs = Get-CargoFeatureArgs -Features $features
 
 function Invoke-DevCargoBuild {
     Push-Location (Join-Path $repoRoot "src-tauri")

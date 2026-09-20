@@ -34,12 +34,7 @@ if (Test-Path (Join-Path $cmakeBin "cmake.exe")) {
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
 $parallel = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
 
-$featureArgs = @()
-if ($features) {
-    $featureArgs = @("--features", $features)
-} else {
-    $featureArgs = @("--no-default-features")
-}
+$featureArgs = Get-CargoFeatureArgs -Features $features
 
 function Invoke-ReleaseBuild {
     Push-Location (Join-Path $repoRoot "src-tauri")

@@ -8,7 +8,7 @@ document.body.style.background = "transparent";
 
 const recEl = document.querySelector<HTMLElement>("[data-overlay-rec]");
 const recLabelEl = document.querySelector<HTMLElement>("[data-overlay-rec-label]");
-const listeningDotsEl = document.querySelector<HTMLElement>("[data-overlay-listening-dots");
+const listeningDotsEl = document.querySelector<HTMLElement>("[data-overlay-listening-dots]");
 
 function applyRecLabel(): void {
   if (recLabelEl) {
@@ -27,6 +27,8 @@ function setListening(active: boolean): void {
   }
 }
 
+setListening(true);
+
 void getSettings()
   .then((settings) => {
     setLocale(settings.ui_locale ?? "en");
@@ -35,6 +37,10 @@ void getSettings()
   .catch(() => {
     applyRecLabel();
   });
+
+void listen<{ active: boolean }>(EVENTS.overlayListening, (event) => {
+  setListening(Boolean(event.payload.active));
+});
 
 void listen(EVENTS.listeningStarted, () => {
   setListening(true);

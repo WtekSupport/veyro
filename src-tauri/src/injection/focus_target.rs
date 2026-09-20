@@ -29,9 +29,40 @@ pub fn restore_injection_target() {
         if hwnd == 0 {
             return;
         }
+        if injection_target_already_active(hwnd) {
+            debug!(
+                hwnd,
+                "injection target already foreground; skipping focus restore"
+            );
+            return;
+        }
         if focus_hwnd(hwnd) {
             debug!(hwnd, "restored injection target window");
+        } else {
+            debug!(hwnd, "failed to restore injection target focus");
         }
+    }
+}
+
+#[cfg(windows)]
+fn injection_target_already_active(stored: isize) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+    unsafe {
+        let target = HWND(stored as *mut _);
+        if target.0.is_null() {
+            return false;
+        }
+        let foreground = GetForegroundWindow();
+        if foreground == target {
+            return true;
+        }
+        let mut fg_pid = 0u32;
+        let mut target_pid = 0u32;
+        GetWindowThreadProcessId(foreground, Some(&mut fg_pid));
+        GetWindowThreadProcessId(target, Some(&mut target_pid));
+        fg_pid != 0 && fg_pid == target_pid
     }
 }
 

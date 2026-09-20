@@ -27,7 +27,7 @@ if ($features -match "local-sherpa-stt") {
 if (-not $SkipCargo) {
     Push-Location (Join-Path $repoRoot "src-tauri")
     try {
-        $featureArgs = if ($features) { @("--features", $features) } else { @("--no-default-features") }
+        $featureArgs = Get-CargoFeatureArgs -Features $features
         cargo build --release @featureArgs -j $parallel
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally {

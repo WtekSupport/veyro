@@ -9,7 +9,7 @@ Write-Host "CARGO_TARGET_DIR=$env:CARGO_TARGET_DIR"
 Write-Host "features=$features"
 Push-Location (Join-Path $repoRoot "src-tauri")
 try {
-    cargo check --features $features
+    cargo check @((Get-CargoFeatureArgs -Features $features))
 } finally {
     Pop-Location
 }
