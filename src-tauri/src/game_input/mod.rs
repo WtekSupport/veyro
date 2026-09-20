@@ -283,8 +283,8 @@ fn unregister_internal() {
 
 fn should_use_ll_hook(config: &HotkeyInstallConfig) -> bool {
     // Global shortcuts (RegisterHotKey) are missed by many hosts — TC command line, Sublime,
-    // games. On Windows always prefer the low-level hook; `hotkey_game_mode` only toggles UI
-    // options such as blocking keys from reaching the host app.
+    // games. On Windows always prefer the low-level hook; `hotkey_game_mode` also changes
+    // injection/focus behavior and suppresses PTT toast notifications (see AppSettings).
     #[cfg(windows)]
     {
         let _ = config;

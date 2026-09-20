@@ -12,6 +12,18 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.17] — 2026-09-20
+
+- **Silero TE punctuation:** Optional on-device text enhancement (Silero TE via libtorch) replaces pause-based comma/period inference; bundled JIT assets, idle unload, setting **Silero TE** (migrates from legacy pause punctuation). Export script: `scripts/extract-silero-te.py`.
+- **Expert Status tab:** Renamed from Log; live CPU/RAM for the app process tree (sysinfo), full-height mic level graph with VAD threshold overlay, capability chips instead of the old icon strip; activity log in a collapsible section.
+- **Voice activity (VAD):** Silero VAD (wavekat-vad) as the default engine with WebRTC pre-filter on quiet frames; Expert toggle for WebRTC-only. Voice sensitivity maps to Silero probability threshold; VAD monitor always visible on Capture (no extra hint lines).
+- **Settings UI (Capture / Transform):** Tab labels **Capture** and **Transform** (RU: Захват / Преобразование); recognition and activation sections regrouped; activation grid layout; removed separate **Game mode** / **Block key** controls—PTT hotkey blocking and overlay injection behavior are applied automatically on Windows.
+- **Model pickers:** Local STT and local LLM dropdowns use three-line labels—name (download size), **RAM · CPU · GPU** requirements, and feature summary (aligned for both recognition and rewrite models).
+- **STT cleanup:** Filters common Whisper subtitle hallucinations (e.g. “thanks for watching”, “DimaTorzok”-style tails) in normalization.
+- **Overlay / PTT:** Hotkey registration prewarms overlay path; injection target restored after REC overlay show; fewer elevation/toast edge cases in push-to-talk mode.
+- **Build & dev (Windows):** Empty Cargo default features so `tauri dev` matches script `--no-default-features` (fixes mixed-feature **LNK1120** link failures); optional `CARGO_INCREMENTAL=0` on dev; shared `Get-CargoFeatureArgs` for local feature sets; BUILD.md troubleshooting for linker errors.
+- **Logging:** Default `tracing` filter quiets noisy `ort` / `ort_sys` crates unless overridden.
+
 ## [1.8.8] — 2026-09-19
 
 - **Local STT (sherpa-onnx):** Parakeet TDT 0.6B v3 and Qwen3-ASR 0.6B / 1.7B alongside Whisper; on-demand model download, unified `local_stt_model` setting (legacy `local_whisper_model` alias), provider factory and live preview for sherpa engines on Windows (DirectML/CUDA when enabled), macOS (CoreML), and CPU fallback.

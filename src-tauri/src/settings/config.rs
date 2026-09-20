@@ -75,6 +75,35 @@ pub fn local_llm_gpu_backend_label() -> &'static str {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum VadEngine {
+    #[default]
+    Silero,
+    WebRtc,
+}
+
+impl VadEngine {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Silero => "silero",
+            Self::WebRtc => "webrtc",
+        }
+    }
+}
+
+pub fn effective_vad_engine(engine: VadEngine) -> VadEngine {
+    crate::vad::analyzer::effective_engine(engine)
+}
+
+pub fn vad_silero_compiled() -> bool {
+    crate::vad::analyzer::silero_compiled()
+}
+
+pub fn vad_silero_runtime_available() -> bool {
+    crate::vad::analyzer::silero_runtime_available()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum VadThresholdMode {
     #[default]
     Auto,
@@ -297,14 +326,17 @@ pub struct AppSettings {
     /// When true (default), release the hotkey stops recording. When false, a second press stops.
     #[serde(default = "default_ptt_hold")]
     pub ptt_hold: bool,
-    /// When true (default), show an animated "..." placeholder in the target field while recording.
-    #[serde(default = "default_live_dictation_field_indicator")]
-    pub live_dictation_field_indicator: bool,
+    /// Top-right REC overlay while microphone capture is active (PTT or continuous).
+    #[serde(
+        default = "default_recording_indicator",
+        alias = "live_dictation_field_indicator"
+    )]
+    pub recording_indicator: bool,
     /// Use a low-level keyboard hook so PTT works in exclusive fullscreen games (Windows only).
     #[serde(default = "default_hotkey_game_mode")]
     pub hotkey_game_mode: bool,
-    /// When true, swallow matched hotkey events so they do not reach other apps (game mode only).
-    #[serde(default)]
+    /// Legacy; prefer [`Self::effective_hotkey_block_system`].
+    #[serde(default = "default_hotkey_block_system")]
     pub hotkey_block_system: bool,
     pub microphone_device: Option<String>,
     pub language: Option<String>,
@@ -335,9 +367,12 @@ pub struct AppSettings {
     pub vad_maximum_segment_ms: u32,
     pub injection_mode: InjectionMode,
     pub spoken_punctuation: bool,
-    /// Insert `,` / `.` from Whisper segment pauses (local STT, Basic/Original only).
-    #[serde(default = "default_auto_punctuation_from_pauses")]
-    pub auto_punctuation_from_pauses: bool,
+    /// Silero text enhancement (local STT, Basic/Original only).
+    #[serde(
+        default = "default_silero_te",
+        alias = "auto_punctuation_from_pauses"
+    )]
+    pub silero_te: bool,
     pub text_processing_mode: TextProcessingMode,
     pub numbers_as_words: bool,
     pub emulate_enter: bool,
@@ -349,6 +384,8 @@ pub struct AppSettings {
     pub log_level: String,
     pub silence_timeout_ms: u32,
     #[serde(default)]
+    pub vad_engine: VadEngine,
+    #[serde(default)]
     pub vad_threshold_mode: VadThresholdMode,
     #[serde(default = "default_vad_voice_threshold_percent")]
     pub vad_voice_threshold_percent: u8,
@@ -357,6 +394,15 @@ pub struct AppSettings {
     pub ui_locale: UiLocale,
     #[serde(default)]
     pub ui_mode: UiMode,
+    /// Unload local STT after this many seconds without dictation. `0` = never unload.
+    #[serde(default = "default_stt_idle_unload_sec")]
+    pub stt_idle_unload_sec: u32,
+    /// Unload local LLM after this many seconds without dictation. `0` = never unload.
+    #[serde(default = "default_llm_idle_unload_sec")]
+    pub llm_idle_unload_sec: u32,
+    /// Load and warm local STT/LLM at startup (and when the settings UI opens if enabled).
+    #[serde(default)]
+    pub prewarm_local_models_at_startup: bool,
 }
 
 fn default_vad_voice_threshold_percent() -> u8 {
@@ -375,16 +421,28 @@ fn default_check_updates_on_startup() -> bool {
     true
 }
 
-fn default_live_dictation_field_indicator() -> bool {
+fn default_recording_indicator() -> bool {
     true
 }
 
-fn default_auto_punctuation_from_pauses() -> bool {
+fn default_silero_te() -> bool {
     true
 }
 
 fn default_hotkey_game_mode() -> bool {
+    false
+}
+
+fn default_hotkey_block_system() -> bool {
     cfg!(windows)
+}
+
+fn default_stt_idle_unload_sec() -> u32 {
+    180
+}
+
+fn default_llm_idle_unload_sec() -> u32 {
+    90
 }
 
 fn default_local_sherpa_num_threads() -> u32 {
@@ -403,9 +461,9 @@ impl Default for AppSettings {
             hotkey_before_capslock: None,
             push_to_talk: true,
             ptt_hold: true,
-            live_dictation_field_indicator: true,
+            recording_indicator: true,
             hotkey_game_mode: default_hotkey_game_mode(),
-            hotkey_block_system: false,
+            hotkey_block_system: default_hotkey_block_system(),
             microphone_device: None,
             language: None,
             transcription_provider: "local".to_string(),
@@ -431,7 +489,7 @@ impl Default for AppSettings {
             vad_maximum_segment_ms: 30_000,
             injection_mode: InjectionMode::Auto,
             spoken_punctuation: true,
-            auto_punctuation_from_pauses: true,
+            silero_te: true,
             text_processing_mode: TextProcessingMode::Original,
             numbers_as_words: false,
             emulate_enter: false,
@@ -441,16 +499,52 @@ impl Default for AppSettings {
             show_notifications: false,
             log_level: "info".to_string(),
             silence_timeout_ms: 700,
+            vad_engine: VadEngine::Silero,
             vad_threshold_mode: VadThresholdMode::Auto,
             vad_voice_threshold_percent: default_vad_voice_threshold_percent(),
             vad_auto_threshold_percent: default_vad_auto_threshold_percent(),
             ui_locale: UiLocale::En,
             ui_mode: UiMode::Homemaker,
+            stt_idle_unload_sec: default_stt_idle_unload_sec(),
+            llm_idle_unload_sec: default_llm_idle_unload_sec(),
+            prewarm_local_models_at_startup: false,
         }
     }
 }
 
 impl AppSettings {
+    pub fn stt_idle_unload_after(&self) -> Option<std::time::Duration> {
+        idle_unload_duration(self.stt_idle_unload_sec)
+    }
+
+    pub fn llm_idle_unload_after(&self) -> Option<std::time::Duration> {
+        idle_unload_duration(self.llm_idle_unload_sec)
+    }
+
+    pub fn injection_mode_for_host(&self) -> InjectionMode {
+        self.injection_mode
+    }
+
+    /// PTT "listening" toasts steal focus from fullscreen apps (especially on first press).
+    pub fn suppress_ptt_toasts(&self) -> bool {
+        self.push_to_talk
+    }
+
+    /// Swallow matched hotkey events so they do not reach the focused app (PTT on Windows).
+    pub fn effective_hotkey_block_system(&self) -> bool {
+        if self.hotkey_block_system {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            return self.push_to_talk;
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
     /// Switch the hotkey to the remapped Caps Lock when `capslock_ptt` turns on, and restore the
     /// previous one when it turns off (unless another hotkey was picked in the meantime).
     pub fn sync_capslock_hotkey(&mut self, was_enabled: bool) {
@@ -501,6 +595,18 @@ impl AppSettings {
         if !(1..=5).contains(&self.local_whisper_beam_size) {
             return Err(crate::error::ConfigError::Invalid(
                 "beam_size_range".to_string(),
+            ));
+        }
+
+        if !Self::idle_unload_sec_valid(self.stt_idle_unload_sec) {
+            return Err(crate::error::ConfigError::Invalid(
+                "stt_idle_unload_range".to_string(),
+            ));
+        }
+
+        if !Self::idle_unload_sec_valid(self.llm_idle_unload_sec) {
+            return Err(crate::error::ConfigError::Invalid(
+                "llm_idle_unload_range".to_string(),
             ));
         }
 
@@ -558,6 +664,7 @@ impl AppSettings {
 
     pub fn vad_config(&self) -> crate::vad::VadConfig {
         crate::vad::VadConfig {
+            engine: effective_vad_engine(self.vad_engine),
             pre_speech_buffer_ms: self.vad_pre_speech_buffer_ms,
             minimum_speech_ms: self.vad_minimum_speech_ms,
             silence_timeout_ms: self.silence_timeout_ms,
@@ -653,6 +760,18 @@ impl AppSettings {
         self.transcription_provider == "local"
             && matches!(self.text_rewrite_provider, TextRewriteProvider::Local)
     }
+
+    fn idle_unload_sec_valid(sec: u32) -> bool {
+        sec == 0 || (60..=7_200).contains(&sec)
+    }
+}
+
+fn idle_unload_duration(sec: u32) -> Option<std::time::Duration> {
+    if sec == 0 {
+        None
+    } else {
+        Some(std::time::Duration::from_secs(sec as u64))
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -662,6 +781,8 @@ pub struct SettingsPatch {
     pub capslock_ptt: Option<bool>,
     pub push_to_talk: Option<bool>,
     pub ptt_hold: Option<bool>,
+    pub recording_indicator: Option<bool>,
+    #[serde(alias = "live_dictation_field_indicator")]
     pub live_dictation_field_indicator: Option<bool>,
     pub hotkey_game_mode: Option<bool>,
     pub hotkey_block_system: Option<bool>,
@@ -689,7 +810,8 @@ pub struct SettingsPatch {
     pub vad_maximum_segment_ms: Option<u32>,
     pub injection_mode: Option<InjectionMode>,
     pub spoken_punctuation: Option<bool>,
-    pub auto_punctuation_from_pauses: Option<bool>,
+    #[serde(alias = "auto_punctuation_from_pauses")]
+    pub silero_te: Option<bool>,
     pub text_processing_mode: Option<TextProcessingMode>,
     pub numbers_as_words: Option<bool>,
     pub emulate_enter: Option<bool>,
@@ -699,6 +821,7 @@ pub struct SettingsPatch {
     pub show_notifications: Option<bool>,
     pub log_level: Option<String>,
     pub silence_timeout_ms: Option<u32>,
+    pub vad_engine: Option<VadEngine>,
     pub vad_threshold_mode: Option<VadThresholdMode>,
     pub vad_voice_threshold_percent: Option<u8>,
     pub vad_auto_threshold_percent: Option<u8>,
@@ -706,6 +829,9 @@ pub struct SettingsPatch {
     pub ui_mode: Option<UiMode>,
     pub homemaker_data_storage: Option<HomemakerDataStorage>,
     pub apply_homemaker_local_setup: Option<bool>,
+    pub stt_idle_unload_sec: Option<u32>,
+    pub llm_idle_unload_sec: Option<u32>,
+    pub prewarm_local_models_at_startup: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -723,8 +849,10 @@ impl SettingsPatch {
         if let Some(ptt_hold) = self.ptt_hold {
             settings.ptt_hold = ptt_hold;
         }
-        if let Some(live_dictation_field_indicator) = self.live_dictation_field_indicator {
-            settings.live_dictation_field_indicator = live_dictation_field_indicator;
+        if let Some(recording_indicator) = self.recording_indicator {
+            settings.recording_indicator = recording_indicator;
+        } else if let Some(live_dictation_field_indicator) = self.live_dictation_field_indicator {
+            settings.recording_indicator = live_dictation_field_indicator;
         }
         if let Some(hotkey_game_mode) = self.hotkey_game_mode {
             settings.hotkey_game_mode = hotkey_game_mode;
@@ -801,8 +929,8 @@ impl SettingsPatch {
         if let Some(spoken_punctuation) = self.spoken_punctuation {
             settings.spoken_punctuation = spoken_punctuation;
         }
-        if let Some(auto_punctuation_from_pauses) = self.auto_punctuation_from_pauses {
-            settings.auto_punctuation_from_pauses = auto_punctuation_from_pauses;
+        if let Some(silero_te) = self.silero_te {
+            settings.silero_te = silero_te;
         }
         if let Some(text_processing_mode) = self.text_processing_mode {
             settings.text_processing_mode = text_processing_mode;
@@ -835,6 +963,9 @@ impl SettingsPatch {
         if let Some(silence_timeout_ms) = self.silence_timeout_ms {
             settings.silence_timeout_ms = silence_timeout_ms;
         }
+        if let Some(vad_engine) = self.vad_engine {
+            settings.vad_engine = vad_engine;
+        }
         if let Some(vad_threshold_mode) = self.vad_threshold_mode {
             settings.vad_threshold_mode = vad_threshold_mode;
         }
@@ -861,6 +992,15 @@ impl SettingsPatch {
                     settings.text_rewrite_provider = TextRewriteProvider::Local;
                 }
             }
+        }
+        if let Some(stt_idle_unload_sec) = self.stt_idle_unload_sec {
+            settings.stt_idle_unload_sec = stt_idle_unload_sec;
+        }
+        if let Some(llm_idle_unload_sec) = self.llm_idle_unload_sec {
+            settings.llm_idle_unload_sec = llm_idle_unload_sec;
+        }
+        if let Some(prewarm_local_models_at_startup) = self.prewarm_local_models_at_startup {
+            settings.prewarm_local_models_at_startup = prewarm_local_models_at_startup;
         }
     }
 }

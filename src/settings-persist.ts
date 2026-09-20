@@ -35,11 +35,7 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     ptt_hold: values.push_to_talk
       ? values.ptt_hold
       : (current?.ptt_hold ?? true),
-    live_dictation_field_indicator: values.push_to_talk
-      ? values.live_dictation_field_indicator
-      : (current?.live_dictation_field_indicator ?? true),
-    hotkey_game_mode: values.hotkey_game_mode,
-    hotkey_block_system: values.hotkey_block_system,
+    recording_indicator: values.recording_indicator,
     microphone_device:
       values.microphone_device.length > 0 ? values.microphone_device : null,
     language: values.language === "auto" ? null : values.language,
@@ -65,7 +61,7 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     injection_mode: values.injection_mode,
     text_processing_mode: values.text_processing_mode,
     spoken_punctuation: values.spoken_punctuation,
-    auto_punctuation_from_pauses: values.auto_punctuation_from_pauses,
+    silero_te: values.silero_te,
     numbers_as_words: values.numbers_as_words,
     emulate_enter: values.emulate_enter,
     enter_trigger_phrase: values.enter_trigger_phrase,
@@ -74,10 +70,14 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     capslock_ptt: values.capslock_ptt,
     show_notifications: values.show_notifications,
     silence_timeout_ms: values.silence_timeout_ms,
+    vad_engine: values.vad_engine,
     vad_threshold_mode: values.vad_threshold_mode,
     vad_voice_threshold_percent: values.vad_voice_threshold_percent,
     vad_auto_threshold_percent: values.vad_auto_threshold_percent,
     ui_locale: values.ui_locale,
+    stt_idle_unload_sec: values.stt_idle_unload_sec,
+    llm_idle_unload_sec: values.llm_idle_unload_sec,
+    prewarm_local_models_at_startup: values.prewarm_local_models_at_startup,
   };
 }
 
@@ -87,9 +87,8 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.global_hotkey !== current.global_hotkey ||
     patch.push_to_talk !== current.push_to_talk ||
     patch.ptt_hold !== current.ptt_hold ||
-    patch.live_dictation_field_indicator !== current.live_dictation_field_indicator ||
-    patch.hotkey_game_mode !== current.hotkey_game_mode ||
-    patch.hotkey_block_system !== current.hotkey_block_system ||
+    patch.recording_indicator !==
+      (current.recording_indicator ?? current.live_dictation_field_indicator) ||
     patch.microphone_device !== current.microphone_device ||
     patch.language !== current.language ||
     patch.transcription_provider !== current.transcription_provider ||
@@ -110,7 +109,7 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.injection_mode !== current.injection_mode ||
     patch.text_processing_mode !== current.text_processing_mode ||
     patch.spoken_punctuation !== current.spoken_punctuation ||
-    patch.auto_punctuation_from_pauses !== current.auto_punctuation_from_pauses ||
+    patch.silero_te !== current.silero_te ||
     patch.numbers_as_words !== current.numbers_as_words ||
     patch.emulate_enter !== current.emulate_enter ||
     patch.enter_trigger_phrase !== current.enter_trigger_phrase ||
@@ -119,10 +118,14 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.capslock_ptt !== current.capslock_ptt ||
     patch.show_notifications !== current.show_notifications ||
     patch.silence_timeout_ms !== current.silence_timeout_ms ||
+    patch.vad_engine !== current.vad_engine ||
     patch.vad_threshold_mode !== current.vad_threshold_mode ||
     patch.vad_voice_threshold_percent !== current.vad_voice_threshold_percent ||
     patch.vad_auto_threshold_percent !== current.vad_auto_threshold_percent ||
     patch.ui_locale !== current.ui_locale ||
+    patch.stt_idle_unload_sec !== current.stt_idle_unload_sec ||
+    patch.llm_idle_unload_sec !== current.llm_idle_unload_sec ||
+    patch.prewarm_local_models_at_startup !== current.prewarm_local_models_at_startup ||
     values.api_key.trim().length > 0
   );
 }

@@ -130,6 +130,12 @@ pub struct DiagnosticsSnapshot {
     pub local_stt_model: String,
     #[serde(default)]
     pub sherpa_stt_compiled: bool,
+    #[serde(default)]
+    pub vad_engine: String,
+    #[serde(default)]
+    pub vad_silero_compiled: bool,
+    #[serde(default)]
+    pub vad_silero_runtime_ok: bool,
     pub llm_loaded: bool,
     pub settings_webview_alive: bool,
     pub about_webview_alive: bool,

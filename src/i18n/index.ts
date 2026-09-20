@@ -104,3 +104,23 @@ export function whisperBackendLabel(backend: string): string {
       return t("settings.whisperBackendCpu");
   }
 }
+
+/** Short label for the active VAD engine (diagnostics or settings). */
+export function vadEngineShortLabel(engine: string): string {
+  if (engine === "webrtc") {
+    return t("settings.vadEngineChipWebRtc");
+  }
+  return t("settings.vadEngineChipSilero");
+}
+
+export function vadEngineDiagLabel(diagnostics: {
+  vad_engine: string;
+  vad_silero_runtime_ok?: boolean;
+}): string {
+  const engine = diagnostics.vad_engine;
+  let label = vadEngineShortLabel(engine);
+  if (engine === "silero" && diagnostics.vad_silero_runtime_ok === false) {
+    label = `${label} (${t("settings.vadEngineChipFallback")})`;
+  }
+  return label;
+}

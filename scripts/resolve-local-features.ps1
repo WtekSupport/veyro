@@ -33,6 +33,19 @@ function Resolve-LocalLlmFeature {
     }
 }
 
+function Get-CargoFeatureArgs {
+    param(
+        [AllowEmptyString()]
+        [string]$Features
+    )
+
+    $args = @("--no-default-features")
+    if ($Features) {
+        $args += @("--features", $Features)
+    }
+    return $args
+}
+
 function Resolve-LocalFeatures {
     param(
         [Parameter(Mandatory = $true)]
@@ -55,6 +68,13 @@ function Resolve-LocalFeatures {
         $parts += "local-sherpa-stt"
         if ($IsWindows -and $env:VEYRO_DISABLE_GPU -ne "1") {
             $parts += "local-sherpa-directml"
+        }
+    }
+
+    if ($env:VEYRO_DISABLE_VAD_SILERO -ne "1") {
+        $parts += "vad-silero"
+        if ($env:VEYRO_DISABLE_SILERO_TE -ne "1") {
+            $parts += "silero-te"
         }
     }
 
