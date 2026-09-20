@@ -33,6 +33,15 @@ foreach ($entry in $destMap.GetEnumerator()) {
     }
 }
 
+$libtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|mkl_core\.1|mkl_intel_thread\.1|pytorch_jni)-'
+foreach ($staged in Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue) {
+    if ($staged.Name -notmatch $libtorchPattern) {
+        continue
+    }
+    $destName = $staged.Name -replace "-$([regex]::Escape($triple))\.dll$", ".dll"
+    $resources["binaries/$($staged.Name)"] = $destName
+}
+
 if ($resources.Count -le 1) {
     Write-Error "No native DLLs staged in $binariesDir. Run stage-llm-dlls.ps1 and/or stage-sherpa-dlls.ps1 first."
 }

@@ -59,7 +59,9 @@ if (Test-Path $veyroExe) {
     New-Item -ItemType Directory -Force -Path $portableStage | Out-Null
     Copy-Item $veyroExe $portableStage -Force
     Get-ChildItem $releaseDir -Filter "*.dll" |
-        Where-Object { $_.Name -match '^(llama|ggml|sherpa-onnx|onnxruntime)' } |
+        Where-Object {
+            $_.Name -match '^(llama|ggml|sherpa-onnx|onnxruntime|c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp|mkl_|pytorch_jni)'
+        } |
         Copy-Item -Destination $portableStage -Force
     $zipPath = Join-Path $versionOut "Veyro_${Semver}_x64-portable.zip"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
