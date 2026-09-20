@@ -22,6 +22,9 @@ if ($features -match "local-llm") {
 if ($features -match "local-sherpa-stt") {
     & (Join-Path $PSScriptRoot "stage-sherpa-dlls.ps1") -RepoRoot $repoRoot -Required
 }
+if ($features -match "silero-te") {
+    & (Join-Path $PSScriptRoot "stage-libtorch-dlls.ps1") -RepoRoot $repoRoot -Profile "release" -Required
+}
 & (Join-Path $PSScriptRoot "sync-windows-bundle-resources.ps1") -RepoRoot $repoRoot
 
 if (-not $SkipCargo) {
