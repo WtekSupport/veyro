@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::settings::InjectionMode;
 
 use super::clipboard::paste_via_clipboard;
-use super::focus_target::restore_injection_target;
+use super::focus_target::{capture_injection_target, restore_injection_target};
 use super::timing::{FOCUS_BEFORE_ENTER_MS, FOCUS_BEFORE_INJECT_MS};
 use super::injector::{InjectionBackendInfo, InjectionError, TextInjector};
 
@@ -52,6 +52,7 @@ impl WindowsInjector {
 #[async_trait]
 impl TextInjector for WindowsInjector {
     async fn insert_text(&self, text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+        capture_injection_target();
         restore_injection_target();
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_BEFORE_INJECT_MS));
 
@@ -65,6 +66,7 @@ impl TextInjector for WindowsInjector {
     }
 
     async fn delete_backward(&self, char_count: u32, mode: InjectionMode) -> Result<(), InjectionError> {
+        capture_injection_target();
         restore_injection_target();
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_BEFORE_INJECT_MS));
 
@@ -77,6 +79,7 @@ impl TextInjector for WindowsInjector {
     }
 
     async fn send_enter(&self) -> Result<(), InjectionError> {
+        capture_injection_target();
         restore_injection_target();
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_BEFORE_ENTER_MS));
         super::windows_keyboard::send_return()

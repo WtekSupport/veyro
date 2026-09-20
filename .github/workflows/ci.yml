@@ -64,5 +64,5 @@ jobs:
           if [ -d "$LIB_DIR" ] && [ ! -f "$LIB_DIR/libonnxruntime.so" ]; then
             rm -rf target/sherpa-onnx-prebuilt
           fi
-      - run: cargo test --no-default-features --features local-sherpa-stt --lib
-      - run: cargo clippy --no-default-features --features local-sherpa-stt --lib -- -D warnings
+      - run: cargo test --no-default-features --features local-sherpa-stt,vad-silero --lib
+      - run: cargo clippy --no-default-features --features local-sherpa-stt,vad-silero --lib -- -D warnings

@@ -241,6 +241,18 @@ fn migrate_legacy_fields(value: &mut Value) {
         }
     }
 
+    if value.get("recording_indicator").is_none() {
+        if let Some(legacy) = value.get("live_dictation_field_indicator").cloned() {
+            value["recording_indicator"] = legacy;
+        }
+    }
+
+    if value.get("silero_te").is_none() {
+        if let Some(legacy) = value.get("auto_punctuation_from_pauses").cloned() {
+            value["silero_te"] = legacy;
+        }
+    }
+
     if value.get("local_stt_model").is_none() && value.get("local_whisper_model").is_none() {
         value["local_stt_model"] = Value::String("base".to_string());
     }

@@ -35,7 +35,7 @@ impl HotkeyManager {
                         (
                             settings.global_hotkey.clone(),
                             settings.hotkey_game_mode,
-                            settings.hotkey_block_system,
+                            settings.effective_hotkey_block_system(),
                         )
                     })
             })
@@ -124,7 +124,11 @@ impl HotkeyManager {
         match Self::register(app, hotkey, game_mode, block_system) {
             Ok(()) => {
                 Self::sync_ptt_hold_from_settings(app);
-                if !game_mode && hotkey_conflicts_with_ide(&normalized) {
+                let app_prewarm = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    crate::window::prewarm_recording_overlay(&app_prewarm);
+                });
+                if hotkey_conflicts_with_ide(&normalized) {
                     crate::notify::notify(
                         app,
                         &i18n::translate(locale, "notify.hotkey_title", &[]),
@@ -222,10 +226,20 @@ fn hotkey_conflicts_with_ide(normalized: &str) -> bool {
 pub(crate) fn spawn_ptt_press(app: AppHandle, ctx: Arc<AppContext>) {
     log_ptt_trace(&app, "spawn_ptt_press", "worker started");
     std::thread::spawn(move || {
-        let runtime = ctx.runtime.clone();
-        std::thread::spawn(move || {
-            let _ = tauri::async_runtime::block_on(runtime.prewarm_transcriber());
-        });
+        let settings = ctx
+            .controller
+            .lock()
+            .ok()
+            .map(|controller| controller.settings().clone());
+        let recording_indicator = settings
+            .as_ref()
+            .is_some_and(|s| s.recording_indicator);
+        let suppress_ptt_toasts = settings
+            .as_ref()
+            .is_some_and(|s| s.suppress_ptt_toasts());
+        if let Some(ref settings) = settings {
+            ctx.spawn_local_stt_load_in_background(settings);
+        }
 
         let _ptt_guard = ctx.ptt_lock.lock().ok();
 
@@ -293,11 +307,14 @@ pub(crate) fn spawn_ptt_press(app: AppHandle, ctx: Arc<AppContext>) {
         drop(_ptt_guard);
         log_ptt_trace(&app, "spawn_ptt_press", "worker finished (lock released)");
         if let Some(locale) = locale {
-            crate::notify::notify(
-                &app,
-                &i18n::translate(locale, "app.title", &[]),
-                &i18n::translate(locale, "notify.listening", &[]),
-            );
+            crate::game_input::overlay::router::on_listening_started(&app, recording_indicator);
+            if !suppress_ptt_toasts {
+                crate::notify::notify(
+                    &app,
+                    &i18n::translate(locale, "app.title", &[]),
+                    &i18n::translate(locale, "notify.listening", &[]),
+                );
+            }
             crate::tray::menu::refresh_tray_menu(&app);
         }
     });
@@ -349,6 +366,11 @@ pub(crate) fn spawn_ptt_release(
     log_ptt_trace(&app, "spawn_ptt_release", "worker started");
     std::thread::spawn(move || {
         let locale = app_locale(&app);
+        let suppress_ptt_toasts = ctx
+            .controller
+            .try_lock()
+            .ok()
+            .is_some_and(|c| c.settings().suppress_ptt_toasts());
         ctx.set_audio_callbacks_enabled(false);
         ctx.streaming_preview.stop_and_clear(&app);
         ctx.live_dictation.stop();
@@ -397,6 +419,9 @@ pub(crate) fn spawn_ptt_release(
         }
 
         finish_ptt_release_on_controller(&app, &ctx, speech_queued);
+        if !speech_queued {
+            crate::game_input::overlay::router::on_listening_stopped(&app);
+        }
         if ctx.runtime.pending_count() == 0 && ctx.ptt_postprocess.has_injected_text() {
             crate::app::runtime::schedule_ptt_postprocess_finish(app.clone(), Arc::clone(&ctx));
         }
@@ -404,18 +429,20 @@ pub(crate) fn spawn_ptt_release(
         crate::tray::menu::refresh_tray_menu(&app);
         crate::game_input::reset_toggle_capture();
 
-        if speech_queued {
-            crate::notify::notify(
-                &app,
-                &i18n::translate(locale, "app.title", &[]),
-                &i18n::translate(locale, "notify.processing_speech", &[]),
-            );
-        } else {
-            crate::notify::notify(
-                &app,
-                &i18n::translate(locale, "app.title", &[]),
-                &i18n::translate(locale, "notify.no_speech", &[]),
-            );
+        if !suppress_ptt_toasts {
+            if speech_queued {
+                crate::notify::notify(
+                    &app,
+                    &i18n::translate(locale, "app.title", &[]),
+                    &i18n::translate(locale, "notify.processing_speech", &[]),
+                );
+            } else {
+                crate::notify::notify(
+                    &app,
+                    &i18n::translate(locale, "app.title", &[]),
+                    &i18n::translate(locale, "notify.no_speech", &[]),
+                );
+            }
         }
         log_ptt_trace(
             &app,
@@ -551,7 +578,6 @@ pub fn dispatch_ptt_pressed(app: &AppHandle) {
                 return;
             }
             log_ptt_trace(app, "dispatch_pressed", "spawn ptt press");
-            crate::game_input::overlay::router::on_ptt_pressed(app);
             let Some(ctx) = app.try_state::<Arc<AppContext>>().map(|c| c.inner().clone()) else {
                 if toggle_mode {
                     crate::game_input::reset_toggle_capture();
@@ -567,7 +593,6 @@ pub fn dispatch_ptt_pressed(app: &AppHandle) {
                 return;
             }
             log_ptt_trace(app, "dispatch_pressed", "spawn ptt release (plan release)");
-            crate::game_input::overlay::router::on_ptt_released(app);
             let Some(ctx) = app.try_state::<Arc<AppContext>>().map(|c| c.inner().clone()) else {
                 crate::game_input::reset_toggle_capture();
                 return;
@@ -614,7 +639,7 @@ fn run_toggle_stop_worker(app: &AppHandle) {
     );
 
     emit_listening_stopped(app);
-    crate::game_input::overlay::router::on_ptt_released(app);
+    crate::game_input::overlay::router::on_listening_stopped(app);
 
     #[cfg(windows)]
     crate::game_input::hotkey_win::reset_ptt_key_state();
@@ -639,7 +664,7 @@ pub fn dispatch_ptt_released(app: &AppHandle) {
         .and_then(|mut controller| controller.plan_hotkey_released().ok());
 
     if matches!(plan, Some(HotkeyPlan::PttRelease)) {
-        crate::game_input::overlay::router::on_ptt_released(app);
+        crate::game_input::overlay::router::on_listening_stopped(app);
         let Some(ctx) = app.try_state::<Arc<AppContext>>().map(|c| c.inner().clone()) else {
             return;
         };

@@ -45,6 +45,7 @@ Release artifacts default to `C:\veyro-target` (override with `VEYRO_CARGO_TARGE
 | `VEYRO_DISABLE_LOCAL_LLM=1` | No on-device LLM |
 | `VEYRO_DISABLE_LOCAL_WHISPER=1` | OpenAI STT only |
 | `VEYRO_DISABLE_SHERPA_STT=1` | Omit sherpa-onnx (Parakeet / Qwen3); Whisper-only local STT |
+| `VEYRO_DISABLE_VAD_SILERO=1` | Omit Silero VAD (WebRTC-only speech detection) |
 | `VEYRO_CARGO_TARGET_DIR` | Custom Cargo target directory |
 
 Full table: [BUILD.md](BUILD.md#отключение-функционала-opt-out).

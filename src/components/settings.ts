@@ -17,28 +17,26 @@ import {
   type WhisperModelDownloadProgress,
 } from "../api";
 import type { SettingsTab } from "../state";
-import { t, whisperBackendLabel } from "../i18n";
+import { t } from "../i18n";
 import type { MessageKey } from "../i18n/locales/en";
 import { iconFolder, iconImport, iconPlus, iconTrash } from "./icons";
 import { renderMicMeter } from "./mic-meter";
+import { renderStatusDashboard } from "./status-dashboard";
 import { renderVadThresholdPanel } from "./vad-threshold-panel";
-import type { VadThresholdMode } from "../api";
-import { renderActivityLog } from "./status";
+import type { VadEngine, VadThresholdMode } from "../api";
 
 export interface SettingsFormValues {
   enabled: boolean;
   global_hotkey: string;
   push_to_talk: boolean;
   ptt_hold: boolean;
-  live_dictation_field_indicator: boolean;
-  hotkey_game_mode: boolean;
-  hotkey_block_system: boolean;
+  recording_indicator: boolean;
   microphone_device: string;
   language: string;
   injection_mode: InjectionMode;
   text_processing_mode: TextProcessingMode;
   spoken_punctuation: boolean;
-  auto_punctuation_from_pauses: boolean;
+  silero_te: boolean;
   numbers_as_words: boolean;
   emulate_enter: boolean;
   enter_trigger_phrase: string;
@@ -67,9 +65,13 @@ export interface SettingsFormValues {
   vad_pre_speech_buffer_ms: number;
   vad_minimum_speech_ms: number;
   vad_maximum_segment_ms: number;
+  vad_engine: VadEngine;
   vad_threshold_mode: VadThresholdMode;
   vad_voice_threshold_percent: number;
   vad_auto_threshold_percent: number;
+  stt_idle_unload_sec: number;
+  llm_idle_unload_sec: number;
+  prewarm_local_models_at_startup: boolean;
   api_key: string;
   has_api_key: boolean;
 }
@@ -123,6 +125,18 @@ const LOCAL_STT_MODEL_OPTION_COPY: Record<LocalSttModelKind, LocalSttModelOption
   },
 };
 
+const IDLE_UNLOAD_SEC_OPTIONS = [0, 60, 90, 120, 180, 300, 600] as const;
+
+function idleUnloadOptions(selected: number): string {
+  return IDLE_UNLOAD_SEC_OPTIONS.map((sec) => {
+    const label =
+      sec === 0
+        ? t("settings.idleUnloadNever")
+        : t("settings.idleUnloadDurationSec", { sec: String(sec) });
+    return `<option value="${sec}" ${sec === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+}
+
 const FALLBACK_LOCAL_STT_MODEL_KINDS: LocalSttModelKind[] = [
   "base",
   "small",
@@ -153,27 +167,19 @@ function formatSttModelSize(sizeMb: number): string {
   return t("settings.sttModelSizeFormat", { size: sizeMb });
 }
 
+function formatModelOptionLabel(
+  nameKey: MessageKey,
+  sizeMb: number,
+  reqKey: MessageKey,
+  featuresKey: MessageKey,
+): string {
+  const title = `${t(nameKey)} (${formatSttModelSize(sizeMb)})`;
+  return `${title}\n${t(reqKey)}\n${t(featuresKey)}`;
+}
+
 function formatLocalSttModelOptionLabel(kind: LocalSttModelKind, sizeMb: number): string {
   const copy = LOCAL_STT_MODEL_OPTION_COPY[kind];
-  const title = `${t(copy.name)} (${formatSttModelSize(sizeMb)})`;
-  return `${title}\n${t(copy.req)}\n${t(copy.features)}`;
-}
-
-function localSttModelDisplayName(kind: LocalSttModelKind): string {
-  return t(LOCAL_STT_MODEL_OPTION_COPY[kind].name);
-}
-
-function localSttModelHintKey(model: LocalSttModelKind): MessageKey | null {
-  if (!isWhisperSttModel(model)) {
-    return "settings.sttModelSherpaHint";
-  }
-  if (model === "large_v3_turbo") {
-    return "settings.whisperModelTurboHint";
-  }
-  if (model === "large_v3") {
-    return "settings.whisperModelLargeHint";
-  }
-  return null;
+  return formatModelOptionLabel(copy.name, sizeMb, copy.req, copy.features);
 }
 
 const TEXT_MODE_HINT_KEYS: Record<TextProcessingMode, MessageKey> = {
@@ -183,18 +189,33 @@ const TEXT_MODE_HINT_KEYS: Record<TextProcessingMode, MessageKey> = {
   custom_skill: "settings.textModeHintCustomSkill",
 };
 
-const LLM_MODEL_LABELS: Record<LlmModelKind, MessageKey> = {
-  qwen3_4b: "settings.llmModelQwen3_4B",
-  t_lite_it21: "settings.llmModelTLiteIt21",
-  qwen25_7b: "settings.llmModelQwen25_7B",
-  gec08b: "settings.llmModelGec08B",
+type LlmModelOptionCopy = {
+  name: MessageKey;
+  req: MessageKey;
+  features: MessageKey;
 };
 
-const LLM_MODEL_NAMES: Record<LlmModelKind, MessageKey> = {
-  qwen3_4b: "settings.llmModelNameQwen3_4B",
-  t_lite_it21: "settings.llmModelNameTLiteIt21",
-  qwen25_7b: "settings.llmModelNameQwen25_7B",
-  gec08b: "settings.llmModelNameGec08B",
+const LLM_MODEL_OPTION_COPY: Record<LlmModelKind, LlmModelOptionCopy> = {
+  qwen3_4b: {
+    name: "settings.llmModelNameQwen3_4B",
+    req: "settings.llmModelQwen3_4BReq",
+    features: "settings.llmModelQwen3_4BFeatures",
+  },
+  t_lite_it21: {
+    name: "settings.llmModelNameTLiteIt21",
+    req: "settings.llmModelTLiteIt21Req",
+    features: "settings.llmModelTLiteIt21Features",
+  },
+  qwen25_7b: {
+    name: "settings.llmModelNameQwen25_7B",
+    req: "settings.llmModelQwen25_7BReq",
+    features: "settings.llmModelQwen25_7BFeatures",
+  },
+  gec08b: {
+    name: "settings.llmModelNameGec08B",
+    req: "settings.llmModelGec08BReq",
+    features: "settings.llmModelGec08BFeatures",
+  },
 };
 
 const LLM_MODEL_SIZE_MB: Record<LlmModelKind, number> = {
@@ -203,6 +224,11 @@ const LLM_MODEL_SIZE_MB: Record<LlmModelKind, number> = {
   qwen25_7b: 4_700,
   gec08b: 500,
 };
+
+function formatLlmModelOptionLabel(kind: LlmModelKind, sizeMb: number): string {
+  const copy = LLM_MODEL_OPTION_COPY[kind];
+  return formatModelOptionLabel(copy.name, sizeMb, copy.req, copy.features);
+}
 
 function aiRewriteAvailable(
   values: SettingsFormValues,
@@ -283,15 +309,16 @@ export function settingsToForm(
     global_hotkey: settings.global_hotkey,
     push_to_talk: settings.push_to_talk,
     ptt_hold: settings.ptt_hold ?? true,
-    live_dictation_field_indicator: settings.live_dictation_field_indicator ?? true,
-    hotkey_game_mode: settings.hotkey_game_mode ?? false,
-    hotkey_block_system: settings.hotkey_block_system ?? false,
+    recording_indicator:
+      settings.recording_indicator ??
+      settings.live_dictation_field_indicator ??
+      true,
     microphone_device: settings.microphone_device ?? "",
     language: settings.language ?? "auto",
     injection_mode: settings.injection_mode,
     text_processing_mode: settings.text_processing_mode,
     spoken_punctuation: settings.spoken_punctuation,
-    auto_punctuation_from_pauses: settings.auto_punctuation_from_pauses ?? true,
+    silero_te: settings.silero_te ?? true,
     numbers_as_words: settings.numbers_as_words,
     emulate_enter: settings.emulate_enter,
     enter_trigger_phrase: settings.enter_trigger_phrase,
@@ -324,9 +351,13 @@ export function settingsToForm(
     vad_pre_speech_buffer_ms: settings.vad_pre_speech_buffer_ms ?? 300,
     vad_minimum_speech_ms: settings.vad_minimum_speech_ms ?? 250,
     vad_maximum_segment_ms: settings.vad_maximum_segment_ms ?? 30_000,
+    vad_engine: settings.vad_engine ?? "silero",
     vad_threshold_mode: settings.vad_threshold_mode ?? "auto",
     vad_voice_threshold_percent: settings.vad_voice_threshold_percent ?? 15,
     vad_auto_threshold_percent: settings.vad_auto_threshold_percent ?? 12,
+    stt_idle_unload_sec: settings.stt_idle_unload_sec ?? 180,
+    llm_idle_unload_sec: settings.llm_idle_unload_sec ?? 90,
+    prewarm_local_models_at_startup: settings.prewarm_local_models_at_startup ?? false,
     api_key: "",
     has_api_key: hasApiKey,
   };
@@ -470,8 +501,7 @@ function renderLocalSttModelAction(
   }
 
   if (modelExists) {
-    const modelName = localSttModelDisplayName(values.local_stt_model);
-    return `<span class="field-hint">${escapeHtml(t("settings.whisperModelUsing", { model: modelName }))}</span>`;
+    return "";
   }
 
   return `
@@ -553,8 +583,7 @@ function renderLlmModelAction(
   }
 
   if (modelExists) {
-    const modelName = t(LLM_MODEL_NAMES[values.local_llm_model]);
-    return `<span class="field-hint">${escapeHtml(t("settings.llmModelUsing", { model: modelName }))}</span>`;
+    return "";
   }
 
   return `
@@ -577,7 +606,7 @@ function renderLlmModelOptions(values: SettingsFormValues, llmModels: LlmModelIn
     .map((kind) => {
       const info = llmModels.find((model) => model.kind === kind);
       const sizeMb = info?.size_mb ?? LLM_MODEL_SIZE_MB[kind];
-      const label = t(LLM_MODEL_LABELS[kind], { size: sizeMb });
+      const label = formatLlmModelOptionLabel(kind, sizeMb);
       return `<option value="${kind}" ${values.local_llm_model === kind ? "selected" : ""}>${escapeHtml(label)}</option>`;
     })
     .join("");
@@ -716,13 +745,13 @@ export function renderSettingsForm(
 
   return `
     <form id="settings-form" class="settings-form">
-      <div class="tab-panel tab-panel--log ${activeTab === "status" ? "active" : ""}" data-panel="status">
-        ${renderActivityLog(activityLog)}
+      <div class="tab-panel tab-panel--status ${activeTab === "status" ? "active" : ""}" data-panel="status">
+        ${renderStatusDashboard(values, diagnostics, activityLog)}
       </div>
 
       <div class="tab-panel tab-panel--voice ${activeTab === "voice" ? "active" : ""}" data-panel="voice">
-        <section class="settings-section">
-          <h3 class="settings-section-title">${escapeHtml(t("tabs.section.capture"))}</h3>
+        <section class="settings-section settings-section--activation">
+          <h3 class="settings-section-title">${escapeHtml(t("tabs.section.activation"))}</h3>
         <div class="field-grid voice-ptt-row">
           <label class="field checkbox voice-ptt-toggle">
             <input name="push_to_talk" type="checkbox" ${values.push_to_talk ? "checked" : ""} />
@@ -752,22 +781,10 @@ export function renderSettingsForm(
             <span>${escapeHtml(t("settings.pttHold"))}</span>
           </label>
 
-          <label class="field checkbox ptt-only voice-field-indicator-toggle" ${values.push_to_talk ? "" : "hidden"}>
-            <input name="live_dictation_field_indicator" type="checkbox" ${values.live_dictation_field_indicator ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.liveDictationFieldIndicator"))}</span>
+          <label class="field checkbox voice-recording-indicator-toggle">
+            <input name="recording_indicator" type="checkbox" ${values.recording_indicator ? "checked" : ""} />
+            <span>${escapeHtml(t("settings.recordingIndicator"))}</span>
           </label>
-          ${
-            diagnostics?.hotkey_game_mode_supported
-              ? `<label class="field checkbox voice-game-mode-toggle">
-            <input name="hotkey_game_mode" type="checkbox" ${values.hotkey_game_mode ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.hotkeyGameMode"))}</span>
-          </label>
-          <label class="field checkbox voice-block-system-toggle" ${values.hotkey_game_mode ? "" : "hidden"}>
-            <input name="hotkey_block_system" type="checkbox" ${values.hotkey_block_system ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.hotkeyBlockSystem"))}</span>
-          </label>`
-              : ""
-          }
           ${
             diagnostics?.capslock_ptt_supported
               ? `<label class="field checkbox ptt-only voice-capslock-toggle" ${values.push_to_talk ? "" : "hidden"}>
@@ -780,17 +797,10 @@ export function renderSettingsForm(
               : ""
           }
         </div>
-
-        ${renderVadThresholdPanel(
-          values.vad_threshold_mode,
-          values.vad_voice_threshold_percent,
-          values.vad_auto_threshold_percent,
-          values.push_to_talk,
-        )}
         </section>
 
-        <section class="settings-section">
-          <h3 class="settings-section-title">${escapeHtml(t("tabs.section.microphone"))}</h3>
+        <section class="settings-section settings-section--capture-device">
+          <h3 class="settings-section-title">${escapeHtml(t("tabs.section.captureDevice"))}</h3>
         <div class="field-grid voice-fields">
           <div class="field mic-device-field">
             <span>${escapeHtml(t("settings.microphone"))}</span>
@@ -802,9 +812,29 @@ export function renderSettingsForm(
             ${renderMicMeter(true)}
           </div>
         </div>
+
+        <label class="field checkbox">
+          <input name="audio_preprocess_enabled" type="checkbox" ${values.audio_preprocess_enabled ? "checked" : ""} />
+          <span>${escapeHtml(t("settings.audioPreprocess"))}</span>
+        </label>
+
+        <label class="field checkbox">
+          <input name="audio_noise_reduction_enabled" type="checkbox" ${values.audio_noise_reduction_enabled ? "checked" : ""} ${values.audio_preprocess_enabled ? "" : "disabled"} />
+          <span>${escapeHtml(t("settings.audioNoiseReduction"))}</span>
+        </label>
+
+        ${renderVadThresholdPanel(
+          values.vad_threshold_mode,
+          values.vad_voice_threshold_percent,
+          values.vad_auto_threshold_percent,
+          values.vad_engine,
+          diagnostics?.vad_silero_compiled !== false &&
+            (values.vad_engine !== "silero" || diagnostics?.vad_silero_runtime_ok !== false),
+          diagnostics?.vad_engine,
+        )}
         </section>
 
-        <section class="settings-section">
+        <section class="settings-section settings-section--recognition">
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.recognition"))}</h3>
         <div class="field-grid voice-stt-row">
           <label class="field">
@@ -829,14 +859,9 @@ export function renderSettingsForm(
         <div class="local-whisper-panel" data-local-model-panel ${effectiveTranscriptionProvider(values) === "local" ? "" : "hidden"}>
           <label class="field">
             <span>${escapeHtml(t("settings.whisperModelSelect"))}</span>
-            <select name="local_stt_model" data-whisper-model-select class="stt-model-select">
+            <select name="local_stt_model" data-whisper-model-select class="model-select-rich stt-model-select">
               ${renderLocalSttModelOptions(values, localSttModels)}
             </select>
-            ${
-              localSttModelHintKey(values.local_stt_model)
-                ? `<span class="field-hint">${escapeHtml(t(localSttModelHintKey(values.local_stt_model)!))}</span>`
-                : ""
-            }
           </label>
 
           <label class="field">
@@ -871,7 +896,7 @@ export function renderSettingsForm(
             <span>${escapeHtml(t("settings.whisperUseGpu"))}</span>
             ${
               diagnostics?.whisper_gpu_compiled || diagnostics?.sherpa_stt_compiled
-                ? `<span class="field-hint">${escapeHtml(t("settings.whisperBackend", { backend: whisperBackendLabel(diagnostics.whisper_backend) }))}</span>`
+                ? ""
                 : `<span class="field-hint">${escapeHtml(t("settings.whisperGpuUnavailable"))}</span>`
             }
           </label>
@@ -922,16 +947,6 @@ export function renderSettingsForm(
             >${iconImport()}</button>
           </div>
         </label>
-
-        <label class="field checkbox">
-          <input name="audio_preprocess_enabled" type="checkbox" ${values.audio_preprocess_enabled ? "checked" : ""} />
-          <span>${escapeHtml(t("settings.audioPreprocess"))}</span>
-        </label>
-
-        <label class="field checkbox">
-          <input name="audio_noise_reduction_enabled" type="checkbox" ${values.audio_noise_reduction_enabled ? "checked" : ""} ${values.audio_preprocess_enabled ? "" : "disabled"} />
-          <span>${escapeHtml(t("settings.audioNoiseReduction"))}</span>
-        </label>
         </section>
       </div>
 
@@ -955,7 +970,7 @@ export function renderSettingsForm(
             }
             <label class="field">
               <span>${escapeHtml(t("settings.llmModelSelect"))}</span>
-              <select name="local_llm_model" data-llm-model-select>
+              <select name="local_llm_model" data-llm-model-select class="model-select-rich llm-model-select">
                 ${renderLlmModelOptions(values, llmModels)}
               </select>
             </label>
@@ -1052,6 +1067,33 @@ export function renderSettingsForm(
             </select>
           </label>
 
+          <details class="memory-details advanced-span-2">
+            <summary>${escapeHtml(t("settings.memoryAdvanced"))}</summary>
+            <div class="advanced-grid memory-grid">
+              <label class="field checkbox advanced-span-2">
+                <input
+                  name="prewarm_local_models_at_startup"
+                  type="checkbox"
+                  ${values.prewarm_local_models_at_startup ? "checked" : ""}
+                />
+                <span>${escapeHtml(t("settings.prewarmLocalModelsAtStartup"))}</span>
+              </label>
+              <label class="field">
+                <span>${escapeHtml(t("settings.sttIdleUnload"))}</span>
+                <select name="stt_idle_unload_sec">
+                  ${idleUnloadOptions(values.stt_idle_unload_sec)}
+                </select>
+              </label>
+              <label class="field">
+                <span>${escapeHtml(t("settings.llmIdleUnload"))}</span>
+                <select name="llm_idle_unload_sec">
+                  ${idleUnloadOptions(values.llm_idle_unload_sec)}
+                </select>
+              </label>
+              <p class="field-hint advanced-span-2">${escapeHtml(t("settings.memoryIdleHint"))}</p>
+            </div>
+          </details>
+
           <details class="vad-details advanced-span-2">
             <summary>${escapeHtml(t("settings.vadAdvanced"))}</summary>
             <div class="advanced-grid vad-grid">
@@ -1110,8 +1152,8 @@ export function renderSettingsForm(
           </label>
 
           <label class="field checkbox" data-local-only-toggle>
-            <input name="auto_punctuation_from_pauses" type="checkbox" ${values.auto_punctuation_from_pauses ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.autoPunctuationFromPauses"))}</span>
+            <input name="silero_te" type="checkbox" ${values.silero_te ? "checked" : ""} />
+            <span>${escapeHtml(t("settings.sileroTe"))}</span>
           </label>
 
           <label class="field checkbox">
@@ -1168,9 +1210,7 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     global_hotkey: String(data.get("global_hotkey") ?? ""),
     push_to_talk: data.get("push_to_talk") === "on",
     ptt_hold: data.get("ptt_hold") === "on",
-    live_dictation_field_indicator: data.get("live_dictation_field_indicator") === "on",
-    hotkey_game_mode: data.get("hotkey_game_mode") === "on",
-    hotkey_block_system: data.get("hotkey_block_system") === "on",
+    recording_indicator: data.get("recording_indicator") === "on",
     microphone_device: String(data.get("microphone_device") ?? ""),
     language: String(data.get("language") ?? "auto"),
     injection_mode: String(data.get("injection_mode") ?? "auto") as InjectionMode,
@@ -1178,7 +1218,7 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
       data.get("text_processing_mode") ?? "basic",
     ) as TextProcessingMode,
     spoken_punctuation: data.get("spoken_punctuation") === "on",
-    auto_punctuation_from_pauses: data.get("auto_punctuation_from_pauses") === "on",
+    silero_te: data.get("silero_te") === "on",
     numbers_as_words: data.get("numbers_as_words") === "on",
     emulate_enter: data.get("emulate_enter") === "on",
     enter_trigger_phrase: String(data.get("enter_trigger_phrase") ?? ""),
@@ -1217,6 +1257,9 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     vad_pre_speech_buffer_ms: Number(data.get("vad_pre_speech_buffer_ms") ?? 300),
     vad_minimum_speech_ms: Number(data.get("vad_minimum_speech_ms") ?? 250),
     vad_maximum_segment_ms: Number(data.get("vad_maximum_segment_ms") ?? 30_000),
+    vad_engine: (String(data.get("vad_engine") ?? "silero") === "webrtc"
+      ? "webrtc"
+      : "silero") as VadEngine,
     vad_threshold_mode: (String(data.get("vad_threshold_mode") ?? "auto") === "manual"
       ? "manual"
       : "auto") as VadThresholdMode,
@@ -1224,6 +1267,9 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     vad_auto_threshold_percent: Number(
       data.get("vad_auto_threshold_percent") ?? 12,
     ),
+    stt_idle_unload_sec: Number(data.get("stt_idle_unload_sec") ?? 180),
+    llm_idle_unload_sec: Number(data.get("llm_idle_unload_sec") ?? 90),
+    prewarm_local_models_at_startup: data.get("prewarm_local_models_at_startup") === "on",
     api_key: String(data.get("api_key") ?? ""),
     has_api_key: false,
   };

@@ -1,12 +1,17 @@
 [package]
 name = "veyro"
-version = "1.8.8"
+version = "1.8.16"
 description = "Veyro — desktop voice dictation by MKdee Tech"
 authors = ["MKdee Tech"]
 edition = "2021"
 
 [features]
-default = ["local-whisper", "local-llm", "local-sherpa-stt"]
+# Full local stack is enabled by npm scripts / resolve-local-features.ps1 (--features …).
+# Empty defaults keep `tauri dev`/`tauri build` in sync with the pre-build cargo invocation
+# (which uses --no-default-features). Non-empty defaults caused mixed feature sets and LNK1120 on Windows.
+default = []
+vad-silero = ["dep:wavekat-vad"]
+silero-te = ["dep:tch"]
 local-whisper = ["dep:whisper-rs"]
 local-sherpa-stt = ["dep:sherpa-onnx"]
 local-sherpa-cuda = ["local-sherpa-stt"]
@@ -47,6 +52,7 @@ dirs = "6"
 cpal = "0.15"
 rodio = { version = "0.19", default-features = false, features = ["vorbis"] }
 webrtc-vad = "0.4"
+wavekat-vad = { version = "0.1.16", optional = true, default-features = false, features = ["webrtc", "silero"] }
 rubato = "0.16"
 crossbeam-channel = "0.5"
 async-trait = "0.1"
@@ -78,6 +84,8 @@ notify = "7.0"
 sha2 = "0.10"
 hex = "0.4"
 ouroboros = "0.18"
+sysinfo = "0.33"
+tch = { version = "0.16", optional = true, default-features = false, features = ["download-libtorch"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_SystemInformation", "Win32_Security", "Win32_Security_Authorization"] }

@@ -63,10 +63,8 @@ import {
 import { renderHomemakerConfigBanner } from "./components/homemaker-loading-banner";
 import { mountRotatingTagline } from "./components/rotating-tagline";
 import { startMicLevelMonitor } from "./components/mic-meter";
-import {
-  bindVadThresholdPanel,
-  startVadThresholdMonitor,
-} from "./components/vad-threshold-panel";
+import { bindVadThresholdPanel } from "./components/vad-threshold-panel";
+import { syncVadGraphPolling } from "./components/vad-monitor";
 import {
   AI_TEXT_MODES,
   renderSettingsForm,
@@ -86,13 +84,14 @@ import {
 } from "./components/update-banner";
 import {
   patchLiveStatusUi,
-  renderCompactDiagnostics,
   renderCompactStatusBar,
   renderErrorBanner,
   renderStatusBar,
   renderUsageHint,
   updateActivityLogDom,
 } from "./components/status";
+import { syncStatusDashboardLifecycle } from "./components/status-dashboard";
+import { APP_VERSION_DISPLAY } from "./generated/version";
 import { bindUiModeSwitch, renderUiModeLink } from "./components/ui-mode-switch";
 import { getLocale, setLocale, subscribeLocale, t } from "./i18n";
 import { skillCatalogUrl } from "./lib/skill-catalog-url";
@@ -184,7 +183,17 @@ function render(): void {
           <img class="app-logo" src="${logoUrl}" alt="" width="44" height="44" />
         </button>
         <div class="header-text">
-          <h1>${escapeHtml(t("app.title"))}</h1>
+          <div class="header-title-line">
+            <h1>${escapeHtml(t("app.title"))}</h1>
+            <span class="header-meta">
+              <span class="header-version" title="${escapeHtml(t("about.version", { version: APP_VERSION_DISPLAY }))}">v${escapeHtml(APP_VERSION_DISPLAY)}</span>
+              ${
+                diagnostics?.process_elevated
+                  ? `<span class="header-admin" title="${escapeHtml(t("header.adminHint"))}">${escapeHtml(t("header.admin"))}</span>`
+                  : ""
+              }
+            </span>
+          </div>
           <p class="subtitle subtitle-rotator" aria-live="polite">
             <span class="subtitle-line" data-tagline></span>
           </p>
@@ -206,8 +215,6 @@ function render(): void {
       }
 
       ${renderErrorBanner(status, lastError)}
-
-      ${homemaker ? "" : renderCompactDiagnostics(diagnostics)}
 
       ${
         settings && homemaker
@@ -238,6 +245,17 @@ function render(): void {
 
   bindEvents();
   restoreActivePanelScroll(scrollTop);
+
+  if (!homemaker) {
+    void syncStatusDashboardLifecycle(activeTab === "status");
+    syncVadGraphPolling({
+      statusTab: activeTab === "status",
+      voiceTab: activeTab === "voice",
+    });
+  } else {
+    void syncStatusDashboardLifecycle(false);
+    syncVadGraphPolling({ statusTab: false, voiceTab: false });
+  }
 }
 
 function syncTextModeUi(form: HTMLFormElement): void {
@@ -381,19 +399,6 @@ function syncCaptureModeUi(form: HTMLFormElement): void {
     element.hidden = pushToTalk;
   });
 
-  syncGameModeUi(form);
-}
-
-function syncGameModeUi(form: HTMLFormElement): void {
-  const gameMode =
-    form.querySelector<HTMLInputElement>('input[name="hotkey_game_mode"]')
-      ?.checked ?? false;
-
-  form
-    .querySelectorAll<HTMLElement>(".voice-block-system-toggle")
-    .forEach((element) => {
-      element.hidden = !gameMode;
-    });
 }
 
 async function handleRecoverEngine(): Promise<void> {
@@ -622,6 +627,7 @@ function bindExpertTabListeners(): void {
       return;
     }
     setActiveTab(tab);
+    void syncStatusDashboardLifecycle(tab === "status");
     if (tab === "advanced") {
       void refreshDiagnostics();
     }
@@ -954,12 +960,6 @@ function bindEvents(): void {
           }
           syncTextModeUi(form);
         }
-        if (
-          element instanceof HTMLInputElement &&
-          element.name === "hotkey_game_mode"
-        ) {
-          syncGameModeUi(form);
-        }
         if (element instanceof HTMLInputElement && element.name === "emulate_enter") {
           syncEnterPhraseUi(form);
         }
@@ -1205,7 +1205,9 @@ async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise
     }
 
     void prewarmMicrophone(effectiveSettings.microphone_device);
-    void prewarmLocalModels();
+    if (effectiveSettings.prewarm_local_models_at_startup) {
+      void prewarmLocalModels();
+    }
 
     void runStartupUpdateCheck(
       mountUpdateBannerSlot(),
@@ -1224,7 +1226,6 @@ async function bootstrap(): Promise<void> {
   subscribeUi(() => render());
   subscribeLocale(() => render());
   startMicLevelMonitor();
-  startVadThresholdMonitor();
 
   try {
     const [status, settings] = await Promise.all([

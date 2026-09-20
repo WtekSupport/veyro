@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use tauri::{AppHandle, Manager};
@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::app::activity_log::{ActivityLevel, ActivityLog};
+use crate::app::model_idle::note_dictation_activity;
 use serde_json::{json, Value};
 use crate::app::context::AppContext;
 use crate::app::controller::{with_controller, SharedController};
@@ -56,6 +57,7 @@ pub struct PipelineRuntime {
     pending: Arc<AtomicUsize>,
     queue_tx: UnboundedSender<SegmentJob>,
     activity_log: Arc<ActivityLog>,
+    dictation_activity_ms: Arc<AtomicU64>,
 }
 
 impl PipelineRuntime {
@@ -66,6 +68,7 @@ impl PipelineRuntime {
         cancel: CancellationToken,
         activity_log: Arc<ActivityLog>,
         llm_engine: LlmEngine,
+        dictation_activity_ms: Arc<AtomicU64>,
     ) -> Self {
         let pending = Arc::new(AtomicUsize::new(0));
         let (queue_tx, mut queue_rx) = unbounded_channel();
@@ -80,6 +83,7 @@ impl PipelineRuntime {
         let worker_cancel = cancel.clone();
         let worker_pending = pending.clone();
         let worker_log = activity_log.clone();
+        let worker_dictation_activity = dictation_activity_ms.clone();
         let worker_context = Arc::new(Mutex::new(String::new()));
 
         tauri::async_runtime::spawn(async move {
@@ -97,6 +101,7 @@ impl PipelineRuntime {
                     worker_cancel.clone(),
                     worker_pending.clone(),
                     worker_log.clone(),
+                    worker_dictation_activity.clone(),
                     worker_context.clone(),
                     worker_llm_engine.clone(),
                 )
@@ -112,6 +117,7 @@ impl PipelineRuntime {
             pending,
             queue_tx,
             activity_log,
+            dictation_activity_ms,
         }
     }
 
@@ -203,6 +209,7 @@ impl PipelineRuntime {
         let queued = self.pending.load(Ordering::SeqCst);
         log_activity(
             &self.activity_log,
+            &self.dictation_activity_ms,
             Some(&app),
             ActivityLevel::Info,
             "activity.queue.enqueued",
@@ -226,11 +233,13 @@ impl PipelineRuntime {
 
 fn log_activity(
     activity_log: &ActivityLog,
+    dictation_activity_ms: &AtomicU64,
     app: Option<&AppHandle>,
     level: ActivityLevel,
     message_key: &str,
     message_args: Value,
 ) {
+    note_dictation_activity(dictation_activity_ms, message_key);
     activity_log.push(level, message_key, message_args);
     if let Some(app) = app {
         emit_activity_log(app, &activity_log.snapshot());
@@ -277,6 +286,7 @@ async fn process_one_segment(
     cancel: Arc<RwLock<CancellationToken>>,
     pending: Arc<AtomicUsize>,
     activity_log: Arc<ActivityLog>,
+    dictation_activity_ms: Arc<AtomicU64>,
     last_whisper_context: Arc<Mutex<String>>,
     llm_engine: Arc<RwLock<LlmEngine>>,
 ) {
@@ -299,6 +309,7 @@ async fn process_one_segment(
                 &injector,
                 &llm_engine,
                 &activity_log,
+                &dictation_activity_ms,
                 &http,
             )
             .await;
@@ -314,6 +325,7 @@ async fn process_one_segment(
     if segment.is_empty() {
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Warn,
             "activity.queue.skipped_empty",
@@ -325,6 +337,7 @@ async fn process_one_segment(
 
     log_activity(
         &activity_log,
+        &dictation_activity_ms,
         Some(&app),
         ActivityLevel::Info,
         "activity.ai.transcribing",
@@ -344,6 +357,7 @@ async fn process_one_segment(
     if child_cancel.is_cancelled() {
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Warn,
             "activity.ai.cancelled",
@@ -367,6 +381,7 @@ async fn process_one_segment(
     if preprocessed.skipped_as_silence {
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Warn,
             "activity.segment_dropped_silence",
@@ -453,6 +468,7 @@ async fn process_one_segment(
             if settings.uses_openai_transcription() {
                 log_activity(
                     &activity_log,
+                    &dictation_activity_ms,
                     Some(&app),
                     ActivityLevel::Warn,
                     "activity.transcription.openai_failed",
@@ -464,6 +480,7 @@ async fn process_one_segment(
                 reload_stt_engine(&transcriber, &shared_http, &settings, &cancel);
                 log_activity(
                     &activity_log,
+                    &dictation_activity_ms,
                     Some(&app),
                     ActivityLevel::Warn,
                     "activity.transcription.engine_reloaded",
@@ -491,6 +508,7 @@ async fn process_one_segment(
                 app_error_from_transcription(error, settings.ui_locale),
                 &pending,
                 &activity_log,
+                &dictation_activity_ms,
                 &injector,
             )
             .await;
@@ -517,6 +535,7 @@ async fn process_one_segment(
     if settings.text_processing_mode.uses_ai() && !defer_ai_postprocess {
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Info,
             "activity.text.rewriting",
@@ -535,6 +554,7 @@ async fn process_one_segment(
                 AppError::Internal(error),
                 &pending,
                 &activity_log,
+                &dictation_activity_ms,
                 &injector,
             )
             .await;
@@ -566,6 +586,7 @@ async fn process_one_segment(
                 error.into(),
                 &pending,
                 &activity_log,
+                &dictation_activity_ms,
                 &injector,
             )
             .await;
@@ -576,6 +597,7 @@ async fn process_one_segment(
     if settings.text_processing_mode.uses_ai() && !defer_ai_postprocess {
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Info,
             "activity.text.rewrite_done",
@@ -590,6 +612,7 @@ async fn process_one_segment(
     if processed.rewrite_fallback && !defer_ai_postprocess {
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Warn,
             "activity.text.rewrite_fallback",
@@ -615,6 +638,7 @@ async fn process_one_segment(
             .unwrap_or_default();
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Warn,
             "activity.ai.empty",
@@ -622,6 +646,7 @@ async fn process_one_segment(
         );
         log_activity(
             &activity_log,
+            &dictation_activity_ms,
             Some(&app),
             ActivityLevel::Warn,
             "activity.ai.empty_details",
@@ -644,6 +669,7 @@ async fn process_one_segment(
 
     log_activity(
         &activity_log,
+        &dictation_activity_ms,
         Some(&app),
         ActivityLevel::Info,
         "activity.ai.transcribed",
@@ -665,6 +691,7 @@ async fn process_one_segment(
     notify_localized(&app, &settings, "notify.injecting", &[]);
     log_activity(
         &activity_log,
+        &dictation_activity_ms,
         Some(&app),
         ActivityLevel::Info,
         "activity.inject.inserting",
@@ -681,10 +708,14 @@ async fn process_one_segment(
                 .finalize(&normalized, injector.clone(), &settings)
                 .await
         } else {
-            injector.insert_text(&normalized, settings.injection_mode).await
+            injector
+                .insert_text(&normalized, settings.injection_mode_for_host())
+                .await
         }
     } else {
-        injector.insert_text(&normalized, settings.injection_mode).await
+        injector
+            .insert_text(&normalized, settings.injection_mode_for_host())
+            .await
     };
 
     if let Err(error) = injection_result {
@@ -694,6 +725,7 @@ async fn process_one_segment(
             error.into(),
             &pending,
             &activity_log,
+            &dictation_activity_ms,
             &injector,
         )
         .await;
@@ -708,6 +740,7 @@ async fn process_one_segment(
                 error.into(),
                 &pending,
                 &activity_log,
+                &dictation_activity_ms,
                 &injector,
             )
             .await;
@@ -724,6 +757,7 @@ async fn process_one_segment(
 
     log_activity(
         &activity_log,
+        &dictation_activity_ms,
         Some(&app),
         ActivityLevel::Info,
         "activity.inject.done",
@@ -796,6 +830,7 @@ pub(crate) fn schedule_ptt_postprocess_finish(app: AppHandle, ctx: Arc<AppContex
     let injector = ctx.runtime.injector();
     let llm_engine = ctx.llm_engine.clone();
     let activity_log = ctx.activity_log.clone();
+    let dictation_activity_ms = ctx.llm_dictation_activity_ms.clone();
     let http = ctx.http.clone();
     tauri::async_runtime::spawn(async move {
         try_finish_ptt_postprocess(
@@ -804,6 +839,7 @@ pub(crate) fn schedule_ptt_postprocess_finish(app: AppHandle, ctx: Arc<AppContex
             &injector,
             &llm_engine,
             &activity_log,
+            &dictation_activity_ms,
             &http,
         )
         .await;
@@ -816,6 +852,7 @@ async fn try_finish_ptt_postprocess(
     injector: &Arc<dyn TextInjector>,
     llm_engine: &Arc<RwLock<LlmEngine>>,
     activity_log: &Arc<ActivityLog>,
+    dictation_activity_ms: &AtomicU64,
     http: &reqwest::Client,
 ) {
     let ptt_active = controller
@@ -870,6 +907,7 @@ async fn try_finish_ptt_postprocess(
 
     log_activity(
         activity_log,
+        dictation_activity_ms,
         Some(app),
         ActivityLevel::Info,
         "activity.text.rewriting",
@@ -898,7 +936,7 @@ async fn try_finish_ptt_postprocess(
 
     tray::blink::start_purple_blink(app);
 
-    let injection_mode = settings.injection_mode;
+    let injection_mode = settings.injection_mode_for_host();
     let rollback_for_delete = rollback_chars;
     let rewrite_fut = rewrite_processed_text(
         &rewrite_input,
@@ -932,6 +970,7 @@ async fn try_finish_ptt_postprocess(
             warn!("PTT AI postprocess failed, keeping phase-1 text: {error}");
             log_activity(
                 activity_log,
+                dictation_activity_ms,
                 Some(app),
                 ActivityLevel::Warn,
                 "activity.text.rewrite_fallback",
@@ -947,6 +986,7 @@ async fn try_finish_ptt_postprocess(
 
     log_activity(
         activity_log,
+        dictation_activity_ms,
         Some(app),
         ActivityLevel::Info,
         "activity.text.rewrite_done",
@@ -961,6 +1001,7 @@ async fn try_finish_ptt_postprocess(
     if processed.rewrite_fallback {
         log_activity(
             activity_log,
+            dictation_activity_ms,
             Some(app),
             ActivityLevel::Warn,
             "activity.text.rewrite_fallback",
@@ -1103,6 +1144,9 @@ fn notify_localized(
     body_key: &str,
     body_args: &[(&str, &str)],
 ) {
+    if settings.suppress_ptt_toasts() {
+        return;
+    }
     crate::notify::notify(
         app,
         &i18n::translate(settings.ui_locale, "app.title", &[]),
@@ -1129,6 +1173,7 @@ async fn handle_pipeline_error(
     error: AppError,
     pending: &Arc<AtomicUsize>,
     activity_log: &ActivityLog,
+    dictation_activity_ms: &AtomicU64,
     injector: &Arc<dyn TextInjector>,
 ) {
     clear_live_dictation_indicator(app, injector).await;
@@ -1140,6 +1185,7 @@ async fn handle_pipeline_error(
         .unwrap_or(UiLocale::En);
     log_activity(
         activity_log,
+        dictation_activity_ms,
         Some(app),
         ActivityLevel::Error,
         "activity.pipeline.error",

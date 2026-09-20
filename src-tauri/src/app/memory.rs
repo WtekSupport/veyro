@@ -2,6 +2,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::app::context::AppContext;
 use crate::llm::model_store::{needs_local_llm, needs_local_whisper};
+use crate::settings::{sherpa_stt_compiled, whisper_local_compiled, AppSettings};
+use crate::transcription::local_stt_model_store;
 use crate::window::{ABOUT_WINDOW_LABEL, SETTINGS_WINDOW_LABEL};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -28,10 +30,23 @@ pub fn collect_memory_snapshot(app: &AppHandle, ctx: &AppContext) -> MemorySnaps
     }
 }
 
-pub fn needs_whisper_prewarm(settings: &crate::settings::AppSettings) -> bool {
+pub fn needs_local_stt(settings: &AppSettings) -> bool {
+    settings.transcription_provider == "local"
+        && (whisper_local_compiled() || sherpa_stt_compiled())
+}
+
+pub fn selected_local_stt_ready(settings: &AppSettings) -> bool {
+    local_stt_model_store::resolve_model_bundle(settings)
+        .ok()
+        .is_some_and(|path| {
+            local_stt_model_store::bundle_ready(&path, settings.local_stt_model)
+        })
+}
+
+pub fn needs_whisper_prewarm(settings: &AppSettings) -> bool {
     needs_local_whisper(settings)
 }
 
-pub fn needs_llm_prewarm(settings: &crate::settings::AppSettings) -> bool {
+pub fn needs_llm_prewarm(settings: &AppSettings) -> bool {
     needs_local_llm(settings)
 }
