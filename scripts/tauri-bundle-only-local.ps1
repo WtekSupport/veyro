@@ -11,7 +11,19 @@ Set-Location $repoRoot
 & (Join-Path $PSScriptRoot "ensure-updater-keys.ps1")
 & node (Join-Path $PSScriptRoot "sync-updater-config.mjs")
 & (Join-Path $PSScriptRoot "ensure-rust-path.ps1")
+& (Join-Path $PSScriptRoot "ensure-cmake.ps1")
 . (Join-Path $PSScriptRoot "ensure-cargo-target.ps1")
+
+. (Join-Path $PSScriptRoot "enable-serial-cmake-wrapper.ps1")
+Enable-SerialCmakeWrapper -RepoRoot $repoRoot
+$cmakeWrapper = Join-Path (Join-Path $repoRoot ".tools") "veyro-cmake-wrapper"
+$cmakeBin = Join-Path (Join-Path (Join-Path $repoRoot ".tools") "cmake") "bin"
+$cmakePath = @()
+if (Test-Path $cmakeWrapper) { $cmakePath += $cmakeWrapper }
+if (Test-Path (Join-Path $cmakeBin "cmake.exe")) { $cmakePath += $cmakeBin }
+if ($cmakePath.Count -gt 0) {
+    $env:PATH = (($cmakePath -join ";") + ";" + $env:PATH)
+}
 . (Join-Path $PSScriptRoot "resolve-local-features.ps1")
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
 $parallel = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
