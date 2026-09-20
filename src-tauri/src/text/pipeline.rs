@@ -359,7 +359,7 @@ mod tests {
             seg("второе", 1400, 1800),
         ];
         let processed = process_with_segments("первое второе", &segments, &settings).await;
-        assert_eq!(processed.text, "Первое второе. ");
+        assert_eq!(processed.text, "Первое второе");
     }
 
     #[tokio::test]
