@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "silero-te"), allow(dead_code))]
+
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
