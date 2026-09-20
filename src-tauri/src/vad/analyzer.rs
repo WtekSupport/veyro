@@ -1,7 +1,5 @@
-use std::sync::atomic::AtomicBool;
-
 #[cfg(feature = "vad-silero")]
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use webrtc_vad::{Vad, VadMode};
 
