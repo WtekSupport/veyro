@@ -64,7 +64,7 @@ jobs:
       - name: Drop stale sherpa prebuilt dir (rust-cache can restore empty lib folders)
         run: |
           LIB_DIR="target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-linux-x64-shared-lib/lib"
-          if [ -d "$LIB_DIR" ] && [ ! -f "$LIB_DIR/libonnxruntime.so" ]; then
+          if [ -d "$LIB_DIR" ] && { [ ! -f "$LIB_DIR/libonnxruntime.so" ] || [ ! -f "$LIB_DIR/libsherpa-onnx-c-api.so" ]; }; then
             rm -rf target/sherpa-onnx-prebuilt
           fi
       - run: cargo test --no-default-features --features local-sherpa-stt,vad-silero --lib
