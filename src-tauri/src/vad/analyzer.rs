@@ -11,6 +11,7 @@ use crate::vad::threshold::peak_level_percent;
 pub static SILERO_RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 /// Peak below this (in idle) skips Silero when WebRTC is also silent.
+#[cfg(feature = "vad-silero")]
 const IDLE_SILENCE_FLOOR_PERCENT: u8 = 3;
 
 pub struct VoiceAnalyzer {

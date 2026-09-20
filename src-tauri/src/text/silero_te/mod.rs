@@ -1,4 +1,5 @@
 mod engine;
+#[cfg(feature = "silero-te")]
 mod process;
 pub mod store;
 
