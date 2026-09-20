@@ -12,7 +12,20 @@
                                      "binaries/sherpa-onnx-c-api-x86_64-pc-windows-msvc.dll":  "sherpa-onnx-c-api.dll",
                                      "binaries/sherpa-onnx-cxx-api-x86_64-pc-windows-msvc.dll":  "sherpa-onnx-cxx-api.dll",
                                      "binaries/onnxruntime-x86_64-pc-windows-msvc.dll":  "onnxruntime.dll",
-                                     "binaries/onnxruntime_providers_shared-x86_64-pc-windows-msvc.dll":  "onnxruntime_providers_shared.dll"
+                                     "binaries/onnxruntime_providers_shared-x86_64-pc-windows-msvc.dll":  "onnxruntime_providers_shared.dll",
+                                     "binaries/asmjit-x86_64-pc-windows-msvc.dll":  "asmjit.dll",
+                                     "binaries/c10-x86_64-pc-windows-msvc.dll":  "c10.dll",
+                                     "binaries/fbgemm-x86_64-pc-windows-msvc.dll":  "fbgemm.dll",
+                                     "binaries/fbjni-x86_64-pc-windows-msvc.dll":  "fbjni.dll",
+                                     "binaries/libiomp5md-x86_64-pc-windows-msvc.dll":  "libiomp5md.dll",
+                                     "binaries/libiompstubs5md-x86_64-pc-windows-msvc.dll":  "libiompstubs5md.dll",
+                                     "binaries/mkl_core.1-x86_64-pc-windows-msvc.dll":  "mkl_core.1.dll",
+                                     "binaries/mkl_intel_thread.1-x86_64-pc-windows-msvc.dll":  "mkl_intel_thread.1.dll",
+                                     "binaries/pytorch_jni-x86_64-pc-windows-msvc.dll":  "pytorch_jni.dll",
+                                     "binaries/torch-x86_64-pc-windows-msvc.dll":  "torch.dll",
+                                     "binaries/torch_cpu-x86_64-pc-windows-msvc.dll":  "torch_cpu.dll",
+                                     "binaries/torch_global_deps-x86_64-pc-windows-msvc.dll":  "torch_global_deps.dll",
+                                     "binaries/uv-x86_64-pc-windows-msvc.dll":  "uv.dll"
                                  }
                }
 }
