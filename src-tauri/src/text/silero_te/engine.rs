@@ -1,12 +1,17 @@
-use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(feature = "silero-te")]
+use std::collections::HashSet;
+
+#[cfg(feature = "silero-te")]
 use serde::Deserialize;
 
+#[cfg(feature = "silero-te")]
 use super::process::{
     build_uni_symbols, enhance_tokens, language_code, language_index, process_unicode,
     unitoken_into_token,
 };
+#[cfg(feature = "silero-te")]
 use super::store;
 
 static ENGINE: OnceLock<Mutex<SileroTeEngine>> = OnceLock::new();
@@ -26,6 +31,7 @@ struct LoadedEngine {
     pad_token: String,
 }
 
+#[cfg(feature = "silero-te")]
 #[derive(Deserialize)]
 struct TeMeta {
     pad: bool,

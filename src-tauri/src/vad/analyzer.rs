@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+
+#[cfg(feature = "vad-silero")]
+use std::sync::atomic::Ordering;
 
 use webrtc_vad::{Vad, VadMode};
 
@@ -79,7 +82,7 @@ impl VoiceAnalyzer {
         *self = Self::new(engine, threshold_percent);
     }
 
-    pub fn is_voice(&mut self, frame: &[f32], speaking: bool) -> bool {
+    pub fn is_voice(&mut self, frame: &[f32], _speaking: bool) -> bool {
         let peak = peak_level_percent(frame);
         let threshold = self.threshold_percent;
         if peak < threshold {
@@ -95,7 +98,7 @@ impl VoiceAnalyzer {
 
         #[cfg(feature = "vad-silero")]
         {
-            let run_silero = if speaking {
+            let run_silero = if _speaking {
                 peak >= IDLE_SILENCE_FLOOR_PERCENT || webrtc_voice
             } else {
                 webrtc_voice || peak >= IDLE_SILENCE_FLOOR_PERCENT
