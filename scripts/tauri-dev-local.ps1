@@ -135,6 +135,10 @@ if (-not (Test-Path $tauriJs)) {
     Write-Error "Tauri CLI not found. Run npm install in the repo root."
 }
 
+if ($features -match "silero-te") {
+    & (Join-Path $PSScriptRoot "stage-libtorch-dlls.ps1") -RepoRoot $repoRoot -Profile "debug"
+}
+
 $nodeExe = (Get-Command node -ErrorAction Stop).Source
 & $nodeExe $tauriJs dev --features $features -- -j $parallel
 if ($LASTEXITCODE -ne 0) {
