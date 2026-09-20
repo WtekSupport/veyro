@@ -69,6 +69,10 @@ if ($features -match "local-sherpa-stt") {
     & (Join-Path $PSScriptRoot "stage-sherpa-dlls.ps1") -RepoRoot $repoRoot -Required
     $syncWindowsBundle = $true
 }
+if ($features -match "silero-te") {
+    & (Join-Path $PSScriptRoot "stage-libtorch-dlls.ps1") -RepoRoot $repoRoot -Profile "release" -Required
+    $syncWindowsBundle = $true
+}
 if ($syncWindowsBundle) {
     & (Join-Path $PSScriptRoot "sync-windows-bundle-resources.ps1") -RepoRoot $repoRoot
 }
@@ -166,12 +170,14 @@ function Publish-ReleaseArtifacts {
     }
 
     $veyroExe = Join-Path $ReleaseDir "veyro.exe"
-    if ((Test-Path $veyroExe) -and ($Features -match "local-llm")) {
+    if (Test-Path $veyroExe) {
         $portableStage = Join-Path $versionOut "_portable_stage"
         New-Item -ItemType Directory -Force -Path $portableStage | Out-Null
         Copy-Item $veyroExe $portableStage -Force
         Get-ChildItem $ReleaseDir -Filter "*.dll" |
-            Where-Object { $_.Name -match '^(llama|ggml|sherpa-onnx|onnxruntime)' } |
+            Where-Object {
+                $_.Name -match '^(llama|ggml|sherpa-onnx|onnxruntime|c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp|mkl_|pytorch_jni)'
+            } |
             Copy-Item -Destination $portableStage -Force
         $zipPath = Join-Path $versionOut "Veyro_${Semver}_x64-portable.zip"
         if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

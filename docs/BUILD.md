@@ -81,6 +81,8 @@ npm run tauri:dev
 
 Скрипт dev по умолчанию ставит `CARGO_INCREMENTAL=0` на Windows; для более быстрых пересборок можно `VEYRO_CARGO_INCREMENTAL=1`.
 
+**Silero TE (libtorch):** при ошибке «`c10.dll` was not found» скопируйте runtime DLL рядом с `veyro.exe` — `npm run tauri:dev` / `tauri:build` делают это через `scripts/stage-libtorch-dlls.ps1`. Вручную: `powershell -File scripts/stage-libtorch-dlls.ps1 -RepoRoot . -Profile release` (или `debug`).
+
 ### Release + NSIS-инсталлятор
 
 ```powershell
