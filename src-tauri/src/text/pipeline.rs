@@ -3,7 +3,7 @@ use reqwest::Client;
 use crate::llm::LlmEngine;
 use crate::settings::{AppSettings, TextProcessingMode};
 use crate::text::corrections::apply_corrections;
-use crate::text::dictionary::{load_dictionary, protected_terms, Dictionary};
+use crate::text::dictionary::{protected_terms, Dictionary};
 use crate::text::enter_trigger::apply_enter_trigger;
 use crate::text::normalize::{
     apply_basic_cleanup, apply_optimization_paragraphs, apply_original, apply_spoken_punctuation,
@@ -62,7 +62,7 @@ pub async fn process_transcription(
         return Ok(immediate);
     }
 
-    let dictionary = load_dictionary(settings.transcription_dictionary_path.as_deref())
+    let dictionary = crate::text::dictionary::load_dictionary_for_settings(settings)
         .unwrap_or_default();
     let terms = protected_terms(&dictionary);
 
@@ -87,7 +87,7 @@ pub fn process_transcription_immediate_sync(
     settings: &AppSettings,
     whisper_detected_language: Option<&str>,
 ) -> Result<ProcessedText, TextProcessingError> {
-    let dictionary = load_dictionary(settings.transcription_dictionary_path.as_deref())
+    let dictionary = crate::text::dictionary::load_dictionary_for_settings(settings)
         .unwrap_or_default();
     let postprocess_lang = settings.postprocess_language(whisper_detected_language);
 

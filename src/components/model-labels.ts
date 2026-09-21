@@ -1,4 +1,4 @@
-import type { LlmModelKind, LocalSttModelKind } from "../api";
+import type { LlmModelKind, LocalSttFamily, LocalSttModelKind } from "../api";
 import { t } from "../i18n";
 
 const LOCAL_STT_MODEL_NAME_KEYS = {
@@ -44,6 +44,21 @@ export function localSttModelDisplayName(kind: LocalSttModelKind): string {
 
 export function localSttModelPlateName(kind: LocalSttModelKind): string {
   return t(LOCAL_STT_PLATE_NAME_KEYS[kind]);
+}
+
+const LOCAL_STT_FAMILY_PLATE_NAME_KEYS = {
+  whisper_base: "status.modelWhisperBase",
+  whisper_small: "status.modelWhisperSmall",
+  whisper_medium: "status.modelWhisperMedium",
+  whisper_large_v3_turbo: "status.modelWhisperTurbo",
+  whisper_large_v3: "status.modelWhisperLargeV3",
+  parakeet_tdt_0_6b_v3: "settings.sttModelNameParakeetTdt06bV3",
+  qwen3_asr_0_6b: "settings.sttModelNameQwen3Asr06b",
+  qwen3_asr_1_7b: "settings.sttModelNameQwen3Asr17b",
+} as const satisfies Record<LocalSttFamily, string>;
+
+export function localSttFamilyPlateName(family: LocalSttFamily): string {
+  return t(LOCAL_STT_FAMILY_PLATE_NAME_KEYS[family]);
 }
 
 export function llmModelDisplayName(kind: LlmModelKind): string {

@@ -20,6 +20,8 @@ pub const MICROPHONE_CHANGED: &str = "app://microphone-changed";
 pub const ACTIVITY_LOG: &str = "app://activity-log";
 pub const WHISPER_MODEL_DOWNLOAD_PROGRESS: &str = "app://whisper-model-download-progress";
 pub const LLM_MODEL_DOWNLOAD_PROGRESS: &str = "app://llm-model-download-progress";
+pub const SILERO_TE_DOWNLOAD_PROGRESS: &str = "app://silero-te-download-progress";
+pub const SILERO_VAD_DOWNLOAD_PROGRESS: &str = "app://silero-vad-download-progress";
 pub const SKILL_IMPORTED: &str = "app://skill-imported";
 pub const SKILLS_CHANGED: &str = "app://skills-changed";
 

@@ -343,6 +343,10 @@ pub struct AppSettings {
     pub transcription_provider: String,
     pub transcription_model: String,
     pub local_whisper_models_dir: Option<String>,
+    #[serde(default)]
+    pub local_stt_family: crate::settings::LocalSttFamily,
+    #[serde(default)]
+    pub local_stt_quant: crate::settings::LocalSttQuant,
     #[serde(default, alias = "local_whisper_model")]
     pub local_stt_model: crate::settings::LocalSttModelKind,
     pub local_whisper_use_gpu: bool,
@@ -359,6 +363,8 @@ pub struct AppSettings {
     pub local_llm_gpu_autodetected: bool,
     pub ai_rewrite_skill: Option<String>,
     pub whisper_prompt_prefix: String,
+    /// Root folder for models, LLM, and dictionary (subfolders applied automatically).
+    pub data_storage_dir: Option<String>,
     pub transcription_dictionary_path: Option<String>,
     pub audio_preprocess_enabled: bool,
     pub audio_noise_reduction_enabled: bool,
@@ -403,6 +409,39 @@ pub struct AppSettings {
     /// Load and warm local STT/LLM at startup (and when the settings UI opens if enabled).
     #[serde(default)]
     pub prewarm_local_models_at_startup: bool,
+    /// Low-resource profile: disk spill queue, fewer previews/prewarms while backlogged.
+    #[serde(default)]
+    pub weak_pc_mode: bool,
+    #[serde(default = "default_weak_pc_spill_to_disk")]
+    pub weak_pc_spill_to_disk: bool,
+    #[serde(default = "default_weak_pc_ram_segment_cap")]
+    pub weak_pc_ram_segment_cap: u32,
+    #[serde(default = "default_weak_pc_max_disk_queue_mb")]
+    pub weak_pc_max_disk_queue_mb: u32,
+    #[serde(default = "default_weak_pc_reduce_preview")]
+    pub weak_pc_reduce_preview: bool,
+    #[serde(default = "default_weak_pc_reduce_prewarm")]
+    pub weak_pc_reduce_prewarm: bool,
+}
+
+fn default_weak_pc_spill_to_disk() -> bool {
+    true
+}
+
+fn default_weak_pc_ram_segment_cap() -> u32 {
+    2
+}
+
+fn default_weak_pc_max_disk_queue_mb() -> u32 {
+    512
+}
+
+fn default_weak_pc_reduce_preview() -> bool {
+    true
+}
+
+fn default_weak_pc_reduce_prewarm() -> bool {
+    true
 }
 
 fn default_vad_voice_threshold_percent() -> u8 {
@@ -469,6 +508,8 @@ impl Default for AppSettings {
             transcription_provider: "local".to_string(),
             transcription_model: "whisper-1".to_string(),
             local_whisper_models_dir: None,
+            local_stt_family: crate::settings::LocalSttFamily::WhisperBase,
+            local_stt_quant: crate::settings::LocalSttQuant::Legacy,
             local_stt_model: crate::settings::LocalSttModelKind::WhisperBase,
             local_whisper_use_gpu: whisper_gpu_compiled(),
             local_sherpa_num_threads: default_local_sherpa_num_threads(),
@@ -481,6 +522,7 @@ impl Default for AppSettings {
             local_llm_gpu_autodetected: false,
             ai_rewrite_skill: None,
             whisper_prompt_prefix: String::new(),
+            data_storage_dir: None,
             transcription_dictionary_path: None,
             audio_preprocess_enabled: true,
             audio_noise_reduction_enabled: false,
@@ -508,11 +550,51 @@ impl Default for AppSettings {
             stt_idle_unload_sec: default_stt_idle_unload_sec(),
             llm_idle_unload_sec: default_llm_idle_unload_sec(),
             prewarm_local_models_at_startup: false,
+            weak_pc_mode: false,
+            weak_pc_spill_to_disk: default_weak_pc_spill_to_disk(),
+            weak_pc_ram_segment_cap: default_weak_pc_ram_segment_cap(),
+            weak_pc_max_disk_queue_mb: default_weak_pc_max_disk_queue_mb(),
+            weak_pc_reduce_preview: default_weak_pc_reduce_preview(),
+            weak_pc_reduce_prewarm: default_weak_pc_reduce_prewarm(),
         }
     }
 }
 
 impl AppSettings {
+    pub fn local_stt_variant(&self) -> crate::settings::LocalSttVariant {
+        crate::settings::normalize_variant(crate::settings::LocalSttVariant::new(
+            self.local_stt_family,
+            self.local_stt_quant,
+        ))
+    }
+
+    pub fn set_local_stt_variant(&mut self, variant: crate::settings::LocalSttVariant) {
+        let variant = crate::settings::normalize_variant(variant);
+        self.local_stt_family = variant.family;
+        self.local_stt_quant = variant.quant;
+        self.sync_local_stt_model_from_variant();
+    }
+
+    pub fn sync_local_stt_model_from_variant(&mut self) {
+        if let Some(kind) = self
+            .local_stt_family
+            .to_legacy_kind(self.local_stt_quant)
+        {
+            self.local_stt_model = kind;
+        }
+    }
+
+    /// Align family/quant with `local_stt_model` before path checks (UI may lag controller).
+    pub fn repair_local_stt_selection(&mut self) {
+        if !self.local_stt_model.is_whisper() && self.local_stt_family.is_whisper() {
+            let variant =
+                crate::settings::migrate_from_legacy_stt_model(self.local_stt_model);
+            self.set_local_stt_variant(variant);
+            return;
+        }
+        self.set_local_stt_variant(crate::settings::normalize_variant(self.local_stt_variant()));
+    }
+
     pub fn stt_idle_unload_after(&self) -> Option<std::time::Duration> {
         idle_unload_duration(self.stt_idle_unload_sec)
     }
@@ -607,6 +689,18 @@ impl AppSettings {
         if !Self::idle_unload_sec_valid(self.llm_idle_unload_sec) {
             return Err(crate::error::ConfigError::Invalid(
                 "llm_idle_unload_range".to_string(),
+            ));
+        }
+
+        if !(1..=8).contains(&self.weak_pc_ram_segment_cap) {
+            return Err(crate::error::ConfigError::Invalid(
+                "weak_pc_ram_segment_cap_range".to_string(),
+            ));
+        }
+
+        if !(50..=4_096).contains(&self.weak_pc_max_disk_queue_mb) {
+            return Err(crate::error::ConfigError::Invalid(
+                "weak_pc_max_disk_queue_mb_range".to_string(),
             ));
         }
 
@@ -761,6 +855,22 @@ impl AppSettings {
             && matches!(self.text_rewrite_provider, TextRewriteProvider::Local)
     }
 
+    pub fn weak_pc_active(&self) -> bool {
+        self.weak_pc_mode
+    }
+
+    pub fn effective_spill_enabled(&self) -> bool {
+        self.weak_pc_mode && self.weak_pc_spill_to_disk
+    }
+
+    pub fn should_reduce_preview_when_backlogged(&self) -> bool {
+        self.weak_pc_mode && self.weak_pc_reduce_preview
+    }
+
+    pub fn should_reduce_prewarm_when_backlogged(&self) -> bool {
+        self.weak_pc_mode && self.weak_pc_reduce_prewarm
+    }
+
     fn idle_unload_sec_valid(sec: u32) -> bool {
         sec == 0 || (60..=7_200).contains(&sec)
     }
@@ -791,6 +901,8 @@ pub struct SettingsPatch {
     pub transcription_provider: Option<String>,
     pub transcription_model: Option<String>,
     pub local_whisper_models_dir: Option<Option<String>>,
+    pub local_stt_family: Option<crate::settings::LocalSttFamily>,
+    pub local_stt_quant: Option<crate::settings::LocalSttQuant>,
     #[serde(default, alias = "local_whisper_model")]
     pub local_stt_model: Option<crate::settings::LocalSttModelKind>,
     pub local_whisper_use_gpu: Option<bool>,
@@ -802,6 +914,7 @@ pub struct SettingsPatch {
     pub local_llm_use_gpu: Option<bool>,
     pub ai_rewrite_skill: Option<Option<String>>,
     pub whisper_prompt_prefix: Option<String>,
+    pub data_storage_dir: Option<Option<String>>,
     pub transcription_dictionary_path: Option<Option<String>>,
     pub audio_preprocess_enabled: Option<bool>,
     pub audio_noise_reduction_enabled: Option<bool>,
@@ -832,6 +945,12 @@ pub struct SettingsPatch {
     pub stt_idle_unload_sec: Option<u32>,
     pub llm_idle_unload_sec: Option<u32>,
     pub prewarm_local_models_at_startup: Option<bool>,
+    pub weak_pc_mode: Option<bool>,
+    pub weak_pc_spill_to_disk: Option<bool>,
+    pub weak_pc_ram_segment_cap: Option<u32>,
+    pub weak_pc_max_disk_queue_mb: Option<u32>,
+    pub weak_pc_reduce_preview: Option<bool>,
+    pub weak_pc_reduce_prewarm: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -876,7 +995,19 @@ impl SettingsPatch {
             settings.local_whisper_models_dir = local_whisper_models_dir;
         }
         if let Some(local_stt_model) = self.local_stt_model {
-            settings.local_stt_model = local_stt_model;
+            settings.set_local_stt_variant(crate::settings::migrate_from_legacy_stt_model(
+                local_stt_model,
+            ));
+        } else {
+            if let Some(local_stt_family) = self.local_stt_family {
+                settings.local_stt_family = local_stt_family;
+            }
+            if let Some(local_stt_quant) = self.local_stt_quant {
+                settings.local_stt_quant = local_stt_quant;
+            }
+            if self.local_stt_family.is_some() || self.local_stt_quant.is_some() {
+                settings.sync_local_stt_model_from_variant();
+            }
         }
         if let Some(local_whisper_use_gpu) = self.local_whisper_use_gpu {
             settings.local_whisper_use_gpu = local_whisper_use_gpu;
@@ -904,6 +1035,14 @@ impl SettingsPatch {
         }
         if let Some(whisper_prompt_prefix) = self.whisper_prompt_prefix {
             settings.whisper_prompt_prefix = whisper_prompt_prefix;
+        }
+        if let Some(data_storage_dir) = self.data_storage_dir {
+            settings.data_storage_dir = data_storage_dir;
+            if settings.data_storage_dir.is_some() {
+                settings.local_whisper_models_dir = None;
+                settings.local_llm_models_dir = None;
+                settings.transcription_dictionary_path = None;
+            }
         }
         if let Some(transcription_dictionary_path) = self.transcription_dictionary_path {
             settings.transcription_dictionary_path = transcription_dictionary_path;
@@ -1001,6 +1140,24 @@ impl SettingsPatch {
         }
         if let Some(prewarm_local_models_at_startup) = self.prewarm_local_models_at_startup {
             settings.prewarm_local_models_at_startup = prewarm_local_models_at_startup;
+        }
+        if let Some(weak_pc_mode) = self.weak_pc_mode {
+            settings.weak_pc_mode = weak_pc_mode;
+        }
+        if let Some(weak_pc_spill_to_disk) = self.weak_pc_spill_to_disk {
+            settings.weak_pc_spill_to_disk = weak_pc_spill_to_disk;
+        }
+        if let Some(weak_pc_ram_segment_cap) = self.weak_pc_ram_segment_cap {
+            settings.weak_pc_ram_segment_cap = weak_pc_ram_segment_cap;
+        }
+        if let Some(weak_pc_max_disk_queue_mb) = self.weak_pc_max_disk_queue_mb {
+            settings.weak_pc_max_disk_queue_mb = weak_pc_max_disk_queue_mb;
+        }
+        if let Some(weak_pc_reduce_preview) = self.weak_pc_reduce_preview {
+            settings.weak_pc_reduce_preview = weak_pc_reduce_preview;
+        }
+        if let Some(weak_pc_reduce_prewarm) = self.weak_pc_reduce_prewarm {
+            settings.weak_pc_reduce_prewarm = weak_pc_reduce_prewarm;
         }
     }
 }

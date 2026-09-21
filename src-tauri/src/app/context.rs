@@ -123,7 +123,7 @@ impl AppContext {
     }
 
     /// Cancel in-flight STT work and issue a fresh token for the next transcriber instance.
-    fn rotate_transcriber_cancel(&self) -> CancellationToken {
+    pub(crate) fn rotate_transcriber_cancel(&self) -> CancellationToken {
         let mut guard = self
             .transcriber_cancel
             .lock()
@@ -133,13 +133,19 @@ impl AppContext {
         guard.clone()
     }
 
-    pub fn reload_transcriber(&self, settings: &AppSettings) {
+    pub async fn reload_transcriber(&self, settings: &AppSettings) {
         let transcriber = create_transcriber(
             settings,
             self.http.clone(),
             self.transcriber_cancel_token(),
         );
-        self.runtime.set_transcriber(transcriber);
+        self.runtime.replace_transcriber(transcriber).await;
+    }
+
+    pub fn unload_silero_te_engine(&self) {
+        if let Ok(engine) = crate::text::silero_te::SileroTeEngine::global().lock() {
+            engine.unload();
+        }
     }
 
     pub fn sync_llm_engine(&self, settings: &AppSettings) {
@@ -219,13 +225,22 @@ impl AppContext {
         let llm_was_ready = self.llm_engine.read().map(|e| e.is_ready()).unwrap_or(false);
         let whisper_was_loaded = self.runtime.is_whisper_model_loaded();
 
+        if plan.purge_inference_memory {
+            self.unload_silero_te_engine();
+            self.record_activity(
+                app,
+                ActivityLevel::Info,
+                "activity.memory.inference_purged",
+                Value::Object(Default::default()),
+            );
+        }
+
         if plan.reload_transcriber {
             let _ = self.rotate_transcriber_cancel();
-            self.unload_transcriber().await;
-            self.reload_transcriber(settings);
+            self.reload_transcriber(settings).await;
         } else if !needs_local_stt(settings) && whisper_was_loaded {
             let _ = self.rotate_transcriber_cancel();
-            self.unload_transcriber().await;
+            self.reload_transcriber(settings).await;
         }
 
         if plan.reload_llm_engine || !needs_local_llm(settings) {
@@ -299,6 +314,15 @@ impl AppContext {
     }
 
     pub fn wire_audio_callbacks(self: &Arc<Self>, app: &tauri::AppHandle) {
+        if let Ok(controller) = self.controller.lock() {
+            let settings = controller.settings().clone();
+            self.runtime.replay_spilled_segments(
+                app.clone(),
+                Arc::clone(&self.controller),
+                settings,
+            );
+        }
+
         let ctx = Arc::clone(self);
         let app_handle = app.clone();
         let callbacks_enabled = Arc::clone(&self.audio_callbacks_enabled);
@@ -332,7 +356,10 @@ impl AppContext {
             );
 
             let settings = controller.settings().clone();
-            ctx.spawn_local_stt_load_in_background(&settings);
+            let backlogged = ctx.runtime.pending_count() > 0;
+            if !backlogged || !settings.should_reduce_prewarm_when_backlogged() {
+                ctx.spawn_local_stt_load_in_background(&settings);
+            }
             let ptt_streaming = settings.push_to_talk
                 && controller.is_push_to_talk_active()
                 && settings.ptt_hold;
@@ -345,11 +372,12 @@ impl AppContext {
                 crate::game_input::overlay::router::show_recording_overlay(&app_handle);
             }
 
-            if stream_live || ptt_streaming {
+            let skip_preview = backlogged && settings.should_reduce_preview_when_backlogged();
+            if (stream_live || ptt_streaming) && !skip_preview {
                 crate::injection::focus_target::capture_injection_target();
                 ctx.streaming_preview.start();
             }
-            if stream_live {
+            if stream_live && !skip_preview {
                 ctx.start_live_dictation();
             }
         });
@@ -405,13 +433,6 @@ impl AppContext {
                 return;
             }
 
-            ctx.record_activity(
-                Some(&app_handle),
-                ActivityLevel::Info,
-                "activity.vad.segment_ended",
-                serde_json::json!({ "ms": segment.duration_ms }),
-            );
-
             let keep_preview = ctx.controller.try_lock().ok().is_some_and(|controller| {
                 let ptt_active = controller.is_push_to_talk_active();
                 if !ptt_active {
@@ -424,12 +445,37 @@ impl AppContext {
                 ctx.streaming_preview.stop_and_clear(&app_handle);
             }
 
-            ctx.runtime.process_segment(
+            match ctx.runtime.enqueue_segment(
                 app_handle.clone(),
                 ctx.controller.clone(),
-                segment,
+                segment.clone(),
                 settings,
-            );
+            ) {
+                crate::app::runtime::EnqueueResult::Ok { .. } => {
+                    ctx.record_activity(
+                        Some(&app_handle),
+                        ActivityLevel::Info,
+                        "activity.vad.segment_ended",
+                        serde_json::json!({ "ms": segment.duration_ms }),
+                    );
+                }
+                crate::app::runtime::EnqueueResult::DiskQueueFull => {
+                    ctx.record_activity(
+                        Some(&app_handle),
+                        ActivityLevel::Error,
+                        "activity.segment_queue_disk_full",
+                        serde_json::json!({ "ms": segment.duration_ms }),
+                    );
+                }
+                crate::app::runtime::EnqueueResult::QueueClosed => {
+                    ctx.record_activity(
+                        Some(&app_handle),
+                        ActivityLevel::Warn,
+                        "activity.segment_dropped_busy",
+                        Value::Object(Default::default()),
+                    );
+                }
+            }
         });
 
         let (preview_tx, preview_rx) =
@@ -481,6 +527,9 @@ impl AppContext {
 
     pub fn cancel_pending(&self) {
         self.runtime.cancel_pending();
+        if let Ok(controller) = self.controller.try_lock() {
+            self.runtime.clear_spill_queue(controller.settings());
+        }
         self.root_cancel.cancel();
         self.ptt_postprocess.reset();
         if let Ok(audio) = self.audio.lock() {

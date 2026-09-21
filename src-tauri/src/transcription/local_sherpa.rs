@@ -8,7 +8,10 @@ use tokio_util::sync::CancellationToken;
 use crate::audio::resampler::TARGET_SAMPLE_RATE;
 use crate::audio::segment::AudioSegment;
 use crate::settings::AppSettings;
-use crate::transcription::local_stt_model_store::{bundle_ready, sherpa_bundle_path};
+use crate::settings::LocalSttVariant;
+use crate::transcription::local_stt_model_store::{
+    bundle_ready_for_settings, effective_sherpa_bundle_dir,
+};
 use crate::transcription::models::{TranscriptionOptions, TranscriptionResult};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
 use crate::transcription::sherpa::{build_offline_config, SherpaBuildOptions};
@@ -22,7 +25,7 @@ struct SharedSherpa {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SherpaSettingsSnapshot {
-    model: crate::settings::LocalSttModelKind,
+    variant: LocalSttVariant,
     use_gpu: bool,
     num_threads: u32,
 }
@@ -32,7 +35,7 @@ impl SharedSherpa {
         Self {
             bundle_dir,
             settings_snapshot: SherpaSettingsSnapshot {
-                model: settings.local_stt_model,
+                variant: settings.local_stt_variant(),
                 use_gpu: settings.local_whisper_use_gpu,
                 num_threads: settings.local_sherpa_num_threads,
             },
@@ -42,7 +45,7 @@ impl SharedSherpa {
     }
 
     fn settings_match(&self, settings: &AppSettings) -> bool {
-        self.settings_snapshot.model == settings.local_stt_model
+        self.settings_snapshot.variant == settings.local_stt_variant()
             && self.settings_snapshot.use_gpu == settings.local_whisper_use_gpu
             && self.settings_snapshot.num_threads == settings.local_sherpa_num_threads
     }
@@ -83,7 +86,7 @@ impl SharedSherpa {
             return Ok(());
         }
 
-        if !bundle_ready(&self.bundle_dir, settings.local_stt_model) {
+        if !bundle_ready_for_settings(settings, settings.local_stt_variant()) {
             return Err(TranscriptionError::ModelNotFound(
                 self.bundle_dir.display().to_string(),
             ));
@@ -144,8 +147,8 @@ pub struct LocalSherpaProvider {
 
 impl LocalSherpaProvider {
     pub fn new(settings: AppSettings, cancel: CancellationToken) -> Result<Self, TranscriptionError> {
-        let kind = settings.local_stt_model;
-        let bundle_dir = sherpa_bundle_path(&settings, kind).map_err(|error| {
+        let variant = settings.local_stt_variant();
+        let bundle_dir = effective_sherpa_bundle_dir(&settings, variant).map_err(|error| {
             TranscriptionError::ModelNotFound(error.to_string())
         })?;
         Ok(Self {

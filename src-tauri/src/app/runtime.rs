@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -19,6 +20,7 @@ use crate::app::state::AppState;
 use crate::audio::debug::save_last_ptt_wav;
 use crate::audio::preprocess::{audio_peak_rms, preprocess_segment, PreprocessOptions};
 use crate::audio::segment::AudioSegment;
+use crate::audio::segment_queue_store::SegmentQueueStore;
 use crate::error::AppError;
 use crate::injection::TextInjector;
 use crate::privacy::retention::clear_segment;
@@ -29,7 +31,6 @@ use crate::settings::{
 };
 use crate::network::HttpClient;
 use crate::llm::LlmEngine;
-use crate::text::dictionary::load_dictionary;
 use crate::text::normalize::{
     apply_basic_cleanup, apply_optimization_paragraphs, dedupe_near_duplicate_passages,
     dedupe_ptt_session_overlap, ensure_spaces_after_punctuation, ensure_trailing_block_separator,
@@ -42,11 +43,24 @@ use crate::transcription::{
 };
 use crate::tray;
 
+enum SegmentPayload {
+    Memory(AudioSegment),
+    Disk(PathBuf),
+}
+
 struct SegmentJob {
     app: AppHandle,
     controller: SharedController,
-    segment: AudioSegment,
+    payload: SegmentPayload,
     settings: AppSettings,
+    held_in_memory: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnqueueResult {
+    Ok { pending: usize, spilled: bool },
+    DiskQueueFull,
+    QueueClosed,
 }
 
 pub struct PipelineRuntime {
@@ -55,6 +69,7 @@ pub struct PipelineRuntime {
     injector: Arc<dyn TextInjector>,
     cancel: Arc<RwLock<CancellationToken>>,
     pending: Arc<AtomicUsize>,
+    memory_segments: Arc<AtomicUsize>,
     queue_tx: UnboundedSender<SegmentJob>,
     activity_log: Arc<ActivityLog>,
     dictation_activity_ms: Arc<AtomicU64>,
@@ -71,6 +86,7 @@ impl PipelineRuntime {
         dictation_activity_ms: Arc<AtomicU64>,
     ) -> Self {
         let pending = Arc::new(AtomicUsize::new(0));
+        let memory_segments = Arc::new(AtomicUsize::new(0));
         let (queue_tx, mut queue_rx) = unbounded_channel();
         let transcriber = Arc::new(RwLock::new(transcriber));
         let llm_engine = Arc::new(RwLock::new(llm_engine));
@@ -82,6 +98,7 @@ impl PipelineRuntime {
         let worker_http = Arc::new(RwLock::new(http));
         let worker_cancel = cancel.clone();
         let worker_pending = pending.clone();
+        let worker_memory_segments = memory_segments.clone();
         let worker_log = activity_log.clone();
         let worker_dictation_activity = dictation_activity_ms.clone();
         let worker_context = Arc::new(Mutex::new(String::new()));
@@ -100,6 +117,7 @@ impl PipelineRuntime {
                     worker_http.clone(),
                     worker_cancel.clone(),
                     worker_pending.clone(),
+                    worker_memory_segments.clone(),
                     worker_log.clone(),
                     worker_dictation_activity.clone(),
                     worker_context.clone(),
@@ -115,6 +133,7 @@ impl PipelineRuntime {
             injector,
             cancel,
             pending,
+            memory_segments,
             queue_tx,
             activity_log,
             dictation_activity_ms,
@@ -124,6 +143,18 @@ impl PipelineRuntime {
     pub fn set_transcriber(&self, transcriber: Arc<dyn TranscriptionProvider>) {
         if let Ok(mut guard) = self.transcriber.write() {
             *guard = transcriber;
+        }
+    }
+
+    /// Swap transcriber and explicitly unload the previous instance (drops native weights).
+    pub async fn replace_transcriber(&self, new_transcriber: Arc<dyn TranscriptionProvider>) {
+        let previous = if let Ok(mut guard) = self.transcriber.write() {
+            Some(std::mem::replace(&mut *guard, new_transcriber))
+        } else {
+            None
+        };
+        if let Some(previous) = previous {
+            let _ = previous.unload().await;
         }
     }
 
@@ -198,13 +229,118 @@ impl PipelineRuntime {
         self.injector.clone()
     }
 
-    pub fn process_segment(
+    pub fn replay_spilled_segments(
+        &self,
+        app: AppHandle,
+        controller: SharedController,
+        settings: AppSettings,
+    ) {
+        let Ok(store) = SegmentQueueStore::for_settings(&settings) else {
+            return;
+        };
+        for pending in store.list_pending() {
+            let _ = self.enqueue_disk_replay(
+                app.clone(),
+                controller.clone(),
+                pending.wav_path,
+                settings.clone(),
+            );
+        }
+    }
+
+    pub fn clear_spill_queue(&self, settings: &AppSettings) {
+        if let Ok(store) = SegmentQueueStore::for_settings(settings) {
+            store.clear_all();
+        }
+        self.memory_segments.store(0, Ordering::SeqCst);
+    }
+
+    fn enqueue_disk_replay(
+        &self,
+        app: AppHandle,
+        controller: SharedController,
+        wav_path: PathBuf,
+        settings: AppSettings,
+    ) -> EnqueueResult {
+        let duration_ms = SegmentQueueStore::load(&wav_path)
+            .map(|segment| segment.duration_ms)
+            .unwrap_or(0);
+        self.send_job(
+            app,
+            controller,
+            SegmentPayload::Disk(wav_path),
+            settings,
+            false,
+            duration_ms,
+            false,
+        )
+    }
+
+    pub fn enqueue_segment(
         &self,
         app: AppHandle,
         controller: SharedController,
         segment: AudioSegment,
         settings: AppSettings,
-    ) {
+    ) -> EnqueueResult {
+        let duration_ms = segment.duration_ms;
+        let (payload, held_in_memory, spilled) = match self.prepare_payload(segment, &settings) {
+            Ok(value) => value,
+            Err(()) => return EnqueueResult::DiskQueueFull,
+        };
+        self.send_job(
+            app,
+            controller,
+            payload,
+            settings,
+            held_in_memory,
+            duration_ms,
+            spilled,
+        )
+    }
+
+    fn prepare_payload(
+        &self,
+        segment: AudioSegment,
+        settings: &AppSettings,
+    ) -> Result<(SegmentPayload, bool, bool), ()> {
+        if settings.effective_spill_enabled() {
+            let cap = settings.weak_pc_ram_segment_cap.max(1) as usize;
+            if self.memory_segments.load(Ordering::SeqCst) >= cap {
+                let Ok(store) = SegmentQueueStore::for_settings(settings) else {
+                    self.memory_segments.fetch_add(1, Ordering::SeqCst);
+                    return Ok((SegmentPayload::Memory(segment), true, false));
+                };
+                let max_bytes = settings.weak_pc_max_disk_queue_mb as u64 * 1024 * 1024;
+                let wav_bytes = (segment.samples.len() * 2).saturating_add(44) as u64;
+                if store.total_bytes().saturating_add(wav_bytes) > max_bytes {
+                    return Err(());
+                }
+                match store.spill(&segment) {
+                    Ok(path) => return Ok((SegmentPayload::Disk(path), false, true)),
+                    Err(error) => {
+                        warn!("segment spill failed: {error}");
+                        self.memory_segments.fetch_add(1, Ordering::SeqCst);
+                        return Ok((SegmentPayload::Memory(segment), true, false));
+                    }
+                }
+            }
+        }
+
+        self.memory_segments.fetch_add(1, Ordering::SeqCst);
+        Ok((SegmentPayload::Memory(segment), true, false))
+    }
+
+    fn send_job(
+        &self,
+        app: AppHandle,
+        controller: SharedController,
+        payload: SegmentPayload,
+        settings: AppSettings,
+        held_in_memory: bool,
+        duration_ms: u64,
+        spilled: bool,
+    ) -> EnqueueResult {
         self.pending.fetch_add(1, Ordering::SeqCst);
         let queued = self.pending.load(Ordering::SeqCst);
         log_activity(
@@ -213,20 +349,39 @@ impl PipelineRuntime {
             Some(&app),
             ActivityLevel::Info,
             "activity.queue.enqueued",
-            json!({ "ms": segment.duration_ms, "pending": queued }),
+            json!({ "ms": duration_ms, "pending": queued, "spilled": spilled }),
         );
+        if queued > 1 {
+            log_activity(
+                &self.activity_log,
+                &self.dictation_activity_ms,
+                Some(&app),
+                ActivityLevel::Info,
+                "activity.queue.backlog",
+                json!({ "pending": queued, "spilled": spilled }),
+            );
+        }
 
         if self
             .queue_tx
             .send(SegmentJob {
                 app,
                 controller,
-                segment,
+                payload,
                 settings,
+                held_in_memory,
             })
             .is_err()
         {
             self.pending.fetch_sub(1, Ordering::SeqCst);
+            if held_in_memory {
+                self.memory_segments.fetch_sub(1, Ordering::SeqCst);
+            }
+            return EnqueueResult::QueueClosed;
+        }
+        EnqueueResult::Ok {
+            pending: queued,
+            spilled,
         }
     }
 }
@@ -285,6 +440,7 @@ async fn process_one_segment(
     shared_http: Arc<RwLock<reqwest::Client>>,
     cancel: Arc<RwLock<CancellationToken>>,
     pending: Arc<AtomicUsize>,
+    memory_segments: Arc<AtomicUsize>,
     activity_log: Arc<ActivityLog>,
     dictation_activity_ms: Arc<AtomicU64>,
     last_whisper_context: Arc<Mutex<String>>,
@@ -293,11 +449,31 @@ async fn process_one_segment(
     let SegmentJob {
         app,
         controller,
-        mut segment,
+        payload,
         settings,
+        held_in_memory,
     } = job;
 
+    let (mut segment, spill_path) = match payload {
+        SegmentPayload::Memory(segment) => (segment, None),
+        SegmentPayload::Disk(path) => {
+            let loaded = SegmentQueueStore::load(&path).unwrap_or_else(|error| {
+                warn!(path = %path.display(), "failed to load spilled segment: {error}");
+                AudioSegment::new(Vec::new(), 16_000, 1)
+            });
+            (loaded, Some(path))
+        }
+    };
+
     let finish = async |pending: &Arc<AtomicUsize>, app: &AppHandle, controller: &SharedController| {
+        if held_in_memory {
+            memory_segments.fetch_sub(1, Ordering::SeqCst);
+        }
+        if let Some(path) = spill_path.clone() {
+            if let Ok(store) = SegmentQueueStore::for_settings(&settings) {
+                store.delete_pair_for_wav(&path);
+            }
+        }
         clear_live_dictation_indicator(app, &injector).await;
         if pending.fetch_sub(1, Ordering::SeqCst) == 1 {
             let _ = with_controller(controller, app, |controller, handle| {
@@ -393,7 +569,7 @@ async fn process_one_segment(
     }
     segment = preprocessed.segment;
 
-    let dictionary = load_dictionary(settings.transcription_dictionary_path.as_deref())
+    let dictionary = crate::text::dictionary::load_dictionary_for_settings(&settings)
         .unwrap_or_default();
     let previous_text = last_whisper_context
         .lock()
@@ -410,7 +586,9 @@ async fn process_one_segment(
         prompt: prompt.clone(),
         model: settings.transcription_model.clone(),
         whisper_decoding: Some(WhisperDecodingOptions::default()),
-        dictionary_path: settings.transcription_dictionary_path.clone(),
+        dictionary_path: crate::settings::resolve_dictionary_file_path(&settings)
+            .ok()
+            .map(|path| path.display().to_string()),
     };
 
     let active_transcriber = transcriber
@@ -926,7 +1104,7 @@ async fn try_finish_ptt_postprocess(
         .map(|guard| guard.clone())
         .unwrap_or_else(|poisoned| poisoned.into_inner().clone());
 
-    let dictionary = load_dictionary(settings.transcription_dictionary_path.as_deref())
+    let dictionary = crate::text::dictionary::load_dictionary_for_settings(&settings)
         .unwrap_or_default();
     let terms = protected_terms(&dictionary);
 

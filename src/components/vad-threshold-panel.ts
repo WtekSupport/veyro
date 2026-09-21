@@ -1,14 +1,24 @@
 import {
   calibrateVadThreshold,
+  type SileroModelDownloadProgress,
   type VadEngine,
   type VadThresholdMode,
 } from "../api";
 import { t, vadEngineShortLabel } from "../i18n";
+import { getState, setSettings } from "../state";
 import { notifyVadMicDeviceChanged } from "./vad-monitor";
 
 let calibrating = false;
 
 export { notifyVadMicDeviceChanged };
+
+function formatDownloadProgress(progress: SileroModelDownloadProgress): string {
+  if (progress.percent !== null && progress.percent >= 0) {
+    return t("settings.downloadingWhisper", { percent: Math.round(progress.percent) });
+  }
+  const downloadedMb = (progress.downloaded / (1024 * 1024)).toFixed(1);
+  return t("settings.downloadingWhisperUnknown", { downloaded: downloadedMb });
+}
 
 export function renderVadThresholdPanel(
   mode: VadThresholdMode,
@@ -17,6 +27,10 @@ export function renderVadThresholdPanel(
   vadEngine: VadEngine = "silero",
   sileroAvailable = true,
   activeVadEngine?: string,
+  sileroCompiled = false,
+  sileroModelOnDisk = true,
+  sileroVadDownload: SileroModelDownloadProgress | null = null,
+  sileroVadDownloadPercent: number | null = null,
 ): string {
   const effective = mode === "auto" ? autoThreshold : manualThreshold;
   const vadChipEngine = activeVadEngine ?? vadEngine;
@@ -34,8 +48,11 @@ export function renderVadThresholdPanel(
       </div>
 
       <label class="field">
-        <span>${escapeHtml(t("settings.vadEngine"))}</span>
-        <select name="vad_engine" class="select-input">
+        <select
+          name="vad_engine"
+          class="select-input"
+          aria-label="${escapeHtml(t("settings.vadEngine"))}"
+        >
           <option value="silero" ${vadEngine === "silero" ? "selected" : ""} ${sileroAvailable ? "" : "disabled"}>
             ${escapeHtml(t("settings.vadEngineSilero"))}
           </option>
@@ -50,26 +67,23 @@ export function renderVadThresholdPanel(
         }
       </label>
 
-      <div class="vad-threshold-mode">
-        <label class="vad-threshold-mode-option">
-          <input
-            type="radio"
-            name="vad_threshold_mode"
-            value="auto"
-            ${mode === "auto" ? "checked" : ""}
-          />
-          <span>${escapeHtml(t("settings.vadThresholdAuto"))}</span>
-        </label>
-        <label class="vad-threshold-mode-option">
-          <input
-            type="radio"
-            name="vad_threshold_mode"
-            value="manual"
-            ${mode === "manual" ? "checked" : ""}
-          />
-          <span>${escapeHtml(t("settings.vadThresholdManual"))}</span>
-        </label>
-      </div>
+      ${renderSileroVadModelAction(
+        sileroCompiled,
+        sileroModelOnDisk,
+        sileroVadDownload,
+        sileroVadDownloadPercent,
+      )}
+
+      <label class="field checkbox vad-threshold-auto-check">
+        <input type="checkbox" data-vad-threshold-auto ${mode === "auto" ? "checked" : ""} />
+        <span>${escapeHtml(t("settings.vadThresholdAuto"))}</span>
+      </label>
+      <input
+        type="hidden"
+        name="vad_threshold_mode"
+        value="${mode}"
+        data-vad-threshold-mode-field
+      />
 
       <div class="vad-threshold-controls">
         <div class="vad-threshold-value-row">
@@ -104,13 +118,129 @@ export function renderVadThresholdPanel(
           >
             ${escapeHtml(t("settings.vadCalibrate"))}
           </button>
-          <p class="field-hint vad-threshold-hint">${escapeHtml(t("settings.vadThresholdHint"))}</p>
         </div>
       </div>
 
       <input type="hidden" name="vad_auto_threshold_percent" value="${autoThreshold}" data-vad-auto-threshold />
     </section>
   `;
+}
+
+function renderSileroVadModelAction(
+  sileroCompiled: boolean,
+  sileroModelOnDisk: boolean,
+  sileroVadDownload: SileroModelDownloadProgress | null,
+  downloadProgressPercent: number | null,
+): string {
+  if (!sileroCompiled) {
+    return "";
+  }
+  if (sileroModelOnDisk && !sileroVadDownload) {
+    return "";
+  }
+
+  if (sileroVadDownload) {
+    return `
+      <div class="silero-vad-download" data-silero-vad-download>
+        <div class="field-row">
+          <span class="field-hint" data-silero-vad-download-hint>${escapeHtml(formatDownloadProgress(sileroVadDownload))}</span>
+        </div>
+        <div
+          class="download-progress"
+          data-silero-vad-download-progress
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="${downloadProgressPercent ?? 0}"
+        >
+          <div
+            class="download-progress-bar ${
+              downloadProgressPercent === null ? "is-indeterminate" : ""
+            }"
+            data-silero-vad-download-bar
+            style="${downloadProgressPercent === null ? "" : `width: ${downloadProgressPercent}%;`}"
+          ></div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="field-row model-action" data-silero-vad-download-action>
+      <button type="button" class="btn-secondary" data-download-silero-vad-model>
+        ${escapeHtml(t("settings.downloadWhisperModel"))}
+      </button>
+    </div>
+  `;
+}
+
+function vadDownloadPercent(progress: SileroModelDownloadProgress | null): number | null {
+  if (progress?.percent === null || progress?.percent === undefined) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, Math.round(progress.percent)));
+}
+
+export function ensureSileroVadDownloadUi(progress: SileroModelDownloadProgress): void {
+  if (!document.querySelector("[data-silero-vad-download]")) {
+    const action = document.querySelector("[data-silero-vad-download-action]");
+    if (action) {
+      const percent = vadDownloadPercent(progress);
+      action.outerHTML = `
+      <div class="silero-vad-download" data-silero-vad-download>
+        <div class="field-row">
+          <span class="field-hint" data-silero-vad-download-hint>${escapeHtml(formatDownloadProgress(progress))}</span>
+        </div>
+        <div
+          class="download-progress"
+          data-silero-vad-download-progress
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="${percent ?? 0}"
+        >
+          <div
+            class="download-progress-bar ${percent === null ? "is-indeterminate" : ""}"
+            data-silero-vad-download-bar
+            style="${percent === null ? "" : `width: ${percent}%;`}"
+          ></div>
+        </div>
+      </div>`;
+    }
+  }
+  updateSileroVadDownloadUi(progress);
+}
+
+export function updateSileroVadDownloadUi(
+  progress: SileroModelDownloadProgress | null,
+): void {
+  const panel = document.querySelector<HTMLElement>("[data-silero-vad-download]");
+  if (!panel || !progress) {
+    return;
+  }
+
+  const percent = vadDownloadPercent(progress);
+  const hint = panel.querySelector<HTMLElement>("[data-silero-vad-download-hint]");
+  if (hint) {
+    hint.textContent = formatDownloadProgress(progress);
+  }
+
+  const bar = panel.querySelector<HTMLElement>("[data-silero-vad-download-bar]");
+  const progressRoot = panel.querySelector<HTMLElement>("[data-silero-vad-download-progress]");
+  if (!bar || !progressRoot) {
+    return;
+  }
+
+  if (percent === null) {
+    bar.style.width = "";
+    bar.classList.add("is-indeterminate");
+    progressRoot.setAttribute("aria-valuenow", "0");
+    return;
+  }
+
+  bar.classList.remove("is-indeterminate");
+  bar.style.width = `${percent}%`;
+  progressRoot.setAttribute("aria-valuenow", String(percent));
 }
 
 export function bindVadThresholdPanel(
@@ -130,13 +260,10 @@ export function bindVadThresholdPanel(
     onChange();
   });
 
-  const modeInputs = panel.querySelectorAll<HTMLInputElement>('input[name="vad_threshold_mode"]');
-
-  modeInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      syncVadThresholdControls(panel);
-      onChange();
-    });
+  panel.querySelector<HTMLInputElement>("[data-vad-threshold-auto]")?.addEventListener("change", () => {
+    syncVadThresholdModeField(panel);
+    syncVadThresholdControls(panel);
+    onChange();
   });
 
   slider?.addEventListener("input", () => {
@@ -152,7 +279,16 @@ export function bindVadThresholdPanel(
   });
 }
 
+function syncVadThresholdModeField(panel: HTMLElement): void {
+  const hidden = panel.querySelector<HTMLInputElement>("[data-vad-threshold-mode-field]");
+  const checkbox = panel.querySelector<HTMLInputElement>("[data-vad-threshold-auto]");
+  if (hidden && checkbox) {
+    hidden.value = checkbox.checked ? "auto" : "manual";
+  }
+}
+
 function syncVadThresholdControls(panel: HTMLElement): void {
+  syncVadThresholdModeField(panel);
   const mode = currentThresholdMode(panel);
   const slider = panel.querySelector<HTMLInputElement>("[data-vad-threshold-slider]");
   const calibrateButton = panel.querySelector<HTMLButtonElement>("[data-vad-calibrate]");
@@ -178,10 +314,12 @@ function syncVadThresholdControls(panel: HTMLElement): void {
 }
 
 function currentThresholdMode(panel: HTMLElement): VadThresholdMode {
-  const checked = panel.querySelector<HTMLInputElement>(
-    'input[name="vad_threshold_mode"]:checked',
-  );
-  return checked?.value === "manual" ? "manual" : "auto";
+  const checkbox = panel.querySelector<HTMLInputElement>("[data-vad-threshold-auto]");
+  if (checkbox) {
+    return checkbox.checked ? "auto" : "manual";
+  }
+  const hidden = panel.querySelector<HTMLInputElement>("[data-vad-threshold-mode-field]");
+  return hidden?.value === "manual" ? "manual" : "auto";
 }
 
 function updateThresholdLineFromSlider(panel: HTMLElement): void {
@@ -233,27 +371,33 @@ async function runCalibration(form: HTMLFormElement, panel: HTMLElement): Promis
 
   try {
     const threshold = await calibrateVadThreshold();
-    const autoInput = panel.querySelector<HTMLInputElement>("[data-vad-auto-threshold]");
-    if (autoInput) {
-      autoInput.value = String(threshold);
+    const current = getState().settings;
+    if (current) {
+      setSettings({
+        ...current,
+        vad_threshold_mode: "auto",
+        vad_auto_threshold_percent: threshold,
+      });
+    } else {
+      const autoInput = panel.querySelector<HTMLInputElement>("[data-vad-auto-threshold]");
+      if (autoInput) {
+        autoInput.value = String(threshold);
+      }
+      const autoCheckbox = panel.querySelector<HTMLInputElement>("[data-vad-threshold-auto]");
+      if (autoCheckbox) {
+        autoCheckbox.checked = true;
+      }
+      syncVadThresholdModeField(panel);
+      syncVadThresholdControls(panel);
     }
-    const autoRadio = panel.querySelector<HTMLInputElement>(
-      'input[name="vad_threshold_mode"][value="auto"]',
-    );
-    if (autoRadio) {
-      autoRadio.checked = true;
-    }
-    syncVadThresholdControls(panel);
-
-    const { getSettings } = await import("../api");
-    const { setSettings } = await import("../state");
-    setSettings(await getSettings());
   } catch {
     // Calibration errors surface via global error handling when invoked from save flow.
   } finally {
     calibrating = false;
-    syncVadThresholdControls(panel);
-    void form.dispatchEvent(new Event("change", { bubbles: true }));
+    const livePanel = form.querySelector<HTMLElement>("[data-vad-threshold-panel]");
+    if (livePanel) {
+      syncVadThresholdControls(livePanel);
+    }
   }
 }
 

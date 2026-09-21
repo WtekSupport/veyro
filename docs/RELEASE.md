@@ -28,6 +28,21 @@ NSIS is also built under `%CARGO_TARGET_DIR%\release\bundle\nsis\` (default `C:\
 
 Signed builds and the in-app updater: [docs/UPDATER.md](UPDATER.md).
 
+## Silero TE on-demand assets
+
+Installers no longer bundle `silero-te` weights. The app downloads them into the user models folder.
+
+**One-time publish** (required before users can download in release builds):
+
+```powershell
+python scripts/extract-silero-te.py
+powershell -ExecutionPolicy Bypass -File scripts/package-silero-te-release.ps1 -RepoRoot .
+```
+
+This creates or updates GitHub release **`silero-te-assets-v1`** with flat assets: `model.pt`, `tokenizer.pt`, `meta.json` (~88 MB total). Needs `gh auth login`.
+
+Override URLs for testing with `VEYRO_SILERO_TE_BASE_URL`. Debug builds can seed from `src-tauri/resources/silero-te` after extract when the release is not published yet.
+
 ## Tag and upload
 
 The only git remote is **GitHub** (`origin` → `https://github.com/WtekSupport/veyro.git`). Do not add GitLab or other remotes; CI, releases, and the updater manifest all use GitHub.

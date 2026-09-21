@@ -146,6 +146,10 @@ pub fn sherpa_gpu_compiled() -> bool {
     cfg!(any(feature = "local-sherpa-cuda", feature = "local-sherpa-directml"))
 }
 
+pub fn local_stt_gpu_compiled() -> bool {
+    crate::settings::whisper_gpu_compiled() || sherpa_gpu_compiled()
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub fn sherpa_accelerator_available() -> bool {
     sherpa_stt_compiled()

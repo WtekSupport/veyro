@@ -353,6 +353,8 @@ fn preview_options(settings: &AppSettings) -> TranscriptionOptions {
         prompt: None,
         model: settings.transcription_model.clone(),
         whisper_decoding: Some(WhisperDecodingOptions::permissive()),
-        dictionary_path: settings.transcription_dictionary_path.clone(),
+        dictionary_path: crate::settings::resolve_dictionary_file_path(settings)
+            .ok()
+            .map(|path| path.display().to_string()),
     }
 }

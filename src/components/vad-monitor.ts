@@ -17,10 +17,12 @@ function updateStatusLevelDisplay(level: number): void {
 }
 
 function currentThresholdMode(panel: HTMLElement): "auto" | "manual" {
-  const checked = panel.querySelector<HTMLInputElement>(
-    'input[name="vad_threshold_mode"]:checked',
-  );
-  return checked?.value === "manual" ? "manual" : "auto";
+  const checkbox = panel.querySelector<HTMLInputElement>("[data-vad-threshold-auto]");
+  if (checkbox) {
+    return checkbox.checked ? "auto" : "manual";
+  }
+  const hidden = panel.querySelector<HTMLInputElement>("[data-vad-threshold-mode-field]");
+  return hidden?.value === "manual" ? "manual" : "auto";
 }
 
 function setThresholdDisplay(panel: HTMLElement, percent: number): void {

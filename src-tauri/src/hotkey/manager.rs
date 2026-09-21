@@ -226,6 +226,22 @@ fn hotkey_conflicts_with_ide(normalized: &str) -> bool {
 pub(crate) fn spawn_ptt_press(app: AppHandle, ctx: Arc<AppContext>) {
     log_ptt_trace(&app, "spawn_ptt_press", "worker started");
     std::thread::spawn(move || {
+        let allowed = ctx.controller.lock().ok().is_some_and(|controller| {
+            matches!(controller.status().state, AppState::Ready)
+                || matches!(
+                    crate::game_input::toggle_capture_state(),
+                    crate::game_input::ToggleCapture::Starting
+                )
+        });
+        if !allowed {
+            log_ptt_trace(&app, "spawn_ptt_press", "aborted (capture no longer allowed)");
+            let _ = ctx.controller.lock().map(|mut c| c.reset_ptt_active());
+            crate::game_input::reset_toggle_capture();
+            #[cfg(windows)]
+            crate::game_input::hotkey_win::reset_ptt_key_state();
+            return;
+        }
+
         let settings = ctx
             .controller
             .lock()
@@ -570,11 +586,16 @@ pub fn dispatch_ptt_pressed(app: &AppHandle) {
             });
         }
         Some(HotkeyPlan::PttPress) => {
-            let toggle_mode = ctx.controller.lock().ok().is_some_and(|c| {
-                c.settings().push_to_talk && press_to_toggle(c.settings())
-            });
-            if toggle_mode && !crate::game_input::begin_toggle_start() {
+            let (toggle_mode, hold_mode) = ctx.controller.lock().ok().map(|c| {
+                let settings = c.settings();
+                (
+                    settings.push_to_talk && press_to_toggle(settings),
+                    settings.push_to_talk && !press_to_toggle(settings),
+                )
+            }).unwrap_or((false, false));
+            if (toggle_mode || hold_mode) && !crate::game_input::begin_toggle_start() {
                 log_ptt_trace(app, "dispatch_pressed", "begin_toggle_start rejected");
+                let _ = ctx.controller.lock().map(|mut c| c.reset_ptt_active());
                 return;
             }
             log_ptt_trace(app, "dispatch_pressed", "spawn ptt press");

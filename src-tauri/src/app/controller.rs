@@ -35,6 +35,8 @@ pub struct SettingsUpdatePlan {
     pub audio_action: AudioAction,
     pub reload_transcriber: bool,
     pub reload_llm_engine: bool,
+    /// Drop STT/LLM/TE weights from RAM (not only swap handles).
+    pub purge_inference_memory: bool,
     pub capslock_ptt_changed: bool,
 }
 use crate::error::{AppError, AudioError};
@@ -114,7 +116,10 @@ impl AppController {
         let previous_vad_voice_threshold = self.settings.vad_voice_threshold_percent;
         let previous_vad_auto_threshold = self.settings.vad_auto_threshold_percent;
         let previous_provider = self.settings.transcription_provider.clone();
-        let previous_model = self.settings.local_stt_model;
+        let previous_transcription_model = self.settings.transcription_model.clone();
+        let previous_silero_te = self.settings.silero_te;
+        let previous_variant = self.settings.local_stt_variant();
+        let previous_data_storage_dir = self.settings.data_storage_dir.clone();
         let previous_models_dir = self.settings.local_whisper_models_dir.clone();
         let previous_use_gpu = self.settings.local_whisper_use_gpu;
         let previous_beam = self.settings.local_whisper_beam_size;
@@ -169,7 +174,9 @@ impl AppController {
         };
 
         let reload_transcriber = previous_provider != self.settings.transcription_provider
-            || previous_model != self.settings.local_stt_model
+            || previous_transcription_model != self.settings.transcription_model
+            || previous_variant != self.settings.local_stt_variant()
+            || previous_data_storage_dir != self.settings.data_storage_dir
             || previous_models_dir != self.settings.local_whisper_models_dir
             || previous_use_gpu != self.settings.local_whisper_use_gpu
             || previous_beam != self.settings.local_whisper_beam_size
@@ -178,8 +185,13 @@ impl AppController {
         let reload_llm_engine = previous_text_processing_mode != self.settings.text_processing_mode
             || previous_rewrite_provider != self.settings.text_rewrite_provider
             || previous_llm_model != self.settings.local_llm_model
+            || previous_data_storage_dir != self.settings.data_storage_dir
             || previous_llm_models_dir != self.settings.local_llm_models_dir
             || previous_llm_use_gpu != self.settings.local_llm_use_gpu;
+
+        let purge_inference_memory = reload_transcriber
+            || reload_llm_engine
+            || previous_silero_te != self.settings.silero_te;
 
         let hotkey_changed = previous_hotkey != self.settings.global_hotkey;
         let game_mode_changed = previous_hotkey_game_mode != self.settings.hotkey_game_mode;
@@ -195,6 +207,7 @@ impl AppController {
             audio_action,
             reload_transcriber,
             reload_llm_engine,
+            purge_inference_memory,
             capslock_ptt_changed: previous_capslock != self.settings.capslock_ptt,
         })
     }
@@ -271,13 +284,29 @@ impl AppController {
         Ok(())
     }
 
+    pub fn is_ptt_pipeline_busy(&self) -> bool {
+        matches!(
+            self.state,
+            AppState::Processing | AppState::Transcribing | AppState::Injecting
+        )
+    }
+
+    /// New PTT capture may start only from a clean Ready state (not while listening or processing).
+    pub fn can_start_new_ptt_capture(&self) -> bool {
+        self.settings.enabled
+            && self.settings.push_to_talk
+            && self.state == AppState::Ready
+            && !self.push_to_talk_active
+            && !self.is_ptt_pipeline_busy()
+    }
+
     pub fn plan_hotkey_pressed(&mut self) -> Result<HotkeyPlan, AppError> {
         if !self.settings.push_to_talk || !self.settings.enabled {
             return Ok(HotkeyPlan::None);
         }
 
         if !crate::hotkey::ptt_mode::press_to_toggle(&self.settings) {
-            if self.state != AppState::Ready {
+            if !self.can_start_new_ptt_capture() {
                 return Ok(HotkeyPlan::None);
             }
             self.push_to_talk_active = true;
@@ -286,6 +315,9 @@ impl AppController {
 
         match self.state {
             AppState::Ready => {
+                if !self.can_start_new_ptt_capture() {
+                    return Ok(HotkeyPlan::None);
+                }
                 self.push_to_talk_active = true;
                 Ok(HotkeyPlan::PttPress)
             }
@@ -305,7 +337,13 @@ impl AppController {
         if crate::hotkey::ptt_mode::press_to_toggle(&self.settings) {
             return Ok(HotkeyPlan::None);
         }
+        if self.is_ptt_pipeline_busy() {
+            return Ok(HotkeyPlan::None);
+        }
         if !matches!(self.state, AppState::Ready | AppState::Listening) {
+            return Ok(HotkeyPlan::None);
+        }
+        if !crate::game_input::begin_toggle_stop() {
             return Ok(HotkeyPlan::None);
         }
         self.push_to_talk_active = false;
@@ -532,16 +570,21 @@ mod tests {
 
     #[test]
     fn hold_mode_press_and_release() {
+        crate::game_input::reset_toggle_capture();
         let mut controller = ptt_controller(true);
 
+        assert!(crate::game_input::begin_toggle_start());
         assert_eq!(
             controller.plan_hotkey_pressed().unwrap(),
             HotkeyPlan::PttPress
         );
+        crate::game_input::confirm_toggle_start();
+        controller.state = AppState::Listening;
         assert_eq!(
             controller.plan_hotkey_released().unwrap(),
             HotkeyPlan::PttRelease
         );
+        crate::game_input::reset_toggle_capture();
     }
 
     #[test]
@@ -563,6 +606,7 @@ mod tests {
 
     #[test]
     fn scroll_lock_with_hold_ignores_second_press_until_release() {
+        crate::game_input::reset_toggle_capture();
         let settings = AppSettings {
             push_to_talk: true,
             ptt_hold: true,
@@ -573,17 +617,22 @@ mod tests {
         let mut controller = AppController::new(settings, MockInjector::new());
         controller.state = AppState::Ready;
 
+        assert!(crate::game_input::begin_toggle_start());
         assert_eq!(
             controller.plan_hotkey_pressed().unwrap(),
             HotkeyPlan::PttPress
         );
+        crate::game_input::confirm_toggle_start();
         controller.state = AppState::Listening;
 
         assert_eq!(controller.plan_hotkey_pressed().unwrap(), HotkeyPlan::None);
+        crate::game_input::confirm_toggle_start();
+        controller.state = AppState::Listening;
         assert_eq!(
             controller.plan_hotkey_released().unwrap(),
             HotkeyPlan::PttRelease
         );
+        crate::game_input::reset_toggle_capture();
     }
 
     #[test]
@@ -629,6 +678,31 @@ mod tests {
     }
 
     #[test]
+    fn hold_mode_release_during_processing_is_ignored() {
+        let mut controller = ptt_controller(true);
+        controller.push_to_talk_active = true;
+        controller.state = AppState::Processing;
+
+        assert_eq!(
+            controller.plan_hotkey_released().unwrap(),
+            HotkeyPlan::None
+        );
+        assert!(controller.push_to_talk_active);
+    }
+
+    #[test]
+    fn hold_mode_second_press_while_active_flag_is_ignored() {
+        let mut controller = ptt_controller(true);
+        controller.push_to_talk_active = true;
+        controller.state = AppState::Ready;
+
+        assert_eq!(
+            controller.plan_hotkey_pressed().unwrap(),
+            HotkeyPlan::None
+        );
+    }
+
+    #[test]
     fn segment_recovery_target_listening_while_ptt_active() {
         let mut controller = ptt_controller(true);
         controller.push_to_talk_active = true;
@@ -641,6 +715,21 @@ mod tests {
         let controller = ptt_controller(true);
 
         assert_eq!(controller.segment_recovery_target(), AppState::Ready);
+    }
+
+    #[test]
+    fn transcription_model_change_triggers_stt_reload() {
+        let mut controller = AppController::new(AppSettings::default(), MockInjector::new());
+
+        let plan = controller
+            .plan_settings_update(SettingsPatch {
+                transcription_model: Some("gpt-4o-mini-transcribe".to_string()),
+                ..Default::default()
+            })
+            .expect("settings update should succeed");
+
+        assert!(plan.reload_transcriber);
+        assert!(plan.purge_inference_memory);
     }
 
     #[test]

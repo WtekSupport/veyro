@@ -11,6 +11,7 @@ import type {
 } from "../api";
 
 import { t, translateActivity, translateState, translateError } from "../i18n";
+import { renderStatusBarGearButton } from "./status-quick-settings";
 
 
 
@@ -131,14 +132,9 @@ function stateClass(state: StatusSnapshot["state"]): string {
 }
 
 function livePartialMarkup(
-  status: StatusSnapshot,
   partialTranscript: string | null,
   compact: boolean,
 ): string {
-  if (status.state === "listening") {
-    const tag = compact ? "span" : "p";
-    return `<${tag} class="status-partial status-listening-indicator" aria-hidden="true"><span class="listening-dots"></span></${tag}>`;
-  }
   const trimmed = partialTranscript?.trim();
   if (!trimmed) {
     return "";
@@ -168,13 +164,9 @@ export function patchLiveStatusUi(
     if (text) {
       text.textContent = label;
     }
-    const meta = bar.querySelector(".status-meta");
-    if (meta) {
-      meta.textContent = status.state === "ready" ? t("status.ready") : t("status.live");
-    }
   });
 
-  const compactPartial = livePartialMarkup(status, partialTranscript, true);
+  const compactPartial = livePartialMarkup(partialTranscript, true);
   document.querySelectorAll(".status-bar--compact").forEach((bar) => {
     const existing = bar.querySelector(".status-partial");
     if (existing) {
@@ -185,7 +177,7 @@ export function patchLiveStatusUi(
     }
   });
 
-  const fullPartial = livePartialMarkup(status, partialTranscript, false);
+  const fullPartial = livePartialMarkup(partialTranscript, false);
   document.querySelectorAll(".status-bar:not(.status-bar--compact)").forEach((bar) => {
     let sibling = bar.nextElementSibling;
     if (sibling?.classList.contains("status-partial")) {
@@ -207,12 +199,7 @@ export function renderCompactStatusBar(
   }
 
   const label = translateState(status.state);
-  const partial =
-    status.state === "listening"
-      ? `<span class="status-partial status-listening-indicator" aria-hidden="true"><span class="listening-dots"></span></span>`
-      : partialTranscript?.trim()
-        ? `<span class="status-partial" aria-live="polite">${escapeHtml(truncatePartial(partialTranscript, 80))}</span>`
-        : "";
+  const partial = livePartialMarkup(partialTranscript, true);
 
   return `
     <div class="status-bar status-bar--compact">
@@ -237,12 +224,7 @@ export function renderStatusBar(
 
 
   const label = translateState(status.state);
-  const partial =
-    status.state === "listening"
-      ? `<p class="status-partial status-listening-indicator" aria-hidden="true"><span class="listening-dots"></span></p>`
-      : partialTranscript?.trim()
-        ? `<p class="status-partial" aria-live="polite">${escapeHtml(truncatePartial(partialTranscript, 120))}</p>`
-        : "";
+  const partial = livePartialMarkup(partialTranscript, false);
 
   return `
 
@@ -252,7 +234,7 @@ export function renderStatusBar(
 
       <span class="status-text">${escapeHtml(label)}</span>
 
-      <span class="status-meta">${status.state === "ready" ? t("status.ready") : t("status.live")}</span>
+      ${renderStatusBarGearButton()}
 
     </div>
 
@@ -353,6 +335,10 @@ export function updateActivityLogDom(entries: ActivityLogEntry[]): void {
     return;
   }
   list.innerHTML = activityLogListHtml(entries);
+}
+
+export function renderActivityLogListOnly(entries: ActivityLogEntry[]): string {
+  return `<ul class="activity-log-list">${activityLogListHtml(entries)}</ul>`;
 }
 
 export function renderActivityLog(
