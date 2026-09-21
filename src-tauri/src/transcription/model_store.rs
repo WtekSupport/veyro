@@ -20,6 +20,21 @@ const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_secs(5);
 // ggml tensor files store magic 0x67676d6c as bytes 6c 6d 67 67 on disk.
 const GGML_FILE_MAGIC: [u8; 4] = [0x6c, 0x6d, 0x67, 0x67];
 
+pub fn validate_whisper_file(path: &Path, file_name: &str) -> Result<(), String> {
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut header = [0_u8; 4];
+    use std::io::Read;
+    file.read_exact(&mut header)
+        .map_err(|error| error.to_string())?;
+    if header != GGML_FILE_MAGIC {
+        let _ = fs::remove_file(path);
+        return Err(format!(
+            "downloaded file is not a valid ggml Whisper model ({file_name})"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 pub struct DownloadProgress {
     pub downloaded: u64,
@@ -50,22 +65,11 @@ impl DownloadProgress {
 }
 
 pub fn default_models_dir() -> Result<PathBuf, ConfigError> {
-    let base = dirs::config_dir().ok_or_else(|| {
-        ConfigError::Read("unable to resolve OS config directory".to_string())
-    })?;
-    Ok(base.join("Veyro").join("models"))
+    Ok(crate::settings::default_data_storage_root()?.join(crate::settings::SUBDIR_STT_MODELS))
 }
 
 pub fn resolve_models_dir(settings: &AppSettings) -> Result<PathBuf, ConfigError> {
-    if let Some(dir) = settings
-        .local_whisper_models_dir
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        return Ok(PathBuf::from(dir));
-    }
-    default_models_dir()
+    crate::settings::resolve_stt_models_dir(settings)
 }
 
 pub fn models_dir_for(settings: &AppSettings) -> Result<PathBuf, ConfigError> {
@@ -77,11 +81,13 @@ pub fn model_path_for(settings: &AppSettings, kind: WhisperModelKind) -> Result<
 }
 
 pub fn resolve_model_path(settings: &AppSettings) -> Result<PathBuf, ConfigError> {
-    let whisper = settings
-        .local_stt_model
-        .whisper_kind()
-        .ok_or_else(|| ConfigError::Read("selected model is not a Whisper model".to_string()))?;
-    model_path_for(settings, whisper)
+    let variant = settings.local_stt_variant();
+    if !variant.family.is_whisper() {
+        return Err(ConfigError::Read(
+            "selected model is not a Whisper model".to_string(),
+        ));
+    }
+    crate::transcription::local_stt_model_store::whisper_model_path(settings, variant)
 }
 
 pub fn model_exists(path: &Path) -> bool {

@@ -1,5 +1,7 @@
 import {
-  isWhisperSttModel,
+  effectiveLocalSttFamily,
+  effectiveLocalSttQuant,
+  isLocalWhisperBeamSizeActive,
   type ActivityLogEntry,
   type AiSkillInfo,
   type AppSettings,
@@ -8,21 +10,30 @@ import {
   type LlmModelDownloadProgress,
   type LlmModelInfo,
   type LlmModelKind,
-  type LocalSttModelInfo,
+  type LocalSttFamily,
+  type LocalSttFamilyInfo,
   type LocalSttModelKind,
+  type LocalSttQuant,
+  type LocalSttVariantInfo,
   type TextProcessingMode,
   type TextRewriteProvider,
   type TranscriptionLanguageInfo,
   type UiLocale,
+  type SileroModelDownloadProgress,
+  type SileroTeModelStatus,
+  type SileroVadModelStatus,
   type WhisperModelDownloadProgress,
 } from "../api";
-import type { SettingsTab } from "../state";
+import { readLocalSttQuantFromForm, renderSttModelPicker } from "./stt-model-picker";
+import { getState, type SettingsTab } from "../state";
 import { t } from "../i18n";
 import type { MessageKey } from "../i18n/locales/en";
 import { iconFolder, iconImport, iconPlus, iconTrash } from "./icons";
 import { renderMicMeter } from "./mic-meter";
 import { renderStatusDashboard } from "./status-dashboard";
 import { renderVadThresholdPanel } from "./vad-threshold-panel";
+import { isStatusQuickSettingsOpen } from "./status-quick-settings";
+import { renderStatusEventsPopover } from "./status-events";
 import type { VadEngine, VadThresholdMode } from "../api";
 
 export interface SettingsFormValues {
@@ -48,18 +59,18 @@ export interface SettingsFormValues {
   ui_locale: UiLocale;
   transcription_provider: string;
   local_stt_model: LocalSttModelKind;
-  local_whisper_models_dir: string;
+  local_stt_family: LocalSttFamily;
+  local_stt_quant: LocalSttQuant;
   whisper_model_exists: boolean;
   local_whisper_use_gpu: boolean;
   local_whisper_beam_size: number;
   text_rewrite_provider: TextRewriteProvider;
   local_llm_model: LlmModelKind;
-  local_llm_models_dir: string;
   llm_model_exists: boolean;
   local_llm_use_gpu: boolean;
   ai_rewrite_skill: string;
   whisper_prompt_prefix: string;
-  transcription_dictionary_path: string;
+  data_storage_dir: string;
   audio_preprocess_enabled: boolean;
   audio_noise_reduction_enabled: boolean;
   vad_pre_speech_buffer_ms: number;
@@ -72,114 +83,14 @@ export interface SettingsFormValues {
   stt_idle_unload_sec: number;
   llm_idle_unload_sec: number;
   prewarm_local_models_at_startup: boolean;
+  weak_pc_mode: boolean;
+  weak_pc_spill_to_disk: boolean;
+  weak_pc_ram_segment_cap: number;
+  weak_pc_max_disk_queue_mb: number;
+  weak_pc_reduce_preview: boolean;
+  weak_pc_reduce_prewarm: boolean;
   api_key: string;
   has_api_key: boolean;
-}
-
-type LocalSttModelOptionCopy = {
-  name: MessageKey;
-  req: MessageKey;
-  features: MessageKey;
-};
-
-const LOCAL_STT_MODEL_OPTION_COPY: Record<LocalSttModelKind, LocalSttModelOptionCopy> = {
-  base: {
-    name: "settings.whisperModelNameBase",
-    req: "settings.sttModelBaseReq",
-    features: "settings.sttModelBaseFeatures",
-  },
-  small: {
-    name: "settings.whisperModelNameSmall",
-    req: "settings.sttModelSmallReq",
-    features: "settings.sttModelSmallFeatures",
-  },
-  medium: {
-    name: "settings.whisperModelNameMedium",
-    req: "settings.sttModelMediumReq",
-    features: "settings.sttModelMediumFeatures",
-  },
-  large_v3_turbo: {
-    name: "settings.whisperModelNameLargeV3Turbo",
-    req: "settings.sttModelLargeV3TurboReq",
-    features: "settings.sttModelLargeV3TurboFeatures",
-  },
-  large_v3: {
-    name: "settings.whisperModelNameLargeV3",
-    req: "settings.sttModelLargeV3Req",
-    features: "settings.sttModelLargeV3Features",
-  },
-  parakeet_tdt_0_6b_v3: {
-    name: "settings.sttModelNameParakeetTdt06bV3",
-    req: "settings.sttModelParakeetReq",
-    features: "settings.sttModelParakeetFeatures",
-  },
-  qwen3_asr_0_6b: {
-    name: "settings.sttModelNameQwen3Asr06b",
-    req: "settings.sttModelQwen06Req",
-    features: "settings.sttModelQwen06Features",
-  },
-  qwen3_asr_1_7b: {
-    name: "settings.sttModelNameQwen3Asr17b",
-    req: "settings.sttModelQwen17Req",
-    features: "settings.sttModelQwen17Features",
-  },
-};
-
-const IDLE_UNLOAD_SEC_OPTIONS = [0, 60, 90, 120, 180, 300, 600] as const;
-
-function idleUnloadOptions(selected: number): string {
-  return IDLE_UNLOAD_SEC_OPTIONS.map((sec) => {
-    const label =
-      sec === 0
-        ? t("settings.idleUnloadNever")
-        : t("settings.idleUnloadDurationSec", { sec: String(sec) });
-    return `<option value="${sec}" ${sec === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
-  }).join("");
-}
-
-const FALLBACK_LOCAL_STT_MODEL_KINDS: LocalSttModelKind[] = [
-  "base",
-  "small",
-  "medium",
-  "large_v3_turbo",
-  "large_v3",
-  "parakeet_tdt_0_6b_v3",
-  "qwen3_asr_0_6b",
-  "qwen3_asr_1_7b",
-];
-
-const LEGACY_LOCAL_STT_KIND: Record<string, LocalSttModelKind> = {
-  whisper_base: "base",
-  whisper_small: "small",
-  whisper_medium: "medium",
-  whisper_large_v3_turbo: "large_v3_turbo",
-  whisper_large_v3: "large_v3",
-};
-
-function normalizeLocalSttModelKind(kind: string): LocalSttModelKind {
-  return (LEGACY_LOCAL_STT_KIND[kind] ?? kind) as LocalSttModelKind;
-}
-
-function formatSttModelSize(sizeMb: number): string {
-  if (sizeMb <= 0) {
-    return "…";
-  }
-  return t("settings.sttModelSizeFormat", { size: sizeMb });
-}
-
-function formatModelOptionLabel(
-  nameKey: MessageKey,
-  sizeMb: number,
-  reqKey: MessageKey,
-  featuresKey: MessageKey,
-): string {
-  const title = `${t(nameKey)} (${formatSttModelSize(sizeMb)})`;
-  return `${title}\n${t(reqKey)}\n${t(featuresKey)}`;
-}
-
-function formatLocalSttModelOptionLabel(kind: LocalSttModelKind, sizeMb: number): string {
-  const copy = LOCAL_STT_MODEL_OPTION_COPY[kind];
-  return formatModelOptionLabel(copy.name, sizeMb, copy.req, copy.features);
 }
 
 const TEXT_MODE_HINT_KEYS: Record<TextProcessingMode, MessageKey> = {
@@ -225,6 +136,23 @@ const LLM_MODEL_SIZE_MB: Record<LlmModelKind, number> = {
   gec08b: 500,
 };
 
+function formatSttModelSize(sizeMb: number): string {
+  if (sizeMb <= 0) {
+    return "…";
+  }
+  return t("settings.sttModelSizeFormat", { size: sizeMb });
+}
+
+function formatModelOptionLabel(
+  nameKey: MessageKey,
+  sizeMb: number,
+  reqKey: MessageKey,
+  featuresKey: MessageKey,
+): string {
+  const title = `${t(nameKey)} (${formatSttModelSize(sizeMb)})`;
+  return `${title}\n${t(reqKey)}\n${t(featuresKey)}`;
+}
+
 function formatLlmModelOptionLabel(kind: LlmModelKind, sizeMb: number): string {
   const copy = LLM_MODEL_OPTION_COPY[kind];
   return formatModelOptionLabel(copy.name, sizeMb, copy.req, copy.features);
@@ -263,10 +191,21 @@ export function effectiveTranscriptionProvider(values: SettingsFormValues): stri
   return values.transcription_provider;
 }
 
+export function needsOpenAiApiKeyForProviders(
+  transcriptionProvider: string,
+  textRewriteProvider: TextRewriteProvider,
+  hasApiKey: boolean,
+): boolean {
+  const effective =
+    !hasApiKey && transcriptionProvider === "openai" ? "local" : transcriptionProvider;
+  return effective === "openai" || textRewriteProvider === "openai";
+}
+
 export function needsOpenAiApiKey(values: SettingsFormValues): boolean {
-  return (
-    values.transcription_provider === "openai" ||
-    values.text_rewrite_provider === "openai"
+  return needsOpenAiApiKeyForProviders(
+    values.transcription_provider,
+    values.text_rewrite_provider,
+    values.has_api_key,
   );
 }
 
@@ -298,12 +237,12 @@ function renderTextModeOptions(
 export function settingsToForm(
   settings: AppSettings,
   hasApiKey: boolean,
-  whisperModelsDir = "",
+  dataStorageDir = "",
   whisperModelExists = false,
-  dictionaryPath = "",
-  llmModelsDir = "",
   llmModelExists = false,
 ): SettingsFormValues {
+  const sttFamily = effectiveLocalSttFamily(settings);
+  const sttQuant = effectiveLocalSttQuant(sttFamily, settings.local_stt_quant);
   return {
     enabled: settings.enabled,
     global_hotkey: settings.global_hotkey,
@@ -333,19 +272,18 @@ export function settingsToForm(
       settings.local_stt_model ??
       (settings as { local_whisper_model?: LocalSttModelKind }).local_whisper_model ??
       "base",
-    local_whisper_models_dir: whisperModelsDir,
+    local_stt_family: sttFamily,
+    local_stt_quant: sttQuant,
     whisper_model_exists: whisperModelExists,
     local_whisper_use_gpu: settings.local_whisper_use_gpu ?? false,
     local_whisper_beam_size: settings.local_whisper_beam_size ?? 1,
     text_rewrite_provider: settings.text_rewrite_provider ?? "openai",
     local_llm_model: settings.local_llm_model ?? "qwen3_4b",
-    local_llm_models_dir: llmModelsDir,
     llm_model_exists: llmModelExists,
     local_llm_use_gpu: settings.local_llm_use_gpu ?? false,
     ai_rewrite_skill: settings.ai_rewrite_skill ?? "",
     whisper_prompt_prefix: settings.whisper_prompt_prefix ?? "",
-    transcription_dictionary_path:
-      settings.transcription_dictionary_path ?? dictionaryPath,
+    data_storage_dir: dataStorageDir.trim(),
     audio_preprocess_enabled: settings.audio_preprocess_enabled ?? true,
     audio_noise_reduction_enabled: settings.audio_noise_reduction_enabled ?? true,
     vad_pre_speech_buffer_ms: settings.vad_pre_speech_buffer_ms ?? 300,
@@ -358,6 +296,12 @@ export function settingsToForm(
     stt_idle_unload_sec: settings.stt_idle_unload_sec ?? 180,
     llm_idle_unload_sec: settings.llm_idle_unload_sec ?? 90,
     prewarm_local_models_at_startup: settings.prewarm_local_models_at_startup ?? false,
+    weak_pc_mode: settings.weak_pc_mode ?? false,
+    weak_pc_spill_to_disk: settings.weak_pc_spill_to_disk ?? true,
+    weak_pc_ram_segment_cap: settings.weak_pc_ram_segment_cap ?? 2,
+    weak_pc_max_disk_queue_mb: settings.weak_pc_max_disk_queue_mb ?? 512,
+    weak_pc_reduce_preview: settings.weak_pc_reduce_preview ?? true,
+    weak_pc_reduce_prewarm: settings.weak_pc_reduce_prewarm ?? true,
     api_key: "",
     has_api_key: hasApiKey,
   };
@@ -455,32 +399,36 @@ export function updateWhisperDownloadUi(
   progressRoot.setAttribute("aria-valuenow", String(percent));
 }
 
-function selectedLocalSttModelExists(
-  values: SettingsFormValues,
-  localSttModels: LocalSttModelInfo[],
-): boolean {
-  const selected = localSttModels.find((model) => model.kind === values.local_stt_model);
-  return selected?.exists ?? values.whisper_model_exists;
+function llmDownloadPercent(progress: LlmModelDownloadProgress | null): number | null {
+  return progress?.percent ?? null;
 }
 
-function renderLocalSttModelAction(
+function renderSileroTeModelAction(
   values: SettingsFormValues,
-  localSttModels: LocalSttModelInfo[],
-  whisperModelDownload: WhisperModelDownloadProgress | null,
+  sileroTeCompiled: boolean,
+  sileroTeReady: boolean,
+  sileroTeDownload: SileroModelDownloadProgress | null,
   downloadProgressPercent: number | null,
 ): string {
-  const downloadingModel = whisperModelDownload !== null;
-  const modelExists = selectedLocalSttModelExists(values, localSttModels);
+  if (effectiveTranscriptionProvider(values) !== "local") {
+    return "";
+  }
+  if (!sileroTeCompiled) {
+    return "";
+  }
+  if (sileroTeReady && !sileroTeDownload) {
+    return "";
+  }
 
-  if (downloadingModel) {
+  if (sileroTeDownload) {
     return `
-      <div class="whisper-download" data-whisper-download>
+      <div class="silero-te-download" data-silero-te-download>
         <div class="field-row">
-          <span class="field-hint" data-whisper-download-hint>${escapeHtml(formatDownloadProgress(whisperModelDownload))}</span>
+          <span class="field-hint" data-silero-te-download-hint>${escapeHtml(formatDownloadProgress(sileroTeDownload))}</span>
         </div>
         <div
           class="download-progress"
-          data-whisper-download-progress
+          data-silero-te-download-progress
           role="progressbar"
           aria-valuemin="0"
           aria-valuemax="100"
@@ -490,51 +438,85 @@ function renderLocalSttModelAction(
             class="download-progress-bar ${
               downloadProgressPercent === null ? "is-indeterminate" : ""
             }"
-            data-whisper-download-bar
-            style="${
-              downloadProgressPercent === null ? "" : `width: ${downloadProgressPercent}%;`
-            }"
+            data-silero-te-download-bar
+            style="${downloadProgressPercent === null ? "" : `width: ${downloadProgressPercent}%;`}"
           ></div>
         </div>
       </div>
     `;
   }
 
-  if (modelExists) {
-    return "";
-  }
-
   return `
-    <div class="field-row model-action">
-      <button type="button" class="btn-secondary" data-download-whisper-model>
+    <div class="field-row model-action" data-silero-te-download-action>
+      <button type="button" class="btn-secondary" data-download-silero-te-model>
         ${escapeHtml(t("settings.downloadWhisperModel"))}
       </button>
     </div>
   `;
 }
 
-function renderLocalSttModelOptions(
-  values: SettingsFormValues,
-  localSttModels: LocalSttModelInfo[],
-): string {
-  const models =
-    localSttModels.length > 0
-      ? localSttModels.map((info) => ({
-          kind: normalizeLocalSttModelKind(String(info.kind)),
-          size_mb: info.size_mb,
-        }))
-      : FALLBACK_LOCAL_STT_MODEL_KINDS.map((kind) => ({ kind, size_mb: 0 }));
-
-  return models
-    .map((info) => {
-      const label = formatLocalSttModelOptionLabel(info.kind, info.size_mb);
-      return `<option value="${info.kind}" ${values.local_stt_model === info.kind ? "selected" : ""}>${escapeHtml(label)}</option>`;
-    })
-    .join("");
+export function ensureSileroTeDownloadUi(
+  progress: SileroModelDownloadProgress,
+): void {
+  if (!document.querySelector("[data-silero-te-download]")) {
+    const action = document.querySelector("[data-silero-te-download-action]");
+    if (action) {
+      const percent = whisperDownloadPercent(progress);
+      action.outerHTML = `
+      <div class="silero-te-download" data-silero-te-download>
+        <div class="field-row">
+          <span class="field-hint" data-silero-te-download-hint">${escapeHtml(formatDownloadProgress(progress))}</span>
+        </div>
+        <div
+          class="download-progress"
+          data-silero-te-download-progress
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="${percent ?? 0}"
+        >
+          <div
+            class="download-progress-bar ${percent === null ? "is-indeterminate" : ""}"
+            data-silero-te-download-bar
+            style="${percent === null ? "" : `width: ${percent}%;`}"
+          ></div>
+        </div>
+      </div>`;
+    }
+  }
+  updateSileroTeDownloadUi(progress);
 }
 
-function llmDownloadPercent(progress: LlmModelDownloadProgress | null): number | null {
-  return progress?.percent ?? null;
+export function updateSileroTeDownloadUi(
+  progress: SileroModelDownloadProgress | null,
+): void {
+  const panel = document.querySelector<HTMLElement>("[data-silero-te-download]");
+  if (!panel || !progress) {
+    return;
+  }
+
+  const percent = whisperDownloadPercent(progress);
+  const hint = panel.querySelector<HTMLElement>("[data-silero-te-download-hint]");
+  if (hint) {
+    hint.textContent = formatDownloadProgress(progress);
+  }
+
+  const bar = panel.querySelector<HTMLElement>("[data-silero-te-download-bar]");
+  const progressRoot = panel.querySelector<HTMLElement>("[data-silero-te-download-progress]");
+  if (!bar || !progressRoot) {
+    return;
+  }
+
+  if (percent === null) {
+    bar.style.width = "";
+    bar.classList.add("is-indeterminate");
+    progressRoot.setAttribute("aria-valuenow", "0");
+    return;
+  }
+
+  bar.classList.remove("is-indeterminate");
+  bar.style.width = `${percent}%`;
+  progressRoot.setAttribute("aria-valuenow", String(percent));
 }
 
 function selectedLlmModelExists(
@@ -707,23 +689,154 @@ function renderTranscriptionLanguageOptions(
   );
 }
 
+export function renderStatusQuickSettingsPopover(
+  values: SettingsFormValues,
+  systemNotificationsAvailable: boolean,
+): string {
+  const panelOpen = isStatusQuickSettingsOpen();
+  return `
+    <div class="status-quick-settings" data-status-quick-settings-popover ${panelOpen ? "" : "hidden"}>
+      <div
+        class="status-quick-settings-panel"
+        id="status-quick-settings-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="status-quick-settings-title"
+      >
+        <header class="status-quick-settings-header">
+          <h4 class="status-quick-settings-title" id="status-quick-settings-title">
+            ${escapeHtml(t("status.quickSettingsTitle"))}
+          </h4>
+          <button
+            type="button"
+            class="status-quick-settings-close icon-btn"
+            data-close-status-quick-settings
+            aria-label="${escapeHtml(t("common.close"))}"
+            title="${escapeHtml(t("common.close"))}"
+          >×</button>
+        </header>
+        <div class="status-quick-settings-body">
+          <label class="field">
+            <span>${escapeHtml(t("settings.uiLocale"))}</span>
+            <select name="ui_locale">
+              <option value="en" ${values.ui_locale === "en" ? "selected" : ""}>${escapeHtml(t("settings.uiLocaleEn"))}</option>
+              <option value="ru" ${values.ui_locale === "ru" ? "selected" : ""}>${escapeHtml(t("settings.uiLocaleRu"))}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>${escapeHtml(t("settings.dataStorage"))}</span>
+            <div class="api-key-row">
+              <input
+                type="text"
+                value="${escapeHtml(values.data_storage_dir)}"
+                placeholder="${escapeHtml(t("settings.dataStoragePlaceholder"))}"
+                readonly
+                data-data-storage-display
+              />
+              <button
+                type="button"
+                class="icon-btn"
+                data-open-data-storage-folder
+                title="${escapeHtml(t("settings.dataStorageOpen"))}"
+                aria-label="${escapeHtml(t("settings.dataStorageOpen"))}"
+              >${iconFolder()}</button>
+              <button
+                type="button"
+                class="icon-btn"
+                data-pick-data-storage-dir
+                title="${escapeHtml(t("settings.dataStoragePick"))}"
+                aria-label="${escapeHtml(t("settings.dataStoragePick"))}"
+              >${iconImport()}</button>
+            </div>
+          </label>
+
+          ${renderWeakPcExpertSettings({
+            weak_pc_mode: values.weak_pc_mode,
+            weak_pc_spill_to_disk: values.weak_pc_spill_to_disk,
+            weak_pc_ram_segment_cap: values.weak_pc_ram_segment_cap,
+            weak_pc_max_disk_queue_mb: values.weak_pc_max_disk_queue_mb,
+            weak_pc_reduce_preview: values.weak_pc_reduce_preview,
+            weak_pc_reduce_prewarm: values.weak_pc_reduce_prewarm,
+          })}
+
+          <div class="status-quick-settings-subsection">
+            <h5 class="status-quick-settings-subtitle">${escapeHtml(t("settings.memoryAdvanced"))}</h5>
+            <div class="status-quick-settings-grid">
+              <label class="field checkbox status-quick-settings-span">
+                <input
+                  name="prewarm_local_models_at_startup"
+                  type="checkbox"
+                  ${values.prewarm_local_models_at_startup ? "checked" : ""}
+                />
+                <span>${escapeHtml(t("settings.prewarmLocalModelsAtStartup"))}</span>
+              </label>
+              ${renderIdleUnloadSlider("settings.sttIdleUnload", "stt_idle_unload_sec", values.stt_idle_unload_sec)}
+              ${renderIdleUnloadSlider("settings.llmIdleUnload", "llm_idle_unload_sec", values.llm_idle_unload_sec)}
+              <p class="field-hint status-quick-settings-span">${escapeHtml(t("settings.memoryIdleHint"))}</p>
+            </div>
+          </div>
+
+          <div class="status-quick-settings-toggles">
+            <label class="field checkbox">
+              <input name="start_on_boot" type="checkbox" ${values.start_on_boot ? "checked" : ""} />
+              <span>${escapeHtml(t("settings.startOnBoot"))}</span>
+            </label>
+            <label class="field checkbox">
+              <input name="check_updates_on_startup" type="checkbox" ${values.check_updates_on_startup ? "checked" : ""} />
+              <span>${escapeHtml(t("settings.checkUpdatesOnStartup"))}</span>
+            </label>
+            <label class="field checkbox">
+              <input
+                name="show_notifications"
+                type="checkbox"
+                ${values.show_notifications && systemNotificationsAvailable ? "checked" : ""}
+                ${systemNotificationsAvailable ? "" : "disabled"}
+              />
+              <span>${escapeHtml(t("settings.notifications"))}</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 export function renderSettingsForm(
   values: SettingsFormValues,
   devices: string[],
   activeTab: SettingsTab,
   activityLog: ActivityLogEntry[],
   whisperModelDownload: WhisperModelDownloadProgress | null = null,
-  localSttModels: LocalSttModelInfo[] = [],
+  localSttFamilies: LocalSttFamilyInfo[] = [],
+  sttVariantInfo: LocalSttVariantInfo | null = null,
   aiSkills: AiSkillInfo[] = [],
   diagnostics: DiagnosticsSnapshot | null = null,
   llmModelDownload: LlmModelDownloadProgress | null = null,
   llmModels: LlmModelInfo[] = [],
   transcriptionLanguages: TranscriptionLanguageInfo[] = [],
+  sileroTeModel: SileroTeModelStatus | null = null,
+  sileroVadModel: SileroVadModelStatus | null = null,
+  sileroTeModelDownload: SileroModelDownloadProgress | null = null,
+  sileroVadModelDownload: SileroModelDownloadProgress | null = null,
 ): string {
   const downloadProgressPercent = whisperDownloadPercent(whisperModelDownload);
   const llmDownloadProgressPercent = llmDownloadPercent(llmModelDownload);
+  const sileroTeDownloadProgressPercent = whisperDownloadPercent(sileroTeModelDownload);
+  const sileroVadDownloadProgressPercent = whisperDownloadPercent(sileroVadModelDownload);
+  const sileroVadOnDisk = sileroVadModel?.exists === true;
+  const sileroVadReady =
+    sileroVadOnDisk || diagnostics?.vad_silero_runtime_ok === true;
+  const sileroTeReady = sileroTeModel?.exists === true;
+  const sileroTeCompiled =
+    diagnostics?.silero_te_compiled === true || (sileroTeModel?.size_mb ?? 0) > 0;
+  const sttVariantReady = sttVariantInfo?.exists === true || values.whisper_model_exists;
+  const sileroCompiled = diagnostics?.vad_silero_compiled !== false;
   const localLlmCompiled = diagnostics?.local_llm_compiled ?? false;
   const localLlmGpuCompiled = diagnostics?.local_llm_gpu_compiled ?? false;
+  const localSttGpuCompiled =
+    diagnostics?.local_stt_gpu_compiled === true ||
+    diagnostics?.whisper_gpu_compiled === true ||
+    diagnostics?.sherpa_gpu_compiled === true;
   const defaultMicOption = `<option value="" ${
     values.microphone_device.length === 0 ? "selected" : ""
   }>${escapeHtml(t("settings.defaultMic"))}</option>`;
@@ -742,11 +855,16 @@ export function renderSettingsForm(
 
   const textModeHint = t(textModeHintKey(values.text_processing_mode));
   const systemNotificationsAvailable = diagnostics?.system_notifications_available ?? true;
+  const showWhisperBeam = isLocalWhisperBeamSizeActive(values, {
+    whisperCompiled: diagnostics?.whisper_local_compiled !== false,
+  });
 
   return `
     <form id="settings-form" class="settings-form">
+      ${renderStatusQuickSettingsPopover(values, systemNotificationsAvailable)}
+      ${renderStatusEventsPopover(activityLog)}
       <div class="tab-panel tab-panel--status ${activeTab === "status" ? "active" : ""}" data-panel="status">
-        ${renderStatusDashboard(values, diagnostics, activityLog)}
+        ${renderStatusDashboard(values, diagnostics)}
       </div>
 
       <div class="tab-panel tab-panel--voice ${activeTab === "voice" ? "active" : ""}" data-panel="voice">
@@ -803,10 +921,10 @@ export function renderSettingsForm(
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.captureDevice"))}</h3>
         <div class="field-grid voice-fields">
           <div class="field mic-device-field">
-            <span>${escapeHtml(t("settings.microphone"))}</span>
             <select
               name="microphone_device"
               class="device-select"
+              aria-label="${escapeHtml(t("settings.microphone"))}"
               title="${escapeHtml(values.microphone_device || t("settings.defaultMic"))}"
             >${deviceOptions}</select>
             ${renderMicMeter(true)}
@@ -828,9 +946,12 @@ export function renderSettingsForm(
           values.vad_voice_threshold_percent,
           values.vad_auto_threshold_percent,
           values.vad_engine,
-          diagnostics?.vad_silero_compiled !== false &&
-            (values.vad_engine !== "silero" || diagnostics?.vad_silero_runtime_ok !== false),
+          sileroCompiled && (values.vad_engine !== "silero" || sileroVadReady),
           diagnostics?.vad_engine,
+          sileroCompiled,
+          sileroVadOnDisk,
+          sileroVadModelDownload,
+          sileroVadDownloadProgressPercent,
         )}
         </section>
 
@@ -857,58 +978,43 @@ export function renderSettingsForm(
         </div>
 
         <div class="local-whisper-panel" data-local-model-panel ${effectiveTranscriptionProvider(values) === "local" ? "" : "hidden"}>
-          <label class="field">
-            <span>${escapeHtml(t("settings.whisperModelSelect"))}</span>
-            <select name="local_stt_model" data-whisper-model-select class="model-select-rich stt-model-select">
-              ${renderLocalSttModelOptions(values, localSttModels)}
-            </select>
-          </label>
-
-          <label class="field">
-            <span>${escapeHtml(t("settings.whisperModelsDir"))}</span>
-            <div class="api-key-row">
-              <input
-                name="local_whisper_models_dir"
-                type="text"
-                value="${escapeHtml(values.local_whisper_models_dir)}"
-                placeholder="${escapeHtml(t("settings.whisperModelsDirPlaceholder"))}"
-                readonly
-              />
-              <button
-                type="button"
-                class="icon-btn"
-                data-pick-whisper-models-dir
-                title="${escapeHtml(t("settings.whisperModelsDirPick"))}"
-                aria-label="${escapeHtml(t("settings.whisperModelsDirPick"))}"
-              >${iconFolder()}</button>
-            </div>
-          </label>
-
-          ${renderLocalSttModelAction(values, localSttModels, whisperModelDownload, downloadProgressPercent)}
+          ${renderSttModelPicker(
+            values.local_stt_family,
+            values.local_stt_quant,
+            localSttFamilies,
+            sttVariantInfo,
+            whisperModelDownload,
+            downloadProgressPercent,
+            sttVariantReady,
+          )}
 
           <label class="field checkbox">
             <input
               name="local_whisper_use_gpu"
               type="checkbox"
               ${values.local_whisper_use_gpu ? "checked" : ""}
-              ${diagnostics?.whisper_gpu_compiled || diagnostics?.sherpa_stt_compiled ? "" : "disabled"}
+              ${localSttGpuCompiled ? "" : "disabled"}
             />
             <span>${escapeHtml(t("settings.whisperUseGpu"))}</span>
             ${
-              diagnostics?.whisper_gpu_compiled || diagnostics?.sherpa_stt_compiled
+              localSttGpuCompiled
                 ? ""
                 : `<span class="field-hint">${escapeHtml(t("settings.whisperGpuUnavailable"))}</span>`
             }
           </label>
 
-          <label class="field" data-whisper-beam-field ${isWhisperSttModel(values.local_stt_model) ? "" : "hidden"}>
+          ${
+            showWhisperBeam
+              ? `<label class="field" data-whisper-beam-field>
             <span>${escapeHtml(t("settings.whisperBeamSize"))}</span>
             <select name="local_whisper_beam_size">
               <option value="1" ${values.local_whisper_beam_size === 1 ? "selected" : ""}>${escapeHtml(t("settings.whisperBeamGreedy"))}</option>
               <option value="3" ${values.local_whisper_beam_size === 3 ? "selected" : ""}>${escapeHtml(t("settings.whisperBeam3"))}</option>
               <option value="5" ${values.local_whisper_beam_size === 5 ? "selected" : ""}>${escapeHtml(t("settings.whisperBeam5"))}</option>
             </select>
-          </label>
+          </label>`
+              : ""
+          }
         </div>
 
         <label class="field advanced-span-2">
@@ -921,32 +1027,6 @@ export function renderSettingsForm(
           >${escapeHtml(values.whisper_prompt_prefix)}</textarea>
         </label>
 
-        <label class="field advanced-span-2">
-          <span>${escapeHtml(t("settings.transcriptionDictionary"))}</span>
-          <div class="api-key-row">
-            <input
-              name="transcription_dictionary_path"
-              type="text"
-              value="${escapeHtml(values.transcription_dictionary_path)}"
-              placeholder="${escapeHtml(t("settings.transcriptionDictionaryPlaceholder"))}"
-              readonly
-            />
-            <button
-              type="button"
-              class="icon-btn"
-              data-open-dictionary-folder
-              title="${escapeHtml(t("settings.transcriptionDictionaryOpen"))}"
-              aria-label="${escapeHtml(t("settings.transcriptionDictionaryOpen"))}"
-            >${iconFolder()}</button>
-            <button
-              type="button"
-              class="icon-btn"
-              data-pick-transcription-dictionary
-              title="${escapeHtml(t("settings.transcriptionDictionaryPick"))}"
-              aria-label="${escapeHtml(t("settings.transcriptionDictionaryPick"))}"
-            >${iconImport()}</button>
-          </div>
-        </label>
         </section>
       </div>
 
@@ -955,8 +1035,11 @@ export function renderSettingsForm(
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.textProcessing"))}</h3>
         <div class="advanced-grid">
           <label class="field advanced-span-2">
-            <span>${escapeHtml(t("settings.textRewriteProvider"))}</span>
-            <select name="text_rewrite_provider" data-text-rewrite-provider>
+            <select
+              name="text_rewrite_provider"
+              data-text-rewrite-provider
+              aria-label="${escapeHtml(t("settings.textRewriteProvider"))}"
+            >
               <option value="openai" ${values.text_rewrite_provider === "openai" ? "selected" : ""}>${escapeHtml(t("settings.textRewriteProviderOpenai"))}</option>
               <option value="local" ${values.text_rewrite_provider === "local" ? "selected" : ""} ${localLlmCompiled ? "" : "disabled"}>${escapeHtml(t("settings.textRewriteProviderLocal"))}</option>
             </select>
@@ -973,26 +1056,6 @@ export function renderSettingsForm(
               <select name="local_llm_model" data-llm-model-select class="model-select-rich llm-model-select">
                 ${renderLlmModelOptions(values, llmModels)}
               </select>
-            </label>
-
-            <label class="field">
-              <span>${escapeHtml(t("settings.llmModelsDir"))}</span>
-              <div class="api-key-row">
-                <input
-                  name="local_llm_models_dir"
-                  type="text"
-                  value="${escapeHtml(values.local_llm_models_dir)}"
-                  placeholder="${escapeHtml(t("settings.llmModelsDirPlaceholder"))}"
-                  readonly
-                />
-                <button
-                  type="button"
-                  class="icon-btn"
-                  data-pick-llm-models-dir
-                  title="${escapeHtml(t("settings.llmModelsDirPick"))}"
-                  aria-label="${escapeHtml(t("settings.llmModelsDirPick"))}"
-                >${iconFolder()}</button>
-              </div>
             </label>
 
             ${renderLlmModelAction(values, llmModels, llmModelDownload, llmDownloadProgressPercent)}
@@ -1025,39 +1088,36 @@ export function renderSettingsForm(
         </div>
         </section>
 
-        <section class="settings-section" data-openai-connections-section ${needsOpenAiApiKey(values) ? "" : "hidden"}>
+        ${
+          needsOpenAiApiKey(values)
+            ? `
+        <section class="settings-section" data-openai-connections-section>
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.connections"))}</h3>
-        <div class="advanced-grid">
-          <label class="field advanced-span-2" data-openai-api-key-panel ${needsOpenAiApiKey(values) ? "" : "hidden"}>
-            <span>${escapeHtml(t("settings.apiKey"))}</span>
-            <div class="api-key-row">
-              <input
-                name="api_key"
-                type="password"
-                placeholder="${values.has_api_key ? escapeHtml(t("settings.apiKeyConfigured")) : escapeHtml(t("settings.apiKeyPlaceholder"))}"
-                autocomplete="off"
-              />
-              ${
-                values.has_api_key
-                  ? `<button type="button" class="icon-btn" data-clear-api-key title="${escapeHtml(t("settings.apiKeyClear"))}" aria-label="${escapeHtml(t("settings.apiKeyClear"))}">${iconTrash()}</button>`
-                  : ""
-              }
-            </div>
-          </label>
-        </div>
-        </section>
+          <div class="advanced-grid">
+            <label class="field advanced-span-2" data-openai-api-key-panel>
+              <span>${escapeHtml(t("settings.apiKey"))}</span>
+              <div class="api-key-row">
+                <input
+                  name="api_key"
+                  type="password"
+                  placeholder="${values.has_api_key ? escapeHtml(t("settings.apiKeyConfigured")) : escapeHtml(t("settings.apiKeyPlaceholder"))}"
+                  autocomplete="off"
+                />
+                ${
+                  values.has_api_key
+                    ? `<button type="button" class="icon-btn" data-clear-api-key title="${escapeHtml(t("settings.apiKeyClear"))}" aria-label="${escapeHtml(t("settings.apiKeyClear"))}">${iconTrash()}</button>`
+                    : ""
+                }
+              </div>
+            </label>
+          </div>
+        </section>`
+            : ""
+        }
 
         <section class="settings-section">
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.system"))}</h3>
         <div class="advanced-grid">
-          <label class="field">
-            <span>${escapeHtml(t("settings.uiLocale"))}</span>
-            <select name="ui_locale">
-              <option value="en" ${values.ui_locale === "en" ? "selected" : ""}>${escapeHtml(t("settings.uiLocaleEn"))}</option>
-              <option value="ru" ${values.ui_locale === "ru" ? "selected" : ""}>${escapeHtml(t("settings.uiLocaleRu"))}</option>
-            </select>
-          </label>
-
           <label class="field">
             <span>${escapeHtml(t("settings.injection"))}</span>
             <select name="injection_mode">
@@ -1067,80 +1127,13 @@ export function renderSettingsForm(
             </select>
           </label>
 
-          <details class="memory-details advanced-span-2">
-            <summary>${escapeHtml(t("settings.memoryAdvanced"))}</summary>
-            <div class="advanced-grid memory-grid">
-              <label class="field checkbox advanced-span-2">
-                <input
-                  name="prewarm_local_models_at_startup"
-                  type="checkbox"
-                  ${values.prewarm_local_models_at_startup ? "checked" : ""}
-                />
-                <span>${escapeHtml(t("settings.prewarmLocalModelsAtStartup"))}</span>
-              </label>
-              <label class="field">
-                <span>${escapeHtml(t("settings.sttIdleUnload"))}</span>
-                <select name="stt_idle_unload_sec">
-                  ${idleUnloadOptions(values.stt_idle_unload_sec)}
-                </select>
-              </label>
-              <label class="field">
-                <span>${escapeHtml(t("settings.llmIdleUnload"))}</span>
-                <select name="llm_idle_unload_sec">
-                  ${idleUnloadOptions(values.llm_idle_unload_sec)}
-                </select>
-              </label>
-              <p class="field-hint advanced-span-2">${escapeHtml(t("settings.memoryIdleHint"))}</p>
-            </div>
-          </details>
-
           <details class="vad-details advanced-span-2">
             <summary>${escapeHtml(t("settings.vadAdvanced"))}</summary>
             <div class="advanced-grid vad-grid">
-              <label class="field">
-                <span>${escapeHtml(t("settings.silenceTimeout"))}</span>
-                <input
-                  name="silence_timeout_ms"
-                  type="number"
-                  min="200"
-                  max="10000"
-                  step="50"
-                  value="${values.silence_timeout_ms}"
-                />
-              </label>
-              <label class="field">
-                <span>${escapeHtml(t("settings.vadPreSpeech"))}</span>
-                <input
-                  name="vad_pre_speech_buffer_ms"
-                  type="number"
-                  min="50"
-                  max="2000"
-                  step="50"
-                  value="${values.vad_pre_speech_buffer_ms}"
-                />
-              </label>
-              <label class="field">
-                <span>${escapeHtml(t("settings.vadMinimumSpeech"))}</span>
-                <input
-                  name="vad_minimum_speech_ms"
-                  type="number"
-                  min="50"
-                  max="2000"
-                  step="50"
-                  value="${values.vad_minimum_speech_ms}"
-                />
-              </label>
-              <label class="field">
-                <span>${escapeHtml(t("settings.vadMaximumSegment"))}</span>
-                <input
-                  name="vad_maximum_segment_ms"
-                  type="number"
-                  min="1000"
-                  max="120000"
-                  step="1000"
-                  value="${values.vad_maximum_segment_ms}"
-                />
-              </label>
+              ${renderSegmentationMsSlider("settings.silenceTimeout", "silence_timeout_ms", values.silence_timeout_ms)}
+              ${renderSegmentationMsSlider("settings.vadPreSpeech", "vad_pre_speech_buffer_ms", values.vad_pre_speech_buffer_ms)}
+              ${renderSegmentationMsSlider("settings.vadMinimumSpeech", "vad_minimum_speech_ms", values.vad_minimum_speech_ms)}
+              ${renderSegmentationMsSlider("settings.vadMaximumSegment", "vad_maximum_segment_ms", values.vad_maximum_segment_ms)}
             </div>
           </details>
         </div>
@@ -1151,10 +1144,24 @@ export function renderSettingsForm(
             <span>${escapeHtml(t("settings.spokenPunctuation"))}</span>
           </label>
 
-          <label class="field checkbox" data-local-only-toggle>
-            <input name="silero_te" type="checkbox" ${values.silero_te ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.sileroTe"))}</span>
-          </label>
+          <div class="field-stack" data-local-only-toggle>
+            <label class="field checkbox">
+              <input
+                name="silero_te"
+                type="checkbox"
+                ${values.silero_te && sileroTeReady ? "checked" : ""}
+                ${sileroTeCompiled && !sileroTeReady ? "disabled" : ""}
+              />
+              <span>${escapeHtml(t("settings.sileroTe"))}</span>
+            </label>
+            ${renderSileroTeModelAction(
+              values,
+              sileroTeCompiled,
+              sileroTeReady,
+              sileroTeModelDownload,
+              sileroTeDownloadProgressPercent,
+            )}
+          </div>
 
           <label class="field checkbox">
             <input name="numbers_as_words" type="checkbox" ${values.numbers_as_words ? "checked" : ""} />
@@ -1177,25 +1184,6 @@ export function renderSettingsForm(
             />
           </label>
 
-          <label class="field checkbox">
-            <input name="start_on_boot" type="checkbox" ${values.start_on_boot ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.startOnBoot"))}</span>
-          </label>
-
-          <label class="field checkbox">
-            <input name="check_updates_on_startup" type="checkbox" ${values.check_updates_on_startup ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.checkUpdatesOnStartup"))}</span>
-          </label>
-
-          <label class="field checkbox">
-            <input
-              name="show_notifications"
-              type="checkbox"
-              ${values.show_notifications && systemNotificationsAvailable ? "checked" : ""}
-              ${systemNotificationsAvailable ? "" : "disabled"}
-            />
-            <span>${escapeHtml(t("settings.notifications"))}</span>
-          </label>
         </div>
         </section>
       </div>
@@ -1218,7 +1206,13 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
       data.get("text_processing_mode") ?? "basic",
     ) as TextProcessingMode,
     spoken_punctuation: data.get("spoken_punctuation") === "on",
-    silero_te: data.get("silero_te") === "on",
+    silero_te: (() => {
+      const input = form.querySelector<HTMLInputElement>('input[name="silero_te"]');
+      if (input?.disabled) {
+        return false;
+      }
+      return data.get("silero_te") === "on";
+    })(),
     numbers_as_words: data.get("numbers_as_words") === "on",
     emulate_enter: data.get("emulate_enter") === "on",
     enter_trigger_phrase: String(data.get("enter_trigger_phrase") ?? ""),
@@ -1232,31 +1226,63 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
       }
       return data.get("show_notifications") === "on";
     })(),
-    silence_timeout_ms: Number(data.get("silence_timeout_ms") ?? 700),
+    silence_timeout_ms: clampSegmentationMs(
+      "silence_timeout_ms",
+      Number(data.get("silence_timeout_ms") ?? 700),
+    ),
     ui_locale: String(data.get("ui_locale") ?? "en") as UiLocale,
     transcription_provider: String(data.get("transcription_provider") ?? "local"),
     local_stt_model: String(
       data.get("local_stt_model") ?? data.get("local_whisper_model") ?? "base",
     ) as LocalSttModelKind,
-    local_whisper_models_dir: String(data.get("local_whisper_models_dir") ?? ""),
+    local_stt_family: String(data.get("local_stt_family") ?? "whisper_base") as LocalSttFamily,
+    local_stt_quant: readLocalSttQuantFromForm(form),
     whisper_model_exists: false,
     local_whisper_use_gpu: data.get("local_whisper_use_gpu") === "on",
-    local_whisper_beam_size: Number(data.get("local_whisper_beam_size") ?? 1),
+    local_whisper_beam_size: (() => {
+      const draft = {
+        transcription_provider: String(data.get("transcription_provider") ?? "local"),
+        local_stt_family: String(data.get("local_stt_family") ?? "whisper_base") as LocalSttFamily,
+        local_stt_model: String(
+          data.get("local_stt_model") ?? data.get("local_whisper_model") ?? "base",
+        ) as LocalSttModelKind,
+        local_stt_quant: readLocalSttQuantFromForm(form),
+      };
+      const diagnostics = getState().diagnostics;
+      if (
+        isLocalWhisperBeamSizeActive(draft, {
+          whisperCompiled: diagnostics?.whisper_local_compiled !== false,
+        })
+      ) {
+        return Number(data.get("local_whisper_beam_size") ?? 1);
+      }
+      return getState().settings?.local_whisper_beam_size ?? 1;
+    })(),
     text_rewrite_provider: String(
       data.get("text_rewrite_provider") ?? "openai",
     ) as TextRewriteProvider,
     local_llm_model: String(data.get("local_llm_model") ?? "qwen3_4b") as LlmModelKind,
-    local_llm_models_dir: String(data.get("local_llm_models_dir") ?? ""),
     llm_model_exists: false,
     local_llm_use_gpu: data.get("local_llm_use_gpu") === "on",
     ai_rewrite_skill: String(data.get("ai_rewrite_skill") ?? ""),
     whisper_prompt_prefix: String(data.get("whisper_prompt_prefix") ?? ""),
-    transcription_dictionary_path: String(data.get("transcription_dictionary_path") ?? ""),
+    data_storage_dir: String(
+      form.querySelector<HTMLInputElement>("[data-data-storage-display]")?.value ?? "",
+    ).trim(),
     audio_preprocess_enabled: data.get("audio_preprocess_enabled") === "on",
     audio_noise_reduction_enabled: data.get("audio_noise_reduction_enabled") === "on",
-    vad_pre_speech_buffer_ms: Number(data.get("vad_pre_speech_buffer_ms") ?? 300),
-    vad_minimum_speech_ms: Number(data.get("vad_minimum_speech_ms") ?? 250),
-    vad_maximum_segment_ms: Number(data.get("vad_maximum_segment_ms") ?? 30_000),
+    vad_pre_speech_buffer_ms: clampSegmentationMs(
+      "vad_pre_speech_buffer_ms",
+      Number(data.get("vad_pre_speech_buffer_ms") ?? 300),
+    ),
+    vad_minimum_speech_ms: clampSegmentationMs(
+      "vad_minimum_speech_ms",
+      Number(data.get("vad_minimum_speech_ms") ?? 250),
+    ),
+    vad_maximum_segment_ms: clampSegmentationMs(
+      "vad_maximum_segment_ms",
+      Number(data.get("vad_maximum_segment_ms") ?? 30_000),
+    ),
     vad_engine: (String(data.get("vad_engine") ?? "silero") === "webrtc"
       ? "webrtc"
       : "silero") as VadEngine,
@@ -1267,9 +1293,10 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     vad_auto_threshold_percent: Number(
       data.get("vad_auto_threshold_percent") ?? 12,
     ),
-    stt_idle_unload_sec: Number(data.get("stt_idle_unload_sec") ?? 180),
-    llm_idle_unload_sec: Number(data.get("llm_idle_unload_sec") ?? 90),
+    stt_idle_unload_sec: clampIdleUnloadSec(Number(data.get("stt_idle_unload_sec") ?? 180)),
+    llm_idle_unload_sec: clampIdleUnloadSec(Number(data.get("llm_idle_unload_sec") ?? 90)),
     prewarm_local_models_at_startup: data.get("prewarm_local_models_at_startup") === "on",
+    ...readWeakPcFormFields(form),
     api_key: String(data.get("api_key") ?? ""),
     has_api_key: false,
   };
@@ -1280,6 +1307,332 @@ export function textModeHintKey(mode: TextProcessingMode): MessageKey {
 }
 
 const DEVICE_LABEL_MAX = 34;
+
+/** Matches validation in `src-tauri/src/settings/config.rs`. */
+const SEGMENTATION_MS_LIMITS = {
+  silence_timeout_ms: { min: 200, max: 10_000, step: 50 },
+  vad_pre_speech_buffer_ms: { min: 50, max: 2_000, step: 50 },
+  vad_minimum_speech_ms: { min: 50, max: 2_000, step: 50 },
+  vad_maximum_segment_ms: { min: 1_000, max: 120_000, step: 1_000 },
+} as const;
+
+type SegmentationMsField = keyof typeof SEGMENTATION_MS_LIMITS;
+
+function clampSegmentationMs(name: SegmentationMsField, value: number): number {
+  const { min, max, step } = SEGMENTATION_MS_LIMITS[name];
+  const clamped = Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+  const steps = Math.round((clamped - min) / step);
+  return min + steps * step;
+}
+
+export function formatSegmentationMsValue(ms: number): string {
+  if (ms >= 60_000 && ms % 60_000 === 0) {
+    return `${ms / 60_000} min`;
+  }
+  if (ms >= 1_000) {
+    if (ms % 1_000 === 0) {
+      return `${ms / 1_000} s`;
+    }
+    const sec = Math.round((ms / 1_000) * 10) / 10;
+    return `${String(sec).replace(/\.0$/, "")} s`;
+  }
+  return `${ms} ms`;
+}
+
+function renderSegmentationMsSlider(
+  labelKey: MessageKey,
+  name: SegmentationMsField,
+  value: number,
+): string {
+  const { min, max, step } = SEGMENTATION_MS_LIMITS[name];
+  const snapped = clampSegmentationMs(name, value);
+  const minLabel = formatSegmentationMsValue(min);
+  const maxLabel = formatSegmentationMsValue(max);
+  return `
+    <label class="field segmentation-slider-field">
+      <div class="segmentation-slider-header">
+        <span>${escapeHtml(t(labelKey))}</span>
+        <span class="segmentation-slider-value" data-ms-value-for="${name}">${escapeHtml(formatSegmentationMsValue(snapped))}</span>
+      </div>
+      <input
+        type="range"
+        name="${name}"
+        class="segmentation-slider"
+        data-ms-slider
+        min="${min}"
+        max="${max}"
+        step="${step}"
+        value="${snapped}"
+      />
+      <div class="segmentation-slider-bounds" aria-hidden="true">
+        <span>${escapeHtml(minLabel)}</span>
+        <span>${escapeHtml(maxLabel)}</span>
+      </div>
+    </label>
+  `;
+}
+
+/** Matches `AppSettings::idle_unload_sec_valid` in `src-tauri/src/settings/config.rs`. */
+const IDLE_UNLOAD_SEC = {
+  never: 0,
+  min: 60,
+  max: 7_200,
+  step: 30,
+} as const;
+
+type IdleUnloadField = "stt_idle_unload_sec" | "llm_idle_unload_sec";
+
+function clampIdleUnloadSec(value: number): number {
+  if (value === 0) {
+    return 0;
+  }
+  const { min, max, step } = IDLE_UNLOAD_SEC;
+  const clamped = Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+  return Math.round(clamped / step) * step;
+}
+
+export function formatIdleUnloadSecValue(sec: number): string {
+  const snapped = clampIdleUnloadSec(sec);
+  if (snapped === 0) {
+    return t("settings.idleUnloadNever");
+  }
+  if (snapped >= 3_600 && snapped % 3_600 === 0) {
+    const hours = snapped / 3_600;
+    return hours === 1 ? "1 h" : `${hours} h`;
+  }
+  if (snapped >= 60 && snapped % 60 === 0) {
+    return `${snapped / 60} min`;
+  }
+  return t("settings.idleUnloadDurationSec", { sec: String(snapped) });
+}
+
+function renderIdleUnloadSlider(
+  labelKey: MessageKey,
+  name: IdleUnloadField,
+  value: number,
+): string {
+  const snapped = clampIdleUnloadSec(value);
+  const { never, max, step } = IDLE_UNLOAD_SEC;
+  return `
+    <label class="field segmentation-slider-field status-quick-settings-span">
+      <div class="segmentation-slider-header">
+        <span>${escapeHtml(t(labelKey))}</span>
+        <span class="segmentation-slider-value" data-ms-value-for="${name}">${escapeHtml(formatIdleUnloadSecValue(snapped))}</span>
+      </div>
+      <input
+        type="range"
+        name="${name}"
+        class="segmentation-slider"
+        data-idle-unload-slider
+        min="${never}"
+        max="${max}"
+        step="${step}"
+        value="${snapped}"
+      />
+      <div class="segmentation-slider-bounds" aria-hidden="true">
+        <span>${escapeHtml(t("settings.idleUnloadBoundNever"))}</span>
+        <span>${escapeHtml(t("settings.idleUnloadBoundMax"))}</span>
+      </div>
+    </label>
+  `;
+}
+
+const WEAK_PC_RAM_CAP = { min: 1, max: 8, step: 1 } as const;
+const WEAK_PC_DISK_MB = { min: 50, max: 4_096, step: 50 } as const;
+
+export type WeakPcFormValues = Pick<
+  SettingsFormValues,
+  | "weak_pc_mode"
+  | "weak_pc_spill_to_disk"
+  | "weak_pc_ram_segment_cap"
+  | "weak_pc_max_disk_queue_mb"
+  | "weak_pc_reduce_preview"
+  | "weak_pc_reduce_prewarm"
+>;
+
+export function weakPcValuesFromSettings(settings: AppSettings): WeakPcFormValues {
+  return {
+    weak_pc_mode: settings.weak_pc_mode ?? false,
+    weak_pc_spill_to_disk: settings.weak_pc_spill_to_disk ?? true,
+    weak_pc_ram_segment_cap: settings.weak_pc_ram_segment_cap ?? 2,
+    weak_pc_max_disk_queue_mb: settings.weak_pc_max_disk_queue_mb ?? 512,
+    weak_pc_reduce_preview: settings.weak_pc_reduce_preview ?? true,
+    weak_pc_reduce_prewarm: settings.weak_pc_reduce_prewarm ?? true,
+  };
+}
+
+export const DEFAULT_WEAK_PC_FORM: WeakPcFormValues = {
+  weak_pc_mode: false,
+  weak_pc_spill_to_disk: true,
+  weak_pc_ram_segment_cap: 2,
+  weak_pc_max_disk_queue_mb: 512,
+  weak_pc_reduce_preview: true,
+  weak_pc_reduce_prewarm: true,
+};
+
+export function readWeakPcFormFields(form: HTMLFormElement): WeakPcFormValues {
+  const mode = form.querySelector<HTMLInputElement>('input[name="weak_pc_mode"]')?.checked ?? false;
+  const hasExpertOptions = Boolean(form.querySelector("[data-weak-pc-options]"));
+  if (!hasExpertOptions) {
+    const current = getState().settings;
+    const base = current ? weakPcValuesFromSettings(current) : { ...DEFAULT_WEAK_PC_FORM };
+    if (!mode) {
+      return { ...base, weak_pc_mode: false };
+    }
+    return { ...DEFAULT_WEAK_PC_FORM, weak_pc_mode: true };
+  }
+
+  const data = new FormData(form);
+  return {
+    weak_pc_mode: mode,
+    weak_pc_spill_to_disk: data.get("weak_pc_spill_to_disk") === "on",
+    weak_pc_ram_segment_cap: clampWeakPcRamCap(Number(data.get("weak_pc_ram_segment_cap") ?? 2)),
+    weak_pc_max_disk_queue_mb: clampWeakPcDiskMb(
+      Number(data.get("weak_pc_max_disk_queue_mb") ?? 512),
+    ),
+    weak_pc_reduce_preview: data.get("weak_pc_reduce_preview") === "on",
+    weak_pc_reduce_prewarm: data.get("weak_pc_reduce_prewarm") === "on",
+  };
+}
+
+/** Expert UI: switch + advanced options (no long hint). */
+export function renderWeakPcExpertSettings(values: WeakPcFormValues): string {
+  return `
+          <div class="status-quick-settings-subsection weak-pc-panel weak-pc-panel--in-popover">
+            <label class="field checkbox status-quick-settings-span">
+              <input name="weak_pc_mode" type="checkbox" ${values.weak_pc_mode ? "checked" : ""} />
+              <span>${escapeHtml(t("settings.weakPcMode"))}</span>
+            </label>
+            <div class="weak-pc-options" data-weak-pc-options ${values.weak_pc_mode ? "" : "hidden"}>
+              <label class="field checkbox status-quick-settings-span">
+                <input name="weak_pc_spill_to_disk" type="checkbox" ${values.weak_pc_spill_to_disk ? "checked" : ""} />
+                <span>${escapeHtml(t("settings.weakPcSpillToDisk"))}</span>
+              </label>
+              <label class="field checkbox status-quick-settings-span">
+                <input name="weak_pc_reduce_preview" type="checkbox" ${values.weak_pc_reduce_preview ? "checked" : ""} />
+                <span>${escapeHtml(t("settings.weakPcReducePreview"))}</span>
+              </label>
+              <label class="field checkbox status-quick-settings-span">
+                <input name="weak_pc_reduce_prewarm" type="checkbox" ${values.weak_pc_reduce_prewarm ? "checked" : ""} />
+                <span>${escapeHtml(t("settings.weakPcReducePrewarm"))}</span>
+              </label>
+              ${renderWeakPcRamSlider(values.weak_pc_ram_segment_cap, true)}
+              ${renderWeakPcDiskMbSlider(values.weak_pc_max_disk_queue_mb, true)}
+            </div>
+          </div>
+  `;
+}
+
+/** Standard (homemaker) UI: single switch only. */
+export function renderWeakPcHomemakerSwitch(checked: boolean): string {
+  return `
+            <label class="field checkbox homemaker-weak-pc-toggle">
+              <input name="weak_pc_mode" type="checkbox" ${checked ? "checked" : ""} />
+              <span>${escapeHtml(t("settings.weakPcMode"))}</span>
+            </label>
+  `;
+}
+
+function clampWeakPcRamCap(value: number): number {
+  const v = Number.isFinite(value) ? Math.round(value) : WEAK_PC_RAM_CAP.min;
+  return Math.min(WEAK_PC_RAM_CAP.max, Math.max(WEAK_PC_RAM_CAP.min, v));
+}
+
+function clampWeakPcDiskMb(value: number): number {
+  const v = Number.isFinite(value) ? Math.round(value) : 512;
+  const clamped = Math.min(WEAK_PC_DISK_MB.max, Math.max(WEAK_PC_DISK_MB.min, v));
+  const steps = Math.round((clamped - WEAK_PC_DISK_MB.min) / WEAK_PC_DISK_MB.step);
+  return WEAK_PC_DISK_MB.min + steps * WEAK_PC_DISK_MB.step;
+}
+
+function renderWeakPcRamSlider(value: number, inQuickSettings = false): string {
+  const snapped = clampWeakPcRamCap(value);
+  const spanClass = inQuickSettings ? " status-quick-settings-span" : "";
+  return `
+    <label class="field segmentation-slider-field${spanClass}">
+      <div class="segmentation-slider-header">
+        <span>${escapeHtml(t("settings.weakPcRamSegmentCap"))}</span>
+        <span class="segmentation-slider-value" data-ms-value-for="weak_pc_ram_segment_cap">${snapped}</span>
+      </div>
+      <input
+        type="range"
+        name="weak_pc_ram_segment_cap"
+        class="segmentation-slider"
+        data-weak-pc-slider
+        min="${WEAK_PC_RAM_CAP.min}"
+        max="${WEAK_PC_RAM_CAP.max}"
+        step="${WEAK_PC_RAM_CAP.step}"
+        value="${snapped}"
+      />
+    </label>
+  `;
+}
+
+function renderWeakPcDiskMbSlider(value: number, inQuickSettings = false): string {
+  const snapped = clampWeakPcDiskMb(value);
+  const spanClass = inQuickSettings ? " status-quick-settings-span" : "";
+  return `
+    <label class="field segmentation-slider-field${spanClass}">
+      <div class="segmentation-slider-header">
+        <span>${escapeHtml(t("settings.weakPcMaxDiskQueueMb"))}</span>
+        <span class="segmentation-slider-value" data-ms-value-for="weak_pc_max_disk_queue_mb">${snapped} MB</span>
+      </div>
+      <input
+        type="range"
+        name="weak_pc_max_disk_queue_mb"
+        class="segmentation-slider"
+        data-weak-pc-slider
+        min="${WEAK_PC_DISK_MB.min}"
+        max="${WEAK_PC_DISK_MB.max}"
+        step="${WEAK_PC_DISK_MB.step}"
+        value="${snapped}"
+      />
+    </label>
+  `;
+}
+
+export function bindSegmentationMsSliders(form: HTMLFormElement): void {
+  form.querySelectorAll<HTMLInputElement>("[data-ms-slider]").forEach((slider) => {
+    const update = (): void => {
+      const label = form.querySelector<HTMLElement>(`[data-ms-value-for="${slider.name}"]`);
+      if (label) {
+        label.textContent = formatSegmentationMsValue(Number(slider.value));
+      }
+    };
+    slider.addEventListener("input", update);
+  });
+
+  form.querySelectorAll<HTMLInputElement>("[data-idle-unload-slider]").forEach((slider) => {
+    const update = (): void => {
+      const sec = clampIdleUnloadSec(Number(slider.value));
+      if (String(sec) !== slider.value) {
+        slider.value = String(sec);
+      }
+      const label = form.querySelector<HTMLElement>(`[data-ms-value-for="${slider.name}"]`);
+      if (label) {
+        label.textContent = formatIdleUnloadSecValue(sec);
+      }
+    };
+    slider.addEventListener("input", update);
+  });
+
+  form.querySelectorAll<HTMLInputElement>("[data-weak-pc-slider]").forEach((slider) => {
+    const update = (): void => {
+      const isRam = slider.name === "weak_pc_ram_segment_cap";
+      const value = isRam
+        ? clampWeakPcRamCap(Number(slider.value))
+        : clampWeakPcDiskMb(Number(slider.value));
+      if (String(value) !== slider.value) {
+        slider.value = String(value);
+      }
+      const label = form.querySelector<HTMLElement>(`[data-ms-value-for="${slider.name}"]`);
+      if (label) {
+        label.textContent = isRam ? String(value) : `${value} MB`;
+      }
+    };
+    slider.addEventListener("input", update);
+  });
+}
 
 function shortenDeviceLabel(value: string): string {
   if (value.length <= DEVICE_LABEL_MAX) {

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::webview::PageLoadEvent;
+use tauri::utils::config::Color;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window};
 
 use crate::app::events::OVERLAY_LISTENING;
@@ -28,6 +29,9 @@ const INIT_WINDOW_HEIGHT: f64 = 132.0;
 const OVERLAY_WINDOW_WIDTH: f64 = 280.0;
 const OVERLAY_WINDOW_HEIGHT: f64 = 56.0;
 const OVERLAY_CORNER_MARGIN: f64 = 16.0;
+/// Matches frontend `--bg-deep` (#0d0d0d).
+const SETTINGS_WINDOW_BG: Color = Color(13, 13, 13, 255);
+const OVERLAY_WINDOW_BG: Color = Color(0, 0, 0, 0);
 
 static OVERLAY_PENDING_LISTENING: AtomicBool = AtomicBool::new(false);
 
@@ -78,6 +82,7 @@ pub fn configure_window(app: &AppHandle, window: &WebviewWindow) {
 }
 
 pub fn configure_window_for_ui_mode(window: &WebviewWindow, ui_mode: UiMode) {
+    configure_settings_window_chrome(window);
     let _ = window.set_resizable(false);
     let _ = window.set_maximizable(false);
     let _ = window.set_always_on_top(true);
@@ -86,6 +91,53 @@ pub fn configure_window_for_ui_mode(window: &WebviewWindow, ui_mode: UiMode) {
         UiMode::Homemaker => WINDOW_HEIGHT_HOMEMAKER,
     };
     enforce_window_size(window, WINDOW_WIDTH, height);
+}
+
+fn configure_settings_window_chrome(window: &WebviewWindow) {
+    let _ = window.set_decorations(true);
+    let _ = window.set_background_color(Some(SETTINGS_WINDOW_BG));
+    #[cfg(windows)]
+    apply_windows_titlebar_theme(window);
+}
+
+#[cfg(windows)]
+fn apply_windows_titlebar_theme(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(hwnd.0 as _);
+
+    // Match frontend `--bg-deep` (#0d0d0d) and `--parchment` (#f0f0f0).
+    let dark_mode = 1i32;
+    let caption_color: u32 = 0x000d_0d0d;
+    let text_color: u32 = 0x00f0_f0f0;
+
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            (&dark_mode as *const i32).cast(),
+            std::mem::size_of::<i32>() as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            (&caption_color as *const u32).cast(),
+            std::mem::size_of::<u32>() as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TEXT_COLOR,
+            (&text_color as *const u32).cast(),
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
 }
 
 pub fn configure_main_window_for_ui_mode(app: &AppHandle, ui_mode: UiMode) {
@@ -211,6 +263,8 @@ fn ensure_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .visible(false)
     .skip_taskbar(true)
     .always_on_top(true)
+    .decorations(true)
+    .background_color(SETTINGS_WINDOW_BG)
     .build()
     .map_err(|error| format!("failed to create settings window: {error}"))?;
 
@@ -432,6 +486,7 @@ pub fn hide_settings_window(window: &Window) {
 
 pub fn configure_overlay_window(window: &WebviewWindow) {
     let _ = window.set_decorations(false);
+    let _ = window.set_background_color(Some(OVERLAY_WINDOW_BG));
     #[cfg(not(windows))]
     let _ = window.set_always_on_top(true);
     let _ = window.set_skip_taskbar(true);
@@ -443,6 +498,8 @@ pub fn configure_overlay_window(window: &WebviewWindow) {
     )));
     position_overlay_corner(window);
     configure_overlay_extended_style(window);
+    #[cfg(windows)]
+    apply_overlay_dwm_transparency(window);
 }
 
 /// Hidden WebView for REC indicator (avoids creating the window during fullscreen capture).
@@ -464,6 +521,7 @@ fn ensure_overlay_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .inner_size(OVERLAY_WINDOW_WIDTH, OVERLAY_WINDOW_HEIGHT)
     .decorations(false)
     .transparent(true)
+    .background_color(OVERLAY_WINDOW_BG)
     .shadow(false)
     .always_on_top(true)
     .visible(false)
@@ -563,10 +621,9 @@ fn position_overlay_corner(window: &WebviewWindow) {
         let origin = monitor.position();
         let scale = monitor.scale_factor();
         let width = OVERLAY_WINDOW_WIDTH * scale;
-        let height = OVERLAY_WINDOW_HEIGHT * scale;
         let margin = OVERLAY_CORNER_MARGIN * scale;
         let x = origin.x as f64 + size.width as f64 - width - margin;
-        let y = origin.y as f64 + size.height as f64 - height - margin;
+        let y = origin.y as f64 + margin;
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
             x: x.round() as i32,
             y: y.round() as i32,
@@ -575,6 +632,9 @@ fn position_overlay_corner(window: &WebviewWindow) {
 }
 
 fn overlay_target_monitor(window: &WebviewWindow) -> Option<tauri::Monitor> {
+    if let Some(monitor) = crate::injection::focus_target::monitor_for_injection_target(window) {
+        return Some(monitor);
+    }
     if let Some(monitor) = foreground_monitor(window) {
         return Some(monitor);
     }
@@ -642,6 +702,30 @@ fn configure_overlay_extended_style(window: &WebviewWindow) {
 
 #[cfg(not(windows))]
 fn configure_overlay_extended_style(_window: &WebviewWindow) {}
+
+#[cfg(windows)]
+fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+    use windows::Win32::UI::Controls::MARGINS;
+
+    let Ok(raw) = window.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as _);
+    let margins = MARGINS {
+        cxLeftWidth: -1,
+        cxRightWidth: -1,
+        cyTopHeight: -1,
+        cyBottomHeight: -1,
+    };
+    unsafe {
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_overlay_dwm_transparency(_window: &WebviewWindow) {}
 
 #[cfg(windows)]
 fn activate_window(window: &WebviewWindow) {

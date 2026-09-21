@@ -5,9 +5,10 @@ use crate::app::memory::collect_memory_snapshot;
 use crate::app::state::DiagnosticsSnapshot;
 use crate::settings::{
     effective_vad_engine, has_api_key, local_llm_compiled, local_llm_gpu_compiled,
-    sherpa_stt_compiled, vad_silero_compiled, vad_silero_runtime_available,
-    whisper_gpu_compiled, whisper_local_compiled, LocalSttEngine,
+    local_stt_gpu_compiled, sherpa_gpu_compiled, sherpa_stt_compiled, vad_silero_compiled,
+    vad_silero_runtime_available, whisper_gpu_compiled, whisper_local_compiled, LocalSttEngine,
 };
+use crate::text::silero_te;
 use crate::transcription::model_store::whisper_backend_label;
 
 pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnapshot {
@@ -50,6 +51,8 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
             whisper_backend: whisper_backend_label().to_string(),
             whisper_local_compiled: whisper_local_compiled(),
             whisper_gpu_compiled: whisper_gpu_compiled(),
+            sherpa_gpu_compiled: sherpa_gpu_compiled(),
+            local_stt_gpu_compiled: local_stt_gpu_compiled(),
             capslock_ptt_supported: crate::hotkey::capslock::SUPPORTED,
             hotkey_game_mode_supported: crate::hotkey::game_mode_supported(),
             hotkey_backend: crate::game_input::backend_label().to_string(),
@@ -67,15 +70,16 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
             local_llm_ready: llm_ready,
             whisper_loaded: memory.whisper_loaded,
             local_stt_loaded: memory.whisper_loaded,
-            local_stt_engine: match controller.settings().local_stt_model.engine() {
+            local_stt_engine: match controller.settings().local_stt_variant().engine() {
                 LocalSttEngine::Whisper => "whisper".to_string(),
                 LocalSttEngine::Sherpa => "sherpa".to_string(),
             },
-            local_stt_model: controller.settings().local_stt_model.as_api_str().to_string(),
+            local_stt_model: controller.settings().local_stt_variant().as_api_id(),
             sherpa_stt_compiled: sherpa_stt_compiled(),
             vad_engine: effective_vad_engine(controller.settings().vad_engine).as_str().to_string(),
             vad_silero_compiled: vad_silero_compiled(),
             vad_silero_runtime_ok: vad_silero_runtime_available(),
+            silero_te_compiled: silero_te::compiled(),
             llm_loaded: memory.llm_loaded,
             settings_webview_alive: memory.settings_webview_alive,
             about_webview_alive: memory.about_webview_alive,
@@ -101,6 +105,8 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
         whisper_backend: whisper_backend_label().to_string(),
         whisper_local_compiled: whisper_local_compiled(),
         whisper_gpu_compiled: whisper_gpu_compiled(),
+        sherpa_gpu_compiled: sherpa_gpu_compiled(),
+        local_stt_gpu_compiled: local_stt_gpu_compiled(),
         capslock_ptt_supported: crate::hotkey::capslock::SUPPORTED,
         hotkey_game_mode_supported: crate::hotkey::game_mode_supported(),
         hotkey_backend: crate::game_input::backend_label().to_string(),
@@ -120,6 +126,7 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
         vad_engine: "unknown".to_string(),
         vad_silero_compiled: vad_silero_compiled(),
         vad_silero_runtime_ok: false,
+        silero_te_compiled: silero_te::compiled(),
         llm_loaded: memory.llm_loaded,
         settings_webview_alive: memory.settings_webview_alive,
         about_webview_alive: memory.about_webview_alive,

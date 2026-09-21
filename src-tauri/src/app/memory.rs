@@ -38,8 +38,8 @@ pub fn needs_local_stt(settings: &AppSettings) -> bool {
 pub fn selected_local_stt_ready(settings: &AppSettings) -> bool {
     local_stt_model_store::resolve_model_bundle(settings)
         .ok()
-        .is_some_and(|path| {
-            local_stt_model_store::bundle_ready(&path, settings.local_stt_model)
+        .is_some_and(|_| {
+            local_stt_model_store::bundle_ready_for_settings(settings, settings.local_stt_variant())
         })
 }
 

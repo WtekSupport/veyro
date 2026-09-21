@@ -110,6 +110,10 @@ pub struct DiagnosticsSnapshot {
     pub whisper_backend: String,
     pub whisper_local_compiled: bool,
     pub whisper_gpu_compiled: bool,
+    #[serde(default)]
+    pub sherpa_gpu_compiled: bool,
+    #[serde(default)]
+    pub local_stt_gpu_compiled: bool,
     pub capslock_ptt_supported: bool,
     pub hotkey_game_mode_supported: bool,
     pub hotkey_backend: String,
@@ -136,6 +140,8 @@ pub struct DiagnosticsSnapshot {
     pub vad_silero_compiled: bool,
     #[serde(default)]
     pub vad_silero_runtime_ok: bool,
+    #[serde(default)]
+    pub silero_te_compiled: bool,
     pub llm_loaded: bool,
     pub settings_webview_alive: bool,
     pub about_webview_alive: bool,

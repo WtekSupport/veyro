@@ -1,7 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import {
-  type ActivityLogEntry,
   type AppStats,
   type DiagnosticsSnapshot,
   EVENTS,
@@ -10,10 +9,10 @@ import {
 } from "../api";
 import type { InjectionMode } from "../api";
 import type { SettingsFormValues } from "./settings";
-import { llmModelPlateName, localSttModelPlateName } from "./model-labels";
-import { renderActivityLog } from "./status";
+import { llmModelPlateName, localSttFamilyPlateName } from "./model-labels";
+import { renderStatusEventsTrigger } from "./status-events";
 import { lucideIcon } from "./lucide-icon";
-import { Activity, Cpu, MemoryStick } from "lucide";
+import { Activity, Cpu, MemoryStick, PackageMinus } from "lucide";
 import { t, vadEngineDiagLabel, vadEngineShortLabel, whisperBackendLabel } from "../i18n";
 import { bindVadGraphResize, resizeVadGraphCanvas } from "./vad-level-graph";
 import { refreshVadGraphsFromSnapshot } from "./vad-monitor";
@@ -36,11 +35,12 @@ type StatusPlate = {
 export function renderStatusDashboard(
   values: SettingsFormValues,
   diagnostics: DiagnosticsSnapshot | null,
-  activityLog: ActivityLogEntry[],
 ): string {
   const pushToTalk = values.push_to_talk;
   const vadEngine = diagnostics?.vad_engine ?? values.vad_engine;
   const metrics = formatMetricsDisplay(cachedAppStats);
+  const modelsInMemory =
+    diagnostics?.llm_loaded === true || diagnostics?.local_stt_loaded === true;
 
   return `
     <div class="status-dashboard" data-status-dashboard>
@@ -61,6 +61,14 @@ export function renderStatusDashboard(
           ${lucideIcon(Activity)}
           <span class="status-metric-value" data-status-processes>${escapeHtml(metrics.processes)}</span>
         </div>
+        <button
+          type="button"
+          class="status-unload-models-btn icon-btn"
+          data-force-unload-models
+          title="${escapeHtml(t("status.unloadModelsHint"))}"
+          aria-label="${escapeHtml(t("status.unloadModels"))}"
+          ${modelsInMemory ? "" : "disabled"}
+        >${lucideIcon(PackageMinus)}</button>
       </div>
 
       <section class="status-capture-section" data-status-capture-section>
@@ -71,7 +79,7 @@ export function renderStatusDashboard(
           </div>
           ${
             pushToTalk
-              ? `<span class="status-capture-ptt-note">${escapeHtml(t("status.pttNoVad"))}</span>`
+              ? ""
               : `<span class="status-capture-speech" data-vad-speech-indicator hidden>${escapeHtml(t("settings.vadSpeechDetected"))}</span>`
           }
           <span class="status-capture-level" data-status-level>0%</span>
@@ -81,10 +89,7 @@ export function renderStatusDashboard(
         </div>
       </section>
 
-      <details class="status-log-details">
-        <summary>${escapeHtml(t("status.logExpand"))}</summary>
-        ${renderActivityLog(activityLog)}
-      </details>
+      ${renderStatusEventsTrigger()}
     </div>
   `;
 }
@@ -127,7 +132,9 @@ function renderFeaturePlates(
       : undefined;
   plates.push({
     label: t("status.plateStt"),
-    value: sttLocal ? localSttModelPlateName(values.local_stt_model) : t("status.plateCloudStt"),
+    value: sttLocal
+      ? localSttFamilyPlateName(values.local_stt_family)
+      : t("status.plateCloudStt"),
     active: sttLoaded,
     title: sttTitle,
   });
@@ -281,6 +288,26 @@ async function refreshAppStatsNow(): Promise<void> {
   } catch {
     updateMetricsDom(cachedAppStats);
   }
+}
+
+let unloadModelsBinding = false;
+
+export function bindStatusDashboardActions(onForceUnload: () => void | Promise<void>): void {
+  if (unloadModelsBinding) {
+    return;
+  }
+  unloadModelsBinding = true;
+  document.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      "[data-force-unload-models]",
+    );
+    if (!button || button.disabled) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    void onForceUnload();
+  });
 }
 
 export async function syncStatusDashboardLifecycle(active: boolean): Promise<void> {

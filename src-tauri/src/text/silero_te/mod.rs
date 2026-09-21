@@ -1,5 +1,7 @@
 mod engine;
 #[cfg(feature = "silero-te")]
+pub mod model_store;
+#[cfg(feature = "silero-te")]
 mod process;
 pub mod store;
 
@@ -28,10 +30,16 @@ pub fn apply_if_enabled(text: &str, settings: &AppSettings, language: &str) -> S
 }
 
 pub fn should_apply_silero_te(settings: &AppSettings) -> bool {
+    if !compiled() {
+        return false;
+    }
     if !settings.silero_te {
         return false;
     }
     if settings.transcription_provider != "local" {
+        return false;
+    }
+    if !store::assets_on_disk(settings) {
         return false;
     }
     matches!(

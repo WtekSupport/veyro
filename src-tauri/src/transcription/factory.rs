@@ -51,7 +51,7 @@ fn create_local_transcriber(
     settings: &AppSettings,
     cancel: CancellationToken,
 ) -> Arc<dyn TranscriptionProvider> {
-    match settings.local_stt_model.engine() {
+    match settings.local_stt_variant().engine() {
         LocalSttEngine::Sherpa => create_sherpa_transcriber(settings, cancel),
         LocalSttEngine::Whisper => create_whisper_transcriber(settings, cancel),
     }
@@ -97,9 +97,10 @@ fn create_sherpa_transcriber(
 ) -> Arc<dyn TranscriptionProvider> {
     #[cfg(feature = "local-sherpa-stt")]
     {
-        match local_stt_model_store::sherpa_bundle_path(settings, settings.local_stt_model) {
+        let variant = settings.local_stt_variant();
+        match local_stt_model_store::effective_sherpa_bundle_dir(settings, variant) {
             Ok(path) => {
-                if local_stt_model_store::bundle_ready(&path, settings.local_stt_model) {
+                if local_stt_model_store::bundle_ready_for_settings(settings, variant) {
                     tracing::info!("using sherpa STT bundle at {}", path.display());
                 } else {
                     tracing::warn!(

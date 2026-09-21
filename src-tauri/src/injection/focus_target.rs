@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
 
+use tauri::WebviewWindow;
+
 #[cfg(windows)]
 use tracing::debug;
 
@@ -19,6 +21,41 @@ pub fn capture_injection_target() {
 /// Clear the remembered injection target (e.g. when opening settings).
 pub fn clear_injection_target() {
     INJECTION_TARGET.store(0, Ordering::SeqCst);
+}
+
+/// Monitor where the user dictated (injection target), for REC overlay placement.
+pub fn monitor_for_injection_target(window: &WebviewWindow) -> Option<tauri::Monitor> {
+    #[cfg(windows)]
+    {
+        monitor_for_hwnd(window, INJECTION_TARGET.load(Ordering::SeqCst))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        None
+    }
+}
+
+#[cfg(windows)]
+fn monitor_for_hwnd(window: &WebviewWindow, hwnd: isize) -> Option<tauri::Monitor> {
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    if hwnd == 0 {
+        return None;
+    }
+    let mut rect = RECT::default();
+    unsafe {
+        if GetWindowRect(HWND(hwnd as *mut _), &mut rect).is_err() {
+            return None;
+        }
+    }
+    let x = ((rect.left + rect.right) / 2) as f64;
+    let y = ((rect.top + rect.bottom) / 2) as f64;
+    window
+        .monitor_from_point(x, y)
+        .ok()
+        .flatten()
 }
 
 /// Restore focus to the captured window before pasting text.
