@@ -12,6 +12,15 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.39] — 2026-09-21
+
+- **Local STT catalog:** Pick **family** and **quantization** (Whisper Q4–Q8, sherpa INT8/FP16/FP32) with a spec card—disk size, RAM/VRAM, speed & accuracy tiers, language summary—driven by `describe_local_stt_variant`.
+- **Lossless segment queue:** VAD/PTT segments are queued instead of dropped when the pipeline is busy; optional **weak PC** profile spills overflow to disk under `{data_storage}/segment-queue/` with startup replay and cancel cleanup.
+- **Inference memory:** Switching STT provider/model, cloud transcription model, LLM, or Silero TE purges loaded weights (transcriber replace + unload, Silero TE engine, idle/manual unload); activity `memory.inference_purged`.
+- **Silero TE assets:** Weights are no longer bundled in the installer; the app downloads them on demand (GitHub release `silero-te-assets-v1`; publish via `scripts/package-silero-te-release.ps1`).
+- **Status & settings UI:** Quick settings popover on Status (expert weak-PC options); STT picker component refactor; homemaker weak-PC switch only; overlay/status event wiring cleanup.
+- **Silero VAD:** Dedicated on-disk model store path for Silero VAD weights (aligned with local model layout).
+
 ## [1.8.18] — 2026-09-20
 
 - **Windows (Silero TE):** Bundle libtorch runtime DLLs (`c10.dll`, `torch_cpu.dll`, MKL/OpenMP, etc.) next to the app and in NSIS/portable builds via `stage-libtorch-dlls.ps1` — fixes startup error when Silero TE is enabled.
