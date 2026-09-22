@@ -101,9 +101,9 @@ impl SileroTeEngine {
 
     #[cfg(feature = "silero-te")]
     fn ensure_loaded(&self, settings: &crate::settings::AppSettings) -> Result<(), String> {
-        let fingerprint = settings
-            .transcription_dictionary_path
-            .clone()
+        let fingerprint = crate::settings::resolve_dictionary_file_path(settings)
+            .ok()
+            .map(|path| path.display().to_string())
             .unwrap_or_default();
         let needs_reload = self
             .settings_fingerprint

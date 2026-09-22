@@ -8,6 +8,7 @@ import {
   EVENTS,
   getActivityLog,
   getDevices,
+  forceUnloadLocalModels,
   getDiagnostics,
   getHomemakerHotkeyPresets,
   getHomemakerLocalSetup,
@@ -15,22 +16,26 @@ import {
   prewarmLocalModels,
   setApiKey,
   downloadLlmModel,
-  downloadLocalSttModel,
+  downloadSileroTeModel,
+  downloadSileroVadModel,
+  describeLocalSttVariant,
+  downloadLocalSttVariant,
+  getSileroTeModelStatus,
+  getSileroVadModelStatus,
+  listLocalSttFamilies,
+  getDataStorageDir,
   getLlmModelsDir,
   getLlmModelStatus,
   getDictionaryPath,
   openAboutWindow,
   getWhisperModelsDir,
+  pickDataStorageDir,
   listAiSkills,
   listLlmModels,
   listTranscriptionLanguages,
   listLocalSttModels,
   openAiSkillsFolder,
-  openTranscriptionDictionaryFolder,
   pickAndImportAiSkill,
-  pickLlmModelsDir,
-  pickTranscriptionDictionary,
-  pickWhisperModelsDir,
   getSettings,
   getStatus,
   getWhisperModelStatus,
@@ -41,16 +46,16 @@ import {
   type SettingsPatch,
   type LlmModelKind,
   type TextProcessingMode,
-  type LocalSttModelKind,
+  effectiveLocalSttFamily,
+  effectiveLocalSttQuant,
+  isLocalWhisperBeamSizeActive,
+  localSttModelKindForFamily,
+  type LocalSttFamily,
   subscribe,
   type ActivityLogEntry,
   type StatusSnapshot,
   type TranscriptionCompletedPayload,
 } from "./api";
-import {
-  ensureSpacesAfterPunctuation,
-  mergeTranscriptChunks,
-} from "./lib/text-spacing";
 import { bindHotkeyInputs } from "./components/hotkey-input";
 import { showConfirmDialog } from "./components/confirm-dialog";
 import { FALLBACK_HOMEMAKER_HOTKEY_PRESETS } from "./components/homemaker-hotkeys";
@@ -61,17 +66,37 @@ import {
   renderHomemakerSettings,
 } from "./components/homemaker-settings";
 import { renderHomemakerConfigBanner } from "./components/homemaker-loading-banner";
+import { ensureHomemakerSileroAssets } from "./components/homemaker-silero-download";
 import { mountRotatingTagline } from "./components/rotating-tagline";
 import { startMicLevelMonitor } from "./components/mic-meter";
-import { bindVadThresholdPanel } from "./components/vad-threshold-panel";
+import {
+  bindVadThresholdPanel,
+  ensureSileroVadDownloadUi,
+  updateSileroVadDownloadUi,
+} from "./components/vad-threshold-panel";
 import { syncVadGraphPolling } from "./components/vad-monitor";
 import {
+  bindStatusEventsPanel,
+  isStatusEventsOpen,
+  setStatusEventsOpen,
+} from "./components/status-events";
+import { bindStatusQuickSettings } from "./components/status-quick-settings";
+import {
+  quantsForFamilyFromCatalog,
+  readLocalSttQuantFromForm,
+} from "./components/stt-model-picker";
+import {
   AI_TEXT_MODES,
+  bindSegmentationMsSliders,
+  readWeakPcFormFields,
   renderSettingsForm,
   renderTabBar,
   settingsToForm,
   textModeHintKey,
+  ensureSileroTeDownloadUi,
+  needsOpenAiApiKeyForProviders,
   updateLlmDownloadUi,
+  updateSileroTeDownloadUi,
   updateWhisperDownloadUi,
 } from "./components/settings";
 import {
@@ -83,14 +108,16 @@ import {
   runStartupUpdateCheck,
 } from "./components/update-banner";
 import {
-  patchLiveStatusUi,
   renderCompactStatusBar,
   renderErrorBanner,
   renderStatusBar,
   renderUsageHint,
   updateActivityLogDom,
 } from "./components/status";
-import { syncStatusDashboardLifecycle } from "./components/status-dashboard";
+import {
+  bindStatusDashboardActions,
+  syncStatusDashboardLifecycle,
+} from "./components/status-dashboard";
 import { APP_VERSION_DISPLAY } from "./generated/version";
 import { bindUiModeSwitch, renderUiModeLink } from "./components/ui-mode-switch";
 import { getLocale, setLocale, subscribeLocale, t } from "./i18n";
@@ -114,6 +141,19 @@ function captureActivePanelScroll(): number {
   return (
     document.querySelector<HTMLElement>(".tab-panel.active")?.scrollTop ?? 0
   );
+}
+
+function afterNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+async function waitMinDownloadVisible(startedMs: number, minMs = 500): Promise<void> {
+  const wait = minMs - (performance.now() - startedMs);
+  if (wait > 0) {
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
 }
 
 function restoreActivePanelScroll(scrollTop: number): void {
@@ -142,30 +182,37 @@ function render(): void {
     activityLog,
     whisperModel,
     whisperModels,
+    localSttFamilies,
+    sttVariantInfo,
     aiSkills,
     whisperModelDownload,
     llmModel,
     llmModels,
     llmModelDownload,
+    sileroTeModel,
+    sileroVadModel,
+    sileroTeModelDownload,
+    sileroVadModelDownload,
     homemakerLocalSetup,
     homemakerHotkeyPresets,
     homemakerConfigLoading,
   } = getState();
   const homemaker = isHomemakerMode(settings);
   const uiMode = settings?.ui_mode ?? "homemaker";
-  const selectedWhisper = whisperModels.find((model) => model.selected);
-  const whisperModelsDir = getState().whisperModelsDir;
-  const dictionaryPath = getState().dictionaryPath;
+  const dataStorageDir = getState().dataStorageDir;
   const selectedLlm = llmModels.find((model) => model.selected);
-  const llmModelsDir = getState().llmModelsDir;
+  const selectedStt = whisperModels.find((model) => model.selected);
+  const sttModelReady =
+    sttVariantInfo?.exists ??
+    selectedStt?.exists ??
+    whisperModel?.exists ??
+    false;
   const formValues = settings
     ? settingsToForm(
         settings,
         hasApiKey,
-        whisperModelsDir,
-        selectedWhisper?.exists ?? whisperModel?.exists ?? false,
-        dictionaryPath,
-        llmModelsDir,
+        dataStorageDir,
+        sttModelReady,
         selectedLlm?.exists ?? llmModel?.exists ?? false,
       )
     : null;
@@ -209,8 +256,8 @@ function render(): void {
 
       ${
         homemaker
-          ? renderCompactStatusBar(status, getState().partialTranscript)
-          : `${renderStatusBar(status, getState().partialTranscript)}
+          ? renderCompactStatusBar(status)
+          : `${renderStatusBar(status)}
       ${renderUsageHint(status, diagnostics)}`
       }
 
@@ -232,7 +279,7 @@ function render(): void {
           : formValues
             ? `<section class="panel">
               ${renderTabBar(activeTab)}
-              ${renderSettingsForm(formValues, devices, activeTab, activityLog, whisperModelDownload, whisperModels, aiSkills, diagnostics, llmModelDownload, llmModels, getState().transcriptionLanguages)}
+              ${renderSettingsForm(formValues, devices, activeTab, activityLog, whisperModelDownload, localSttFamilies, sttVariantInfo, aiSkills, diagnostics, llmModelDownload, llmModels, getState().transcriptionLanguages, sileroTeModel, sileroVadModel, sileroTeModelDownload, sileroVadModelDownload)}
             </section>`
             : settings
               ? `<section class="panel"><p class="hint">${escapeHtml(t("status.loading"))}</p></section>`
@@ -338,6 +385,31 @@ function syncTranscriptionProviderUi(form: HTMLFormElement): void {
   form.querySelectorAll<HTMLElement>("[data-local-only-toggle]").forEach((element) => {
     element.hidden = provider !== "local";
   });
+  syncWhisperBeamUi(form);
+}
+
+function syncWhisperBeamUi(form: HTMLFormElement): void {
+  const provider =
+    form.querySelector<HTMLSelectElement>('select[name="transcription_provider"]')
+      ?.value ?? "local";
+  const family =
+    (form.querySelector<HTMLSelectElement>('select[name="local_stt_family"]')?.value ??
+      "whisper_base") as LocalSttFamily;
+  const quant = readLocalSttQuantFromForm(form);
+  const model = localSttModelKindForFamily(family);
+  const diagnostics = getState().diagnostics;
+  const active = isLocalWhisperBeamSizeActive(
+    {
+      transcription_provider: provider,
+      local_stt_family: family,
+      local_stt_model: model,
+      local_stt_quant: quant,
+    },
+    { whisperCompiled: diagnostics?.whisper_local_compiled !== false },
+  );
+  form.querySelectorAll<HTMLElement>("[data-whisper-beam-field]").forEach((element) => {
+    element.hidden = !active;
+  });
 }
 
 function syncTextRewriteProviderUi(form: HTMLFormElement): void {
@@ -354,10 +426,13 @@ function syncOpenAiApiKeyUi(form: HTMLFormElement): void {
     form.querySelector<HTMLSelectElement>('select[name="transcription_provider"]')
       ?.value ?? "local";
   const textRewriteProvider =
-    form.querySelector<HTMLSelectElement>('select[name="text_rewrite_provider"]')
-      ?.value ?? "openai";
-  const needsKey =
-    transcriptionProvider === "openai" || textRewriteProvider === "openai";
+    (form.querySelector<HTMLSelectElement>('select[name="text_rewrite_provider"]')
+      ?.value ?? "openai") as import("./api").TextRewriteProvider;
+  const needsKey = needsOpenAiApiKeyForProviders(
+    transcriptionProvider,
+    textRewriteProvider,
+    getState().hasApiKey,
+  );
 
   form.querySelectorAll<HTMLElement>("[data-openai-api-key-panel]").forEach((element) => {
     element.hidden = !needsKey;
@@ -370,10 +445,19 @@ function syncOpenAiApiKeyUi(form: HTMLFormElement): void {
 function syncDependentSettingsUi(form: HTMLFormElement): void {
   syncCaptureModeUi(form);
   syncEnterPhraseUi(form);
+  syncWeakPcOptionsUi(form);
   syncTranscriptionProviderUi(form);
   syncTextRewriteProviderUi(form);
   syncOpenAiApiKeyUi(form);
   syncTextModeUi(form);
+}
+
+function syncWeakPcOptionsUi(form: HTMLFormElement): void {
+  const enabled =
+    form.querySelector<HTMLInputElement>('input[name="weak_pc_mode"]')?.checked ?? false;
+  form.querySelectorAll<HTMLElement>("[data-weak-pc-options]").forEach((element) => {
+    element.hidden = !enabled;
+  });
 }
 
 function syncEnterPhraseUi(form: HTMLFormElement): void {
@@ -468,6 +552,13 @@ async function persistHomemakerSettings(form: HTMLFormElement): Promise<void> {
     patch.apply_homemaker_local_setup = true;
   }
 
+  const weakPc = readWeakPcFormFields(form);
+  patch.weak_pc_mode = weakPc.weak_pc_mode;
+  patch.weak_pc_spill_to_disk = weakPc.weak_pc_spill_to_disk;
+  patch.weak_pc_ram_segment_cap = weakPc.weak_pc_ram_segment_cap;
+  patch.weak_pc_max_disk_queue_mb = weakPc.weak_pc_max_disk_queue_mb;
+  patch.weak_pc_reduce_prewarm = weakPc.weak_pc_reduce_prewarm;
+
   if (switchingToLocal) {
     patchState({ homemakerConfigLoading: true });
   }
@@ -515,6 +606,8 @@ function bindHomemakerEvents(form: HTMLFormElement): void {
 
   form.querySelector<HTMLInputElement>('input[name="api_key"]')?.addEventListener("change", onChange);
 
+  form.querySelector<HTMLInputElement>('input[name="weak_pc_mode"]')?.addEventListener("change", onChange);
+
   form.querySelector<HTMLButtonElement>("[data-open-skill-catalog]")?.addEventListener("click", () => {
     void openUrl(skillCatalogUrl(getLocale()));
   });
@@ -536,18 +629,31 @@ function bindHomemakerEvents(form: HTMLFormElement): void {
         return;
       }
 
-      const model = setup.local_stt_model;
       patchState({
         whisperModelDownload: { downloaded: 0, total: null, percent: null },
         lastError: null,
       });
 
       const current = getState().settings;
-      if (current && current.local_stt_model !== model) {
-        setSettings(await updateSettings({ local_stt_model: model }));
+      if (
+        current &&
+        (current.local_stt_family !== setup.local_stt_family ||
+          current.local_stt_quant !== setup.local_stt_quant)
+      ) {
+        setSettings(
+          await updateSettings({
+            local_stt_family: setup.local_stt_family,
+            local_stt_quant: setup.local_stt_quant,
+          }),
+        );
       }
 
-      await downloadLocalSttModel(model);
+      await downloadLocalSttVariant(setup.local_stt_family, setup.local_stt_quant);
+      await ensureHomemakerSileroAssets();
+      const settingsAfter = getState().settings;
+      if (settingsAfter) {
+        await refreshSttVariantInfo(settingsAfter);
+      }
       patchState({
         whisperModel: await getWhisperModelStatus(),
         whisperModels: await listLocalSttModels(),
@@ -590,6 +696,7 @@ function bindHomemakerEvents(form: HTMLFormElement): void {
       }
 
       await downloadLlmModel(model);
+      await ensureHomemakerSileroAssets();
       patchState({
         llmModel: await getLlmModelStatus(),
         llmModels: await listLlmModels(),
@@ -659,6 +766,22 @@ function bindEvents(): void {
   mountRotatingTagline(document.querySelector<HTMLElement>(".subtitle-rotator"), uiMode);
   bindUiModeSwitch(document, uiMode);
   bindStandardOnboardingBanner(document);
+  bindStatusQuickSettings();
+  bindStatusEventsPanel();
+  bindStatusDashboardActions(async () => {
+    try {
+      await forceUnloadLocalModels();
+      patchState({
+        diagnostics: await getDiagnostics(),
+        activityLog: await getActivityLog(),
+        lastError: null,
+      });
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      const code = raw.includes("models_unload_busy") ? "models_unload_busy" : "models_unload";
+      setError({ code, message: raw });
+    }
+  });
 
   document
     .querySelector<HTMLButtonElement>("[data-open-about]")
@@ -692,16 +815,31 @@ function bindEvents(): void {
 
   bindHotkeyInputs(form, onSettingsChange);
   bindVadThresholdPanel(form, onSettingsChange);
+  bindSegmentationMsSliders(form);
   syncDependentSettingsUi(form);
+
+  if (!form.dataset.eventsToggleBound) {
+    form.dataset.eventsToggleBound = "1";
+    form.addEventListener("click", (event) => {
+      const trigger = (event.target as HTMLElement).closest("[data-toggle-status-events]");
+      if (!trigger || !form.contains(trigger)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setStatusEventsOpen(!isStatusEventsOpen());
+    });
+  }
 
   form.querySelector<HTMLButtonElement>("[data-download-whisper-model]")?.addEventListener("click", () => {
     if (getState().whisperModelDownload) {
       return;
     }
 
-    const model =
-      (form.querySelector<HTMLSelectElement>('select[name="local_stt_model"]')?.value ??
-        "base") as LocalSttModelKind;
+    const family =
+      (form.querySelector<HTMLSelectElement>('select[name="local_stt_family"]')?.value ??
+        "whisper_base") as LocalSttFamily;
+    const quant = readLocalSttQuantFromForm(form);
 
     patchState({
       whisperModelDownload: { downloaded: 0, total: null, percent: null },
@@ -710,13 +848,18 @@ function bindEvents(): void {
 
     const current = getState().settings;
     const persistModel =
-      current && current.local_stt_model !== model
-        ? updateSettings({ local_stt_model: model }).then(setSettings)
+      current &&
+      (current.local_stt_family !== family || current.local_stt_quant !== quant)
+        ? updateSettings({ local_stt_family: family, local_stt_quant: quant }).then(setSettings)
         : Promise.resolve();
 
     void persistModel
-      .then(() => downloadLocalSttModel(model))
+      .then(() => downloadLocalSttVariant(family, quant))
       .then(async () => {
+        const settings = getState().settings;
+        if (settings) {
+          await refreshSttVariantInfo(settings);
+        }
         patchState({
           whisperModel: await getWhisperModelStatus(),
           whisperModels: await listLocalSttModels(),
@@ -772,55 +915,98 @@ function bindEvents(): void {
       });
   });
 
-  form.querySelector<HTMLButtonElement>("[data-pick-llm-models-dir]")?.addEventListener("click", () => {
-    void pickLlmModelsDir()
+  form.querySelector<HTMLButtonElement>("[data-download-silero-te-model]")?.addEventListener("click", () => {
+    if (getState().sileroTeModelDownload) {
+      return;
+    }
+
+    const initial = { downloaded: 0, total: null, percent: null as number | null };
+    patchState({ sileroTeModelDownload: initial, lastError: null });
+
+    void (async () => {
+      const started = performance.now();
+      try {
+        await afterNextPaint();
+        document
+          .querySelector("[data-silero-te-download]")
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        await downloadSileroTeModel();
+        await waitMinDownloadVisible(started);
+        patchState({
+          sileroTeModel: await getSileroTeModelStatus(),
+          sileroTeModelDownload: null,
+        });
+      } catch (error) {
+        patchState({ sileroTeModelDownload: null });
+        const message = error instanceof Error ? error.message : String(error);
+        setError({ code: "silero_te_download", message });
+      }
+    })();
+  });
+
+  form.querySelector<HTMLButtonElement>("[data-download-silero-vad-model]")?.addEventListener("click", () => {
+    if (getState().sileroVadModelDownload) {
+      return;
+    }
+
+    const vadInitial = { downloaded: 0, total: null, percent: null as number | null };
+    patchState({ sileroVadModelDownload: vadInitial, lastError: null });
+
+    void (async () => {
+      const started = performance.now();
+      try {
+        await afterNextPaint();
+        await downloadSileroVadModel();
+        await waitMinDownloadVisible(started);
+        patchState({
+          sileroVadModel: await getSileroVadModelStatus(),
+          sileroVadModelDownload: null,
+        });
+        await recoverEngine();
+        patchState({ diagnostics: await getDiagnostics() });
+      } catch (error) {
+        patchState({ sileroVadModelDownload: null });
+        const message = error instanceof Error ? error.message : String(error);
+        setError({ code: "silero_vad_download", message });
+      }
+    })();
+  });
+
+  form.querySelector<HTMLButtonElement>("[data-pick-data-storage-dir]")?.addEventListener("click", () => {
+    void pickDataStorageDir()
       .then(async (dir) => {
         if (!dir) {
           return;
         }
 
-        const nextSettings = await updateSettings({ local_llm_models_dir: dir });
+        const nextSettings = await updateSettings({
+          data_storage_dir: dir,
+          local_whisper_models_dir: null,
+          local_llm_models_dir: null,
+          transcription_dictionary_path: null,
+        });
         setSettings(nextSettings);
         patchState({
+          dataStorageDir: await getDataStorageDir(),
+          whisperModelsDir: await getWhisperModelsDir(),
+          dictionaryPath: await getDictionaryPath(),
           llmModelsDir: await getLlmModelsDir(),
+          whisperModels: await listLocalSttModels(),
+          whisperModel: await getWhisperModelStatus(),
           llmModels: await listLlmModels(),
           llmModel: await getLlmModelStatus(),
+          sileroTeModel: await getSileroTeModelStatus().catch(() => null),
+          sileroVadModel: await getSileroVadModelStatus().catch(() => null),
           lastError: null,
         });
+        await refreshSttVariantInfo(nextSettings);
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         setError({
-          code: "llm_models_dir",
+          code: "data_storage_dir",
           message,
         });
-      });
-  });
-
-  form.querySelector<HTMLButtonElement>("[data-open-dictionary-folder]")?.addEventListener("click", () => {
-    void openTranscriptionDictionaryFolder().catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      setError({ code: "dictionary_folder", message });
-    });
-  });
-
-  form.querySelector<HTMLButtonElement>("[data-pick-transcription-dictionary]")?.addEventListener("click", () => {
-    void pickTranscriptionDictionary()
-      .then(async (path) => {
-        if (!path) {
-          return;
-        }
-
-        const nextSettings = await updateSettings({ transcription_dictionary_path: path });
-        setSettings(nextSettings);
-        patchState({
-          dictionaryPath: await getDictionaryPath(),
-          lastError: null,
-        });
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        setError({ code: "dictionary_path", message });
       });
   });
 
@@ -835,30 +1021,6 @@ function bindEvents(): void {
     }
   });
 
-  form.querySelector<HTMLButtonElement>("[data-pick-whisper-models-dir]")?.addEventListener("click", () => {
-    void pickWhisperModelsDir()
-      .then(async (dir) => {
-        if (!dir) {
-          return;
-        }
-
-        const nextSettings = await updateSettings({ local_whisper_models_dir: dir });
-        setSettings(nextSettings);
-        patchState({
-          whisperModelsDir: await getWhisperModelsDir(),
-          whisperModels: await listLocalSttModels(),
-          whisperModel: await getWhisperModelStatus(),
-          lastError: null,
-        });
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        setError({
-          code: "models_dir",
-          message,
-        });
-      });
-  });
 
   form.querySelector<HTMLButtonElement>("[data-clear-api-key]")?.addEventListener("click", () => {
     void clearApiKey()
@@ -936,7 +1098,7 @@ function bindEvents(): void {
 
   form
     .querySelectorAll<HTMLSelectElement | HTMLInputElement>(
-      "select, input[type='checkbox'], input[type='number']",
+      "select, input[type='checkbox'], input[type='number'], input[type='range'][data-ms-slider], input[type='range'][data-idle-unload-slider], input[type='range'][data-weak-pc-slider]",
     )
     .forEach((element) => {
       element.addEventListener("change", () => {
@@ -962,6 +1124,9 @@ function bindEvents(): void {
         }
         if (element instanceof HTMLInputElement && element.name === "emulate_enter") {
           syncEnterPhraseUi(form);
+        }
+        if (element instanceof HTMLInputElement && element.name === "weak_pc_mode") {
+          syncWeakPcOptionsUi(form);
         }
         if (
           element instanceof HTMLSelectElement &&
@@ -1031,13 +1196,30 @@ function bindEvents(): void {
         }
         if (
           element instanceof HTMLSelectElement &&
-          element.name === "local_stt_model"
+          (element.name === "local_stt_family" || element.name === "local_stt_quant")
         ) {
           const current = getState().settings;
           if (current) {
             const baseline = current;
-            const model = element.value as LocalSttModelKind;
-            setSettings({ ...current, local_stt_model: model });
+            const family =
+              (form.querySelector<HTMLSelectElement>('select[name="local_stt_family"]')
+                ?.value ?? current.local_stt_family) as LocalSttFamily;
+            const quants = quantsForFamilyFromCatalog(
+              getState().localSttFamilies,
+              family,
+            );
+            let quant = readLocalSttQuantFromForm(form);
+            if (element.name === "local_stt_family") {
+              quant = quants.includes(quant) ? quant : quants[0] ?? "legacy";
+            }
+            const next = {
+              ...current,
+              local_stt_family: family,
+              local_stt_quant: quant,
+              local_stt_model: localSttModelKindForFamily(family),
+            };
+            setSettings(next);
+            void refreshSttVariantInfo(next);
             void flushPersistSettings({ compareWith: baseline });
           }
           return;
@@ -1110,6 +1292,17 @@ function bindEvents(): void {
   });
 }
 
+async function refreshSttVariantInfo(settings: AppSettings): Promise<void> {
+  try {
+    const family = effectiveLocalSttFamily(settings);
+    const quant = effectiveLocalSttQuant(family, settings.local_stt_quant);
+    const sttVariantInfo = await describeLocalSttVariant(family, quant);
+    patchState({ sttVariantInfo });
+  } catch {
+    patchState({ sttVariantInfo: null });
+  }
+}
+
 async function refreshDiagnostics(): Promise<void> {
   patchState({ diagnostics: await getDiagnostics() });
 }
@@ -1141,10 +1334,12 @@ async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise
   try {
     const apiKeyConfigured = await invokeWithRetry(() => hasApiKey());
 
-    const [devices, transcriptionLanguages, whisperModels, diagnostics] = await Promise.all([
+    const [devices, transcriptionLanguages, whisperModels, localSttFamilies, diagnostics] =
+      await Promise.all([
       invokeWithRetry(() => getDevices()),
       invokeWithRetry(() => listTranscriptionLanguages()),
       invokeWithRetry(() => listLocalSttModels()),
+      invokeWithRetry(() => listLocalSttFamilies()),
       invokeWithRetry(() => getDiagnostics()),
     ]);
 
@@ -1152,6 +1347,7 @@ async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise
       devices,
       transcriptionLanguages,
       whisperModels,
+      localSttFamilies,
       diagnostics,
       hasApiKey: apiKeyConfigured,
     });
@@ -1160,21 +1356,27 @@ async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise
       activityLog,
       whisperModel,
       aiSkills,
+      dataStorageDir,
       whisperModelsDir,
       dictionaryPath,
       llmModel,
       llmModels,
       llmModelsDir,
+      sileroTeModel,
+      sileroVadModel,
       homemakerHotkeyPresets,
     ] = await Promise.all([
       invokeWithRetry(() => getActivityLog()),
       invokeWithRetry(() => getWhisperModelStatus()).catch(() => null),
       invokeWithRetry(() => listAiSkills()).catch(() => []),
+      invokeWithRetry(() => getDataStorageDir()).catch(() => ""),
       invokeWithRetry(() => getWhisperModelsDir()).catch(() => ""),
       invokeWithRetry(() => getDictionaryPath()).catch(() => ""),
       invokeWithRetry(() => getLlmModelStatus()).catch(() => null),
       invokeWithRetry(() => listLlmModels()).catch(() => []),
       invokeWithRetry(() => getLlmModelsDir()).catch(() => ""),
+      invokeWithRetry(() => getSileroTeModelStatus()).catch(() => null),
+      invokeWithRetry(() => getSileroVadModelStatus()).catch(() => null),
       invokeWithRetry(() => getHomemakerHotkeyPresets()).catch(() => [
         ...FALLBACK_HOMEMAKER_HOTKEY_PRESETS,
       ]),
@@ -1191,14 +1393,19 @@ async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise
       settings: effectiveSettings,
       activityLog,
       whisperModel,
+      dataStorageDir,
       whisperModelsDir,
       dictionaryPath,
       llmModel,
       llmModels,
       llmModelsDir,
       aiSkills,
+      sileroTeModel,
+      sileroVadModel,
       homemakerHotkeyPresets,
     });
+
+    await refreshSttVariantInfo(effectiveSettings);
 
     if (isHomemakerMode(effectiveSettings)) {
       await refreshHomemakerLocalSetup();
@@ -1261,29 +1468,7 @@ async function bootstrap(): Promise<void> {
   });
 
   await subscribe<TranscriptionCompletedPayload>(EVENTS.transcriptionCompleted, () => {
-    patchState({ partialTranscript: null });
     void refreshDiagnostics();
-  });
-
-  await subscribe<import("./api").TranscriptionPartialPayload>(
-    EVENTS.transcriptionPartial,
-    (payload) => {
-      const raw = payload.text ?? "";
-      const previous = getState().partialTranscript ?? "";
-      const merged =
-        previous && raw.startsWith(previous.trim())
-          ? ensureSpacesAfterPunctuation(raw)
-          : mergeTranscriptChunks(previous, raw);
-      patchState({ partialTranscript: merged }, { render: false });
-      const currentStatus = getState().status;
-      if (currentStatus) {
-        patchLiveStatusUi(currentStatus, merged);
-      }
-    },
-  );
-
-  await subscribe(EVENTS.transcriptionPartialClear, () => {
-    patchState({ partialTranscript: null });
   });
 
   await subscribe<ActivityLogEntry[]>(EVENTS.activityLog, (entries) => {
@@ -1312,6 +1497,24 @@ async function bootstrap(): Promise<void> {
       }
       patchState({ llmModelDownload: progress }, { render: false });
       updateLlmDownloadUi(progress);
+    },
+  );
+
+  await subscribe<import("./api").SileroModelDownloadProgress>(
+    EVENTS.sileroTeDownloadProgress,
+    (progress) => {
+      patchState({ sileroTeModelDownload: progress }, { render: false });
+      ensureSileroTeDownloadUi(progress);
+      updateSileroTeDownloadUi(progress);
+    },
+  );
+
+  await subscribe<import("./api").SileroModelDownloadProgress>(
+    EVENTS.sileroVadDownloadProgress,
+    (progress) => {
+      patchState({ sileroVadModelDownload: progress }, { render: false });
+      ensureSileroVadDownloadUi(progress);
+      updateSileroVadDownloadUi(progress);
     },
   );
 
@@ -1371,7 +1574,6 @@ async function bootstrap(): Promise<void> {
     EVENTS.listeningStopped,
     EVENTS.transcriptionStarted,
     EVENTS.injectionCompleted,
-    EVENTS.transcriptionPartialClear,
   ]) {
     await subscribe(event, () => {
       void refreshDiagnostics();

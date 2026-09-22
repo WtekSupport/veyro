@@ -11,8 +11,6 @@ pub const LISTENING_STOPPED: &str = "app://listening-stopped";
 /// Targeted at the recording overlay webview (reliable after lazy create / page load).
 pub const OVERLAY_LISTENING: &str = "app://overlay-listening";
 pub const TRANSCRIPTION_STARTED: &str = "app://transcription-started";
-pub const TRANSCRIPTION_PARTIAL: &str = "app://transcription-partial";
-pub const TRANSCRIPTION_PARTIAL_CLEAR: &str = "app://transcription-partial-clear";
 pub const TRANSCRIPTION_COMPLETED: &str = "app://transcription-completed";
 pub const INJECTION_COMPLETED: &str = "app://injection-completed";
 pub const ERROR: &str = "app://error";
@@ -20,6 +18,8 @@ pub const MICROPHONE_CHANGED: &str = "app://microphone-changed";
 pub const ACTIVITY_LOG: &str = "app://activity-log";
 pub const WHISPER_MODEL_DOWNLOAD_PROGRESS: &str = "app://whisper-model-download-progress";
 pub const LLM_MODEL_DOWNLOAD_PROGRESS: &str = "app://llm-model-download-progress";
+pub const SILERO_TE_DOWNLOAD_PROGRESS: &str = "app://silero-te-download-progress";
+pub const SILERO_VAD_DOWNLOAD_PROGRESS: &str = "app://silero-vad-download-progress";
 pub const SKILL_IMPORTED: &str = "app://skill-imported";
 pub const SKILLS_CHANGED: &str = "app://skills-changed";
 
@@ -60,24 +60,6 @@ pub fn emit_listening_stopped(app: &AppHandle) {
 
 pub fn emit_transcription_started(app: &AppHandle) {
     let _ = app.emit(TRANSCRIPTION_STARTED, ());
-}
-
-#[derive(Clone, Serialize)]
-pub struct TranscriptionPartialPayload {
-    pub text: String,
-    pub stable: bool,
-}
-
-pub fn emit_transcription_partial(app: &AppHandle, text: &str) {
-    let payload = TranscriptionPartialPayload {
-        text: text.to_string(),
-        stable: false,
-    };
-    let _ = app.emit(TRANSCRIPTION_PARTIAL, payload);
-}
-
-pub fn emit_transcription_partial_clear(app: &AppHandle) {
-    let _ = app.emit(TRANSCRIPTION_PARTIAL_CLEAR, ());
 }
 
 #[derive(Clone, Serialize)]

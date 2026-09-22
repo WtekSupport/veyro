@@ -1,5 +1,6 @@
 pub mod clipboard;
 pub mod focus_target;
+pub mod focus_watch;
 pub mod injector;
 pub mod live;
 pub mod prepare;

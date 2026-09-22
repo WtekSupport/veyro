@@ -77,6 +77,13 @@ pub fn resolve_dictionary_path(custom_path: Option<&str>) -> Result<PathBuf, Con
     default_dictionary_path()
 }
 
+pub fn load_dictionary_for_settings(
+    settings: &crate::settings::AppSettings,
+) -> Result<Dictionary, ConfigError> {
+    let path = crate::settings::resolve_dictionary_file_path(settings)?;
+    load_dictionary(path.to_str())
+}
+
 fn seed_default_dictionary(path: &Path) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -190,6 +197,12 @@ pub fn open_dictionary_folder(custom_path: Option<&str>) -> Result<(), ConfigErr
     } else {
         open_path(&path)
     }
+}
+
+pub fn open_folder(path: &Path) -> Result<(), ConfigError> {
+    fs::create_dir_all(path)
+        .map_err(|error| ConfigError::Write(format!("{}: {error}", path.display())))?;
+    open_path(path)
 }
 
 fn open_path(path: &Path) -> Result<(), ConfigError> {

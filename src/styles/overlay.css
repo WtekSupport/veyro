@@ -20,7 +20,10 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  justify-content: flex-start;
   gap: 4px;
+  width: 100%;
+  min-height: 100%;
   max-width: 280px;
 }
 
@@ -30,8 +33,8 @@ body {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(12, 10, 8, 0.72);
-  border: 1px solid rgba(212, 168, 75, 0.35);
+  background: rgba(13, 13, 13, 0.82);
+  border: 1px solid rgba(255, 193, 69, 0.38);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   user-select: none;
   pointer-events: none;

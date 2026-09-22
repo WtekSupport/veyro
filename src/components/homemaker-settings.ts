@@ -13,6 +13,7 @@ import type {
 } from "../api";
 
 import { resolveHomemakerHotkeySelection } from "./homemaker-hotkeys";
+import { renderWeakPcHomemakerSwitch } from "./settings";
 import { t } from "../i18n";
 
 
@@ -392,6 +393,8 @@ export function renderHomemakerSettings(
           </div>
 
         </div>
+
+        ${renderWeakPcHomemakerSwitch(settings.weak_pc_mode ?? false)}
 
       </form>
 

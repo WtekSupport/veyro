@@ -14,7 +14,12 @@ import type {
   LlmModelStatus,
   TranscriptionLanguageInfo,
   WhisperModelDownloadProgress,
+  SileroModelDownloadProgress,
+  SileroTeModelStatus,
+  SileroVadModelStatus,
+  LocalSttFamilyInfo,
   LocalSttModelInfo,
+  LocalSttVariantInfo,
   WhisperModelStatus,
 } from "./api";
 
@@ -30,6 +35,9 @@ export interface UiState {
   activityLog: ActivityLogEntry[];
   whisperModel: WhisperModelStatus | null;
   whisperModels: LocalSttModelInfo[];
+  localSttFamilies: LocalSttFamilyInfo[];
+  sttVariantInfo: LocalSttVariantInfo | null;
+  dataStorageDir: string;
   whisperModelsDir: string;
   dictionaryPath: string;
   aiSkills: AiSkillInfo[];
@@ -38,13 +46,16 @@ export interface UiState {
   llmModels: LlmModelInfo[];
   llmModelsDir: string;
   llmModelDownload: LlmModelDownloadProgress | null;
+  sileroTeModel: SileroTeModelStatus | null;
+  sileroVadModel: SileroVadModelStatus | null;
+  sileroTeModelDownload: SileroModelDownloadProgress | null;
+  sileroVadModelDownload: SileroModelDownloadProgress | null;
   loading: boolean;
   activeTab: SettingsTab;
   homemakerLocalSetup: HomemakerLocalSetup | null;
   homemakerHotkeyPresets: string[];
   homemakerConfigLoading: boolean;
   transcriptionLanguages: TranscriptionLanguageInfo[];
-  partialTranscript: string | null;
 }
 
 type Listener = (state: UiState) => void;
@@ -59,6 +70,9 @@ const initialState: UiState = {
   activityLog: [],
   whisperModel: null,
   whisperModels: [],
+  localSttFamilies: [],
+  sttVariantInfo: null,
+  dataStorageDir: "",
   whisperModelsDir: "",
   dictionaryPath: "",
   aiSkills: [],
@@ -67,13 +81,16 @@ const initialState: UiState = {
   llmModels: [],
   llmModelsDir: "",
   llmModelDownload: null,
+  sileroTeModel: null,
+  sileroVadModel: null,
+  sileroTeModelDownload: null,
+  sileroVadModelDownload: null,
   loading: true,
   activeTab: "status",
   homemakerLocalSetup: null,
   homemakerHotkeyPresets: [],
   homemakerConfigLoading: false,
   transcriptionLanguages: [],
-  partialTranscript: null,
 };
 
 let state: UiState = { ...initialState };
@@ -108,7 +125,7 @@ export function patchState(
 
 export function setStatus(status: StatusSnapshot): void {
   patchState({ status }, { render: false });
-  patchLiveStatusUi(status, state.partialTranscript);
+  patchLiveStatusUi(status);
 }
 
 export function setSettings(settings: AppSettings): void {

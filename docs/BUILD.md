@@ -226,18 +226,23 @@ npm run tauri build -- --features local-whisper-vulkan,local-llm-vulkan
 
 ## Модели
 
-### Whisper
+### Локальная модель речи (семейство + квантизация)
 
-| Модель | Файл | ~Размер |
-|--------|------|---------|
-| Base | `ggml-base.bin` | 141 MB |
-| Small | `ggml-small.bin` | 466 MB |
-| Medium | `ggml-medium.bin` | 1.5 GB |
-| Large v3 Turbo | `ggml-large-v3-turbo.bin` | 1.5 GB |
-| Large v3 | `ggml-large-v3.bin` | 3.1 GB |
+В настройках **Голос → Локальная модель речи** выбираются **семейство** (Whisper или Sherpa) и **квантизация** (Q4/Q5/Q8 для Whisper, INT8/FP16/FP32 для Parakeet). Характеристики (размер, RAM/VRAM, скорость) показываются под селектами.
 
-Скачивание: **Голос → Local Whisper → Download model**.  
-Каталог: `%AppData%\Veyro\models\` (Windows).
+| Семейство | Квант | Источник |
+|-----------|-------|----------|
+| Whisper * | Legacy | `ggml-{size}.bin` (HF ggerganov/whisper.cpp) |
+| Whisper * | Q4/Q5/Q8 | `ggml-{size}-q4_0.bin`, `-q5_0`/`-q5_1`, `-q8_0` |
+| Parakeet TDT 0.6B v3 | INT8 | k2-fsa `asr-models` (официально) |
+| Parakeet TDT 0.6B v3 | FP16/FP32 | Hugging Face (Yiivgeny, third-party) |
+| Qwen3-ASR 0.6B / 1.7B | INT8 | k2-fsa `asr-models` |
+
+Sherpa-бандлы: `%AppData%\Veyro\models\sherpa\{family}\{int8|fp16|fp32}\`.  
+Whisper-файлы: `%AppData%\Veyro\models\`.  
+Старые установки Sherpa INT8 без подпапки quant по-прежнему распознаются.
+
+Скачивание: **Download model** в том же блоке.
 
 ### LLM
 

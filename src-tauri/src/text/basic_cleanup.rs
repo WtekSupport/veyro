@@ -273,6 +273,194 @@ fn apply_basic_speech_cleanup_block(text: &str) -> String {
     collapse_orphan_dot_artifacts(&text)
 }
 
+/// Lowercase spurious mid-sentence capitals from STT / Silero TE (keep abbrevs & sentence starts).
+pub fn fix_spurious_mid_sentence_capitals(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    let mut allow_capital = true;
+
+    while let Some(&ch) = chars.peek() {
+        if ch.is_whitespace() {
+            let mut ws = String::new();
+            while let Some(&c) = chars.peek() {
+                if !c.is_whitespace() {
+                    break;
+                }
+                ws.push(chars.next().unwrap());
+            }
+            if ws.contains("\n\n") {
+                allow_capital = true;
+            }
+            out.push_str(&ws);
+            continue;
+        }
+
+        let mut word = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_whitespace() {
+                break;
+            }
+            word.push(chars.next().unwrap());
+        }
+
+        let (leading, core, trailing) = split_word_affixes(&word);
+        let fixed_core = if !allow_capital && should_downcase_spurious_word_core(&core) {
+            downcase_first_char(&core)
+        } else {
+            core
+        };
+        out.push_str(&leading);
+        out.push_str(&fixed_core);
+        out.push_str(&trailing);
+
+        allow_capital = false;
+        if word_ends_sentence(&word) {
+            allow_capital = true;
+        }
+    }
+
+    out
+}
+
+fn split_word_affixes(word: &str) -> (String, String, String) {
+    let chars: Vec<char> = word.chars().collect();
+    let mut start = 0usize;
+    while start < chars.len() && !chars[start].is_alphabetic() {
+        start += 1;
+    }
+    let mut end = chars.len();
+    while end > start && !chars[end - 1].is_alphabetic() {
+        end -= 1;
+    }
+    (
+        chars[..start].iter().collect(),
+        chars[start..end].iter().collect(),
+        chars[end..].iter().collect(),
+    )
+}
+
+fn downcase_first_char(word: &str) -> String {
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return word.to_string();
+    };
+    let mut out: String = first.to_lowercase().collect();
+    out.push_str(chars.as_str());
+    out
+}
+
+fn should_downcase_spurious_word_core(core: &str) -> bool {
+    if core.is_empty() {
+        return false;
+    }
+    let mut chars = core.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_uppercase() {
+        return false;
+    }
+    if core.chars().any(|ch| ch.is_ascii_digit()) {
+        return false;
+    }
+    if has_internal_uppercase(&core) {
+        return false;
+    }
+    if is_likely_abbreviation_core(core) {
+        return false;
+    }
+    if is_roman_numeral(core) {
+        return false;
+    }
+    true
+}
+
+fn has_internal_uppercase(core: &str) -> bool {
+    let mut chars = core.chars();
+    chars.next();
+    chars.any(|ch| ch.is_uppercase())
+}
+
+fn is_likely_abbreviation_core(core: &str) -> bool {
+    if core.contains('.') {
+        let parts: Vec<&str> = core.split('.').filter(|part| !part.is_empty()).collect();
+        if !parts.is_empty()
+            && parts
+                .iter()
+                .all(|part| part.chars().all(|ch| ch.is_alphabetic()))
+        {
+            let letters: usize = parts.iter().map(|part| part.chars().count()).sum();
+            if letters <= 8 {
+                return true;
+            }
+        }
+    }
+    let letters: Vec<char> = core.chars().filter(|c| c.is_alphabetic()).collect();
+    if letters.is_empty() {
+        return false;
+    }
+    if letters.len() == 1 {
+        return false;
+    }
+    letters.iter().all(|c| c.is_uppercase()) && letters.len() <= 5
+}
+
+fn is_roman_numeral(core: &str) -> bool {
+    !core.is_empty()
+        && core
+            .chars()
+            .all(|ch| matches!(ch, 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M'))
+}
+
+fn word_ends_sentence(word: &str) -> bool {
+    let trimmed = word.trim_end_matches(|c: char| {
+        matches!(c, '"' | '\'' | '»' | ')' | ']' | ',' | ';' | ':')
+    });
+    if trimmed.ends_with('…') || trimmed.ends_with('!') || trimmed.ends_with('?') {
+        return true;
+    }
+    if trimmed.ends_with("...") {
+        return true;
+    }
+    if !trimmed.ends_with('.') {
+        return false;
+    }
+    if is_decimal_suffix(trimmed) {
+        return false;
+    }
+    if is_abbreviation_with_trailing_period(trimmed) {
+        return false;
+    }
+    true
+}
+
+fn is_decimal_suffix(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let Some(dot) = chars.iter().rposition(|&c| c == '.') else {
+        return false;
+    };
+    if dot == 0 || dot + 1 >= chars.len() {
+        return false;
+    }
+    chars[dot - 1].is_ascii_digit() && chars[dot + 1].is_ascii_digit()
+}
+
+fn is_abbreviation_with_trailing_period(text: &str) -> bool {
+    let without_dot = text.trim_end_matches('.');
+    if without_dot.is_empty() {
+        return false;
+    }
+    if without_dot.contains('.') {
+        return true;
+    }
+    let letters: Vec<char> = without_dot.chars().filter(|c| c.is_alphabetic()).collect();
+    letters.len() <= 2 && letters.iter().all(|c| c.is_uppercase() || c.is_alphabetic())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +505,37 @@ mod tests {
         let out = apply_basic_speech_cleanup(raw);
         assert!(out.contains("3.14"));
         assert!(out.contains("сервис"));
+    }
+
+    #[test]
+    fn fixes_spurious_mid_sentence_capitals() {
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals("я пошёл В магазин за хлебом"),
+            "я пошёл в магазин за хлебом"
+        );
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals("Первое предложение. Второе началось."),
+            "Первое предложение. Второе началось."
+        );
+    }
+
+    #[test]
+    fn keeps_abbreviations_and_acronyms() {
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals("работает API и JSON хорошо"),
+            "работает API и JSON хорошо"
+        );
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals("согласно т.д. продолжаем"),
+            "согласно т.д. продолжаем"
+        );
+    }
+
+    #[test]
+    fn fixes_after_paragraph_break() {
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals("конец.\n\nНовый абзац"),
+            "конец.\n\nНовый абзац"
+        );
     }
 }

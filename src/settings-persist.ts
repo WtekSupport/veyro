@@ -2,11 +2,18 @@ import {
   getDiagnostics,
   getStatus,
   getLlmModelStatus,
+  getDataStorageDir,
   getLlmModelsDir,
   getWhisperModelStatus,
   getDictionaryPath,
   getWhisperModelsDir,
+  getSileroTeModelStatus,
+  getSileroVadModelStatus,
   listLlmModels,
+  describeLocalSttVariant,
+  effectiveLocalSttFamily,
+  effectiveLocalSttQuant,
+  isLocalWhisperBeamSizeActive,
   listLocalSttModels,
   setApiKey,
   updateSettings,
@@ -28,6 +35,10 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
       : values.transcription_provider;
 
   const current = getState().settings;
+  const diagnostics = getState().diagnostics;
+  const beamActive = isLocalWhisperBeamSizeActive(values, {
+    whisperCompiled: diagnostics?.whisper_local_compiled !== false,
+  });
 
   return {
     global_hotkey: values.global_hotkey,
@@ -36,23 +47,23 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
       ? values.ptt_hold
       : (current?.ptt_hold ?? true),
     recording_indicator: values.recording_indicator,
+    abort_on_focus_loss: values.abort_on_focus_loss,
     microphone_device:
       values.microphone_device.length > 0 ? values.microphone_device : null,
     language: values.language === "auto" ? null : values.language,
     transcription_provider: transcriptionProvider,
-    local_stt_model: values.local_stt_model,
+    local_stt_family: values.local_stt_family,
+    local_stt_quant: values.local_stt_quant,
     local_whisper_use_gpu: values.local_whisper_use_gpu,
-    local_whisper_beam_size: values.local_whisper_beam_size,
+    local_whisper_beam_size: beamActive
+      ? values.local_whisper_beam_size
+      : (current?.local_whisper_beam_size ?? values.local_whisper_beam_size),
     text_rewrite_provider: values.text_rewrite_provider,
     local_llm_model: values.local_llm_model,
     local_llm_use_gpu: values.local_llm_use_gpu,
     ai_rewrite_skill:
       values.ai_rewrite_skill.length > 0 ? values.ai_rewrite_skill : null,
     whisper_prompt_prefix: values.whisper_prompt_prefix,
-    transcription_dictionary_path:
-      values.transcription_dictionary_path.length > 0
-        ? values.transcription_dictionary_path
-        : null,
     audio_preprocess_enabled: values.audio_preprocess_enabled,
     audio_noise_reduction_enabled: values.audio_noise_reduction_enabled,
     vad_pre_speech_buffer_ms: values.vad_pre_speech_buffer_ms,
@@ -78,6 +89,11 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     stt_idle_unload_sec: values.stt_idle_unload_sec,
     llm_idle_unload_sec: values.llm_idle_unload_sec,
     prewarm_local_models_at_startup: values.prewarm_local_models_at_startup,
+    weak_pc_mode: values.weak_pc_mode,
+    weak_pc_spill_to_disk: values.weak_pc_spill_to_disk,
+    weak_pc_ram_segment_cap: values.weak_pc_ram_segment_cap,
+    weak_pc_max_disk_queue_mb: values.weak_pc_max_disk_queue_mb,
+    weak_pc_reduce_prewarm: values.weak_pc_reduce_prewarm,
   };
 }
 
@@ -89,10 +105,12 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.ptt_hold !== current.ptt_hold ||
     patch.recording_indicator !==
       (current.recording_indicator ?? current.live_dictation_field_indicator) ||
+    patch.abort_on_focus_loss !== (current.abort_on_focus_loss ?? true) ||
     patch.microphone_device !== current.microphone_device ||
     patch.language !== current.language ||
     patch.transcription_provider !== current.transcription_provider ||
-    patch.local_stt_model !== current.local_stt_model ||
+    patch.local_stt_family !== current.local_stt_family ||
+    patch.local_stt_quant !== current.local_stt_quant ||
     patch.local_whisper_use_gpu !== current.local_whisper_use_gpu ||
     patch.local_whisper_beam_size !== current.local_whisper_beam_size ||
     patch.text_rewrite_provider !== current.text_rewrite_provider ||
@@ -100,7 +118,6 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.local_llm_use_gpu !== current.local_llm_use_gpu ||
     patch.ai_rewrite_skill !== current.ai_rewrite_skill ||
     patch.whisper_prompt_prefix !== current.whisper_prompt_prefix ||
-    patch.transcription_dictionary_path !== current.transcription_dictionary_path ||
     patch.audio_preprocess_enabled !== current.audio_preprocess_enabled ||
     patch.audio_noise_reduction_enabled !== current.audio_noise_reduction_enabled ||
     patch.vad_pre_speech_buffer_ms !== current.vad_pre_speech_buffer_ms ||
@@ -126,6 +143,11 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.stt_idle_unload_sec !== current.stt_idle_unload_sec ||
     patch.llm_idle_unload_sec !== current.llm_idle_unload_sec ||
     patch.prewarm_local_models_at_startup !== current.prewarm_local_models_at_startup ||
+    patch.weak_pc_mode !== current.weak_pc_mode ||
+    patch.weak_pc_spill_to_disk !== current.weak_pc_spill_to_disk ||
+    patch.weak_pc_ram_segment_cap !== current.weak_pc_ram_segment_cap ||
+    patch.weak_pc_max_disk_queue_mb !== current.weak_pc_max_disk_queue_mb ||
+    patch.weak_pc_reduce_prewarm !== current.weak_pc_reduce_prewarm ||
     values.api_key.trim().length > 0
   );
 }
@@ -190,6 +212,7 @@ export async function flushPersistSettings(options?: {
     setStatus(await getStatus());
     patchState({
       diagnostics: await getDiagnostics(),
+      dataStorageDir: await getDataStorageDir(),
       whisperModelsDir: await getWhisperModelsDir(),
       dictionaryPath: await getDictionaryPath(),
       whisperModels: await listLocalSttModels(),
@@ -197,8 +220,18 @@ export async function flushPersistSettings(options?: {
       llmModelsDir: await getLlmModelsDir(),
       llmModels: await listLlmModels(),
       llmModel: await getLlmModelStatus(),
+      sileroTeModel: await getSileroTeModelStatus().catch(() => null),
+      sileroVadModel: await getSileroVadModelStatus().catch(() => null),
       lastError: null,
     });
+    try {
+      const sttFamily = effectiveLocalSttFamily(nextSettings);
+      const sttQuant = effectiveLocalSttQuant(sttFamily, nextSettings.local_stt_quant);
+      const sttVariantInfo = await describeLocalSttVariant(sttFamily, sttQuant);
+      patchState({ sttVariantInfo });
+    } catch {
+      patchState({ sttVariantInfo: null });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const knownCodes = new Set([

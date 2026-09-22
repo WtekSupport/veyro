@@ -72,7 +72,7 @@ pub fn release_modifiers() -> Result<(), InjectionError> {
     release_modifier_keys(true)
 }
 
-/// Release typing modifiers during live dictation without touching toggle PTT keys.
+/// Release typing modifiers before injection without touching toggle PTT keys.
 ///
 /// Sending KEYUP for ScrollLock/CapsLock/NumLock while the user holds a toggle PTT hotkey
 /// makes the low-level hook emit `PttSignal::Released` and stops capture mid-utterance.

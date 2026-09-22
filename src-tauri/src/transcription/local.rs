@@ -10,7 +10,6 @@ use crate::audio::preprocess::audio_peak_rms;
 use crate::audio::resampler::TARGET_SAMPLE_RATE;
 use crate::audio::segment::AudioSegment;
 use crate::text::dictionary::Dictionary;
-use crate::text::corrections::apply_corrections;
 use crate::text::normalize::{clean_raw_transcription_with_dictionary, strip_prompt_echo};
 use crate::timed_text::TimedTextSegment;
 use crate::transcription::models::{TranscriptionOptions, TranscriptionResult, WhisperDecodingOptions};
@@ -235,82 +234,6 @@ impl SharedModel {
         Ok(meta(segment_count, &whisper_detected, timed_segments))
     }
 
-    fn transcribe_preview(
-        &self,
-        audio: &AudioSegment,
-        options: &TranscriptionOptions,
-    ) -> Result<String, TranscriptionError> {
-        if audio.duration_ms < crate::audio::preview::PREVIEW_MIN_AUDIO_MS {
-            return Ok(String::new());
-        }
-
-        self.ensure_loaded()?;
-
-        let dictionary = crate::text::dictionary::load_dictionary(options.dictionary_path.as_deref())
-            .unwrap_or_default();
-        let (peak, rms) = audio_peak_rms(audio);
-
-        let guard = self
-            .context
-            .lock()
-            .map_err(|_| TranscriptionError::InferenceFailed("model lock poisoned".to_string()))?;
-        let context = guard
-            .as_ref()
-            .ok_or_else(|| TranscriptionError::InferenceFailed("model not loaded".to_string()))?;
-
-        let permissive = merge_decoding_options(
-            Some(WhisperDecodingOptions::permissive()),
-            &dictionary,
-        );
-        let (text, raw_segments, segment_count, detected_language, _timed) = self.decode_audio(
-            context,
-            audio,
-            options,
-            &permissive,
-            1,
-            DecodeProfile::Permissive,
-            false,
-            options.language.as_deref(),
-        )?;
-        let mut finalized = finalize_preview_text(&text, &dictionary, None);
-
-        if finalized.is_empty() && audio.duration_ms >= RETRY_MIN_DURATION_MS {
-            let language = options.language.clone().or(detected_language);
-            let (retry_text, retry_raw, retry_segments, _, _retry_timed) = self.decode_audio(
-                context,
-                audio,
-                options,
-                &permissive,
-                1,
-                DecodeProfile::Permissive,
-                false,
-                language.as_deref(),
-            )?;
-            finalized = finalize_preview_text(&retry_text, &dictionary, None);
-            if finalized.is_empty() {
-                warn!(
-                    duration_ms = audio.duration_ms,
-                    peak,
-                    rms,
-                    segments = retry_segments,
-                    raw = %retry_raw.join(" | "),
-                    "live preview whisper returned empty after retry"
-                );
-            }
-        } else if finalized.is_empty() {
-            warn!(
-                duration_ms = audio.duration_ms,
-                peak,
-                rms,
-                segments = segment_count,
-                raw = %raw_segments.join(" | "),
-                "live preview whisper returned empty"
-            );
-        }
-
-        Ok(finalized)
-    }
-
     fn decode_audio(
         &self,
         context: &WhisperContext,
@@ -429,15 +352,6 @@ fn finalize_local_text(text: &str, dictionary: &Dictionary, prompt: Option<&str>
     strip_prompt_echo(&text, prompt)
 }
 
-fn finalize_preview_text(text: &str, dictionary: &Dictionary, prompt: Option<&str>) -> String {
-    let text = text.trim();
-    if text.is_empty() {
-        return String::new();
-    }
-    let text = apply_corrections(text, &dictionary.corrections);
-    strip_prompt_echo(&text, prompt)
-}
-
 fn merge_decoding_options(
     options: Option<WhisperDecodingOptions>,
     dictionary: &Dictionary,
@@ -524,26 +438,6 @@ impl TranscriptionProvider for LocalWhisperProvider {
         })
         .await
         .map_err(|error| TranscriptionError::InferenceFailed(error.to_string()))?
-    }
-
-    async fn transcribe_preview(
-        &self,
-        audio: AudioSegment,
-        options: TranscriptionOptions,
-    ) -> Result<Option<String>, TranscriptionError> {
-        self.transcribe_preview_sync(audio, options)
-    }
-
-    fn transcribe_preview_sync(
-        &self,
-        audio: AudioSegment,
-        options: TranscriptionOptions,
-    ) -> Result<Option<String>, TranscriptionError> {
-        if self.cancel.is_cancelled() {
-            return Err(TranscriptionError::Cancelled);
-        }
-        let text = self.model.transcribe_preview(&audio, &options)?;
-        Ok(if text.is_empty() { None } else { Some(text) })
     }
 
     async fn unload(&self) -> Result<(), TranscriptionError> {
