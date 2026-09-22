@@ -220,6 +220,7 @@ fn prepare_transcription_for_processing(
 mod tests {
     use super::*;
     use crate::settings::AppSettings;
+    use crate::text::dictionary::load_dictionary;
     use crate::timed_text::TimedTextSegment;
 
     fn seg(text: &str, start: u64, end: u64) -> TimedTextSegment {
