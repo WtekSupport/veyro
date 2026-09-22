@@ -2,8 +2,8 @@ html,
 body {
   margin: 0;
   padding: 0;
-  width: 100%;
-  height: 100%;
+  width: fit-content;
+  height: fit-content;
   background: transparent !important;
   overflow: hidden;
 }
@@ -13,7 +13,9 @@ body {
   padding: 0;
   background: transparent;
   overflow: hidden;
-  display: inline-block;
+  display: block;
+  width: fit-content;
+  height: fit-content;
 }
 
 .overlay-panel {
@@ -22,9 +24,8 @@ body {
   align-items: flex-end;
   justify-content: flex-start;
   gap: 4px;
-  width: 100%;
-  min-height: 100%;
-  max-width: 280px;
+  width: fit-content;
+  min-height: 0;
 }
 
 .overlay-rec {

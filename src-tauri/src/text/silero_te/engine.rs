@@ -146,8 +146,10 @@ impl SileroTeEngine {
 
 #[cfg(feature = "silero-te")]
 fn tensor_from_ivalue(value: tch::IValue) -> Result<tch::Tensor, String> {
+    use tch::{Kind, Tensor};
     match value {
         tch::IValue::Tensor(tensor) => Ok(tensor),
+        tch::IValue::IntList(ids) => Ok(Tensor::from_slice(&ids).to_kind(Kind::Int64)),
         other => Err(format!("expected tensor output, got {other:?}")),
     }
 }
