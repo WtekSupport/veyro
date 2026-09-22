@@ -59,23 +59,48 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --no-default-features --lib
-      - name: Install cmake (sherpa-onnx)
-        run: sudo apt-get install -y cmake
-      - name: Sanitize partial sherpa prebuilt from rust-cache
+      - name: Lint Silero VAD (lib)
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --no-default-features --features vad-silero --lib
+
+  rust-sherpa:
+    name: rust-sherpa
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: false
+          shared-key: sherpa-1.13.8-v3
+      - name: Install Linux build deps (minimal)
         run: |
-          LIB_DIR="target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-linux-x64-shared-lib/lib"
-          if [ -d target/sherpa-onnx-prebuilt ] && [ ! -f "$LIB_DIR/libsherpa-onnx-c-api.so" ]; then
-            rm -rf target/sherpa-onnx-prebuilt
-            cargo clean -p sherpa-onnx-sys
-          fi
-      - name: Build sherpa stack (download prebuilt when missing)
-        run: cargo build --no-default-features --features local-sherpa-stt,vad-silero --lib
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libasound2-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libsecret-1-dev \
+            libssl-dev \
+            libxdo-dev \
+            patchelf \
+            cmake
+      - name: Fresh sherpa prebuilt (avoid partial rust-cache trees)
+        run: rm -rf target/sherpa-onnx-prebuilt
       - run: cargo test --no-default-features --features local-sherpa-stt,vad-silero --lib
       - name: Lint sherpa STT (lib)
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --no-default-features --features local-sherpa-stt --lib
-      - name: Lint Silero VAD (lib)
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo check --no-default-features --features vad-silero --lib
