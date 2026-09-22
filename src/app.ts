@@ -90,6 +90,7 @@ import {
   bindSegmentationMsSliders,
   readWeakPcFormFields,
   renderSettingsForm,
+  updateDataStoragePathDom,
   renderTabBar,
   settingsToForm,
   textModeHintKey,
@@ -986,8 +987,10 @@ function bindEvents(): void {
           transcription_dictionary_path: null,
         });
         setSettings(nextSettings);
+        const dataStorageDir = await getDataStorageDir();
+        updateDataStoragePathDom(dataStorageDir);
         patchState({
-          dataStorageDir: await getDataStorageDir(),
+          dataStorageDir,
           whisperModelsDir: await getWhisperModelsDir(),
           dictionaryPath: await getDictionaryPath(),
           llmModelsDir: await getLlmModelsDir(),

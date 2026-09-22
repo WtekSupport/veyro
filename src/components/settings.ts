@@ -252,7 +252,7 @@ export function settingsToForm(
       settings.recording_indicator ??
       settings.live_dictation_field_indicator ??
       true,
-    abort_on_focus_loss: settings.abort_on_focus_loss ?? true,
+    abort_on_focus_loss: settings.abort_on_focus_loss ?? false,
     microphone_device: settings.microphone_device ?? "",
     language: settings.language ?? "auto",
     injection_mode: settings.injection_mode,
@@ -724,12 +724,15 @@ export function renderStatusQuickSettingsPopover(
             </select>
           </label>
 
-          <label class="field">
+          <div class="field status-quick-settings-storage">
             <span>${escapeHtml(t("settings.dataStorage"))}</span>
-            <button type="button" class="btn-secondary" data-pick-data-storage-dir>
-              ${escapeHtml(t("settings.dataStoragePick"))}
-            </button>
-          </label>
+            ${renderDataStoragePath(values.data_storage_dir)}
+            <div class="field-row">
+              <button type="button" class="btn-secondary" data-pick-data-storage-dir>
+                ${escapeHtml(t("settings.dataStoragePick"))}
+              </button>
+            </div>
+          </div>
 
           ${renderWeakPcExpertSettings({
             weak_pc_mode: values.weak_pc_mode,
@@ -882,11 +885,6 @@ export function renderSettingsForm(
             <input name="recording_indicator" type="checkbox" ${values.recording_indicator ? "checked" : ""} />
             <span>${escapeHtml(t("settings.recordingIndicator"))}</span>
           </label>
-
-          <label class="field checkbox voice-abort-focus-loss-toggle">
-            <input name="abort_on_focus_loss" type="checkbox" ${values.abort_on_focus_loss ? "checked" : ""} />
-            <span>${escapeHtml(t("settings.abortOnFocusLoss"))}</span>
-          </label>
           ${
             diagnostics?.capslock_ptt_supported
               ? `<label class="field checkbox ptt-only voice-capslock-toggle" ${values.push_to_talk ? "" : "hidden"}>
@@ -898,6 +896,12 @@ export function renderSettingsForm(
           </label>`
               : ""
           }
+        </div>
+        <div class="field-grid voice-focus-loss-row">
+          <label class="field checkbox voice-abort-focus-loss-toggle">
+            <input name="abort_on_focus_loss" type="checkbox" ${values.abort_on_focus_loss ? "checked" : ""} />
+            <span>${escapeHtml(t("settings.abortOnFocusLoss"))}</span>
+          </label>
         </div>
         </section>
 
@@ -1290,6 +1294,23 @@ export function textModeHintKey(mode: TextProcessingMode): MessageKey {
 }
 
 const DEVICE_LABEL_MAX = 34;
+
+function renderDataStoragePath(resolvedPath: string): string {
+  const path = resolvedPath.trim();
+  const text = path.length > 0 ? path : t("settings.dataStoragePlaceholder");
+  const title = path.length > 0 ? path : t("settings.dataStoragePlaceholder");
+  return `<p class="data-storage-path" data-data-storage-path title="${escapeHtml(title)}">${escapeHtml(text)}</p>`;
+}
+
+export function updateDataStoragePathDom(resolvedPath: string): void {
+  const path = resolvedPath.trim();
+  const text = path.length > 0 ? path : t("settings.dataStoragePlaceholder");
+  const title = path.length > 0 ? path : t("settings.dataStoragePlaceholder");
+  document.querySelectorAll<HTMLElement>("[data-data-storage-path]").forEach((element) => {
+    element.textContent = text;
+    element.title = title;
+  });
+}
 
 /** Matches validation in `src-tauri/src/settings/config.rs`. */
 const SEGMENTATION_MS_LIMITS = {

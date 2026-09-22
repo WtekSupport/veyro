@@ -275,13 +275,18 @@ fn apply_basic_speech_cleanup_block(text: &str) -> String {
 
 /// Lowercase spurious mid-sentence capitals from STT / Silero TE (keep abbrevs & sentence starts).
 pub fn fix_spurious_mid_sentence_capitals(text: &str) -> String {
+    fix_spurious_mid_sentence_capitals_from(text, true)
+}
+
+/// Same as [`fix_spurious_mid_sentence_capitals`], but the first word may not start a sentence
+/// (continued dictation chunk / injection buffer).
+pub fn fix_spurious_mid_sentence_capitals_from(text: &str, mut allow_capital: bool) -> String {
     if text.is_empty() {
         return String::new();
     }
 
     let mut out = String::new();
     let mut chars = text.chars().peekable();
-    let mut allow_capital = true;
 
     while let Some(&ch) = chars.peek() {
         if ch.is_whitespace() {
@@ -293,7 +298,7 @@ pub fn fix_spurious_mid_sentence_capitals(text: &str) -> String {
                 ws.push(chars.next().unwrap());
             }
             if ws.contains("\n\n") {
-                allow_capital = true;
+                allow_capital = trailing_text_ends_sentence(&out);
             }
             out.push_str(&ws);
             continue;
@@ -324,6 +329,22 @@ pub fn fix_spurious_mid_sentence_capitals(text: &str) -> String {
     }
 
     out
+}
+
+/// Polish text injected after an earlier block in the same dictation session (no leading capital).
+pub fn polish_continuation_injection(text: &str) -> String {
+    fix_spurious_mid_sentence_capitals_from(text, false)
+}
+
+fn trailing_text_ends_sentence(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let Some(last_word) = trimmed.split_whitespace().last() else {
+        return true;
+    };
+    word_ends_sentence(last_word)
 }
 
 fn split_word_affixes(word: &str) -> (String, String, String) {
@@ -537,5 +558,32 @@ mod tests {
             fix_spurious_mid_sentence_capitals("конец.\n\nНовый абзац"),
             "конец.\n\nНовый абзац"
         );
+    }
+
+    #[test]
+    fn does_not_capitalize_after_soft_paragraph_wrap_without_sentence_end() {
+        let wrapped = "один два три\n\nчетыре пять";
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals(wrapped),
+            "один два три\n\nчетыре пять"
+        );
+    }
+
+    #[test]
+    fn continuation_chunk_lowercases_leading_word() {
+        assert_eq!(
+            polish_continuation_injection("Так это оно по идее"),
+            "так это оно по идее"
+        );
+    }
+
+    #[test]
+    fn fixes_user_example_style_run_on_text() {
+        let raw = "Это все понятно да Так это оно по идее просто надо вбрасывать модели попроще Все такое Ну вот, вот";
+        let out = fix_spurious_mid_sentence_capitals(raw);
+        assert!(!out.contains(" да Так "), "out: {out}");
+        assert!(!out.contains(" попроще Все "), "out: {out}");
+        assert!(!out.contains(" такое Ну "), "out: {out}");
+        assert!(out.starts_with("Это"), "out: {out}");
     }
 }

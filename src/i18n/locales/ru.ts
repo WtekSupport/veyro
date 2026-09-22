@@ -125,7 +125,7 @@ export const ru: Record<MessageKey, string> = {
   "settings.ptt": "Разговор по кнопке",
   "settings.pttHold": "Удерживать",
   "settings.recordingIndicator": "Индикация записи",
-  "settings.abortOnFocusLoss": "Контроль фокуса",
+  "settings.abortOnFocusLoss": "Прерывать при потере фокуса",
   "settings.modePtt": "PTT",
   "settings.modeContinuous": "Непрерывный",
   "settings.modeHintPtt": "Режим PTT: удерживайте горячую клавишу во время речи, отпустите для распознавания и вставки.",
@@ -437,6 +437,12 @@ export const ru: Record<MessageKey, string> = {
   "activity.ai.cancelled": "ИИ: распознавание отменено",
   "activity.dictation.aborted_focus_loss":
     "Диктовка прервана: поле ввода потеряло фокус (сессия {session_id})",
+  "activity.dictation.defer_focus_loss":
+    "Диктовка: фокус ушёл с поля — текст копится в буфере до возврата",
+  "activity.inject.deferred":
+    "Вставка отложена: {chars} симв. в буфере (фокус не на поле)",
+  "activity.inject.defer_flushed":
+    "Буфер сброшен в поле ({chars} симв.)",
   "activity.dictation.session_skipped":
     "Диктовка: пропущена работа из очереди (сессия {session_id})",
   "activity.ai.empty": "ИИ: пустой текст после очистки",

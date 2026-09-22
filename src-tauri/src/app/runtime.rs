@@ -935,8 +935,39 @@ async fn process_one_segment(
     }
 
     normalized = ensure_spaces_after_punctuation(&normalized);
+    let continuation_outputs = dictation_session.injection_count()
+        + app
+            .try_state::<Arc<AppContext>>()
+            .map(|ctx| ctx.focus_defer_buffer.segment_count())
+            .unwrap_or(0);
+    if continuation_outputs > 0 {
+        normalized = crate::text::basic_cleanup::polish_continuation_injection(&normalized);
+    }
     normalized = ensure_trailing_block_separator(&normalized);
     let injected_char_count = normalized.chars().count() as u32;
+
+    if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
+        if ctx.should_defer_injection() {
+            ctx.append_deferred_injection(
+                normalized.clone(),
+                processed.press_enter,
+                defer_ai_postprocess,
+            );
+            log_activity(
+                &activity_log,
+                &dictation_activity_ms,
+                Some(&app),
+                ActivityLevel::Info,
+                "activity.inject.deferred",
+                json!({ "chars": injected_char_count }),
+            );
+            if let Ok(mut guard) = last_whisper_context.lock() {
+                *guard = transcription.text.trim().to_string();
+            }
+            finish(&pending, &app, &controller).await;
+            return;
+        }
+    }
 
     let injection_result = injector
         .insert_text(&normalized, settings.injection_mode_for_host())
@@ -954,6 +985,8 @@ async fn process_one_segment(
         .await;
         return;
     }
+
+    dictation_session.record_injection();
 
     if processed.press_enter && !defer_ai_postprocess {
         if let Err(error) = injector.send_enter().await {
@@ -1097,6 +1130,10 @@ async fn try_finish_ptt_postprocess(
     };
 
     if ctx.runtime.pending_count() > 0 {
+        return;
+    }
+
+    if ctx.focus_defer_buffer.has_pending() {
         return;
     }
 
@@ -1442,6 +1479,104 @@ impl From<crate::text::TextProcessingError> for AppError {
     fn from(error: crate::text::TextProcessingError) -> Self {
         AppError::Internal(error.to_string())
     }
+}
+
+pub async fn flush_focus_defer_buffer(app: &AppHandle, ctx: &Arc<AppContext>) {
+    #[cfg(windows)]
+    if !crate::injection::focus_target::focus_target_matches() {
+        return;
+    }
+    let Some((text, press_enter)) = ctx.focus_defer_buffer.take_for_flush() else {
+        return;
+    };
+    if text.is_empty() {
+        ctx.maybe_stop_focus_watch();
+        return;
+    }
+
+    let controller = ctx.controller.clone();
+    let activity_log = ctx.activity_log.clone();
+    let dictation_activity_ms = ctx.llm_dictation_activity_ms.clone();
+    let llm_engine = ctx.llm_engine.clone();
+    let http = ctx.http.clone();
+
+    let settings = match controller.lock() {
+        Ok(c) => c.settings().clone(),
+        Err(_) => {
+            ctx.focus_defer_buffer.push_prepared(text, press_enter);
+            return;
+        }
+    };
+    let injector = ctx.runtime.injector();
+    let char_count = text.chars().count() as u32;
+
+    let _ = with_controller(&controller, app, |controller, handle| {
+        controller.transition_for_injection(handle)
+    });
+    tray::menu::refresh_tray_menu(app);
+
+    let injection_result = injector
+        .insert_text(&text, settings.injection_mode_for_host())
+        .await;
+
+    if let Err(error) = injection_result {
+        warn!("focus defer flush failed: {error}");
+        ctx.focus_defer_buffer.push_prepared(text, press_enter);
+        log_activity(
+            &activity_log,
+            &dictation_activity_ms,
+            Some(app),
+            ActivityLevel::Error,
+            "activity.pipeline.error",
+            json!({ "error": error.to_string() }),
+        );
+        let _ = with_controller(&controller, app, |controller, handle| {
+            controller.recover_to_ready(handle)
+        });
+        return;
+    }
+
+    ctx.dictation_session.record_injection();
+
+    if press_enter {
+        if let Err(error) = injector.send_enter().await {
+            warn!("focus defer flush enter failed: {error}");
+        }
+    }
+
+    log_activity(
+        &activity_log,
+        &dictation_activity_ms,
+        Some(app),
+        ActivityLevel::Info,
+        "activity.inject.defer_flushed",
+        json!({ "chars": char_count }),
+    );
+    notify_localized(
+        app,
+        &settings,
+        "notify.inserted",
+        &[("count", &char_count.to_string())],
+    );
+    emit_injection_completed(app);
+
+    try_finish_ptt_postprocess(
+        app,
+        &controller,
+        &injector,
+        &llm_engine,
+        &activity_log,
+        &dictation_activity_ms,
+        &http,
+    )
+    .await;
+
+    if ctx.runtime.pending_count() == 0 {
+        let _ = with_controller(&controller, app, |controller, handle| {
+            controller.recover_after_segment(handle)
+        });
+    }
+    ctx.maybe_stop_focus_watch();
 }
 
 fn maybe_stop_focus_watch(app: &AppHandle) {

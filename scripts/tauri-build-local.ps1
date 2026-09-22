@@ -1,13 +1,24 @@
 # Release build with local Whisper (whisper-rs). Ensures CMake is available first.
+param(
+    [switch]$SkipVersionBump
+)
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
 
-& node (Join-Path $PSScriptRoot "bump-version.mjs") prod
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+if (-not $SkipVersionBump) {
+    & node (Join-Path $PSScriptRoot "bump-version.mjs") prod
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+} else {
+    & node (Join-Path $PSScriptRoot "sync-version.mjs")
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    Write-Host "Release build: keeping version from version.json (SkipVersionBump)."
 }
 
 . (Join-Path $PSScriptRoot "updater-signing-env.ps1")
