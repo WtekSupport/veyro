@@ -1,8 +1,13 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
+#[cfg(windows)]
+use std::thread::{self};
 use std::time::Duration;
 
+#[cfg(windows)]
 use super::focus_target;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
