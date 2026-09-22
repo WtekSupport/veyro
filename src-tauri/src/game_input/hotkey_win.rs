@@ -231,7 +231,27 @@ fn emit_ptt_toggle_stop() {
     audio_gate::try_send_signal(crate::game_input::PttSignal::ToggleStop);
 }
 
+/// Hold-mode PTT can miss key-up after Alt+Tab; resync before accepting a new edge.
+fn reconcile_ptt_held_with_physical_binding() {
+    if !runtime_ptt_hold() {
+        return;
+    }
+    let Some(binding) = current_binding() else {
+        return;
+    };
+    if binding_state_win::binding_pressed(&binding) {
+        return;
+    }
+    if PTT_HELD
+        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        audio_gate::try_send_signal(crate::game_input::PttSignal::Released);
+    }
+}
+
 fn emit_ptt_pressed() {
+    reconcile_ptt_held_with_physical_binding();
     if PTT_HELD.load(Ordering::Acquire) {
         // Toggle keys (ScrollLock/CapsLock) can miss key-up; still deliver the press edge.
         if !runtime_ptt_hold() {
@@ -537,6 +557,8 @@ fn handle_hook_key_event(event: KeyEvent) {
     let Some((binding, _block_system)) = current_runtime_config() else {
         return;
     };
+
+    reconcile_ptt_held_with_physical_binding();
 
     let Ok(mut state) = HOOK_COMBO_STATE.lock() else {
         return;

@@ -19,9 +19,9 @@ struct WatchState {
 
 static WATCH: Mutex<Option<WatchState>> = Mutex::new(None);
 
-/// Poll foreground/focus vs captured injection target; fire `on_lost` once per session.
+/// Poll foreground/focus vs captured injection target.
 #[cfg(windows)]
-pub fn start_focus_watch(session_id: u64, on_lost: Box<dyn FnOnce() + Send>) {
+pub fn start_focus_watch_abort(session_id: u64, on_lost: Box<dyn FnOnce() + Send>) {
     stop_focus_watch();
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -60,6 +60,57 @@ pub fn start_focus_watch(session_id: u64, on_lost: Box<dyn FnOnce() + Send>) {
             handle: Some(handle),
         });
     }
+}
+
+/// Continuous poll: `on_lost` / `on_regained` on focus transitions until `stop_focus_watch`.
+#[cfg(windows)]
+pub fn start_focus_watch_defer(
+    on_lost: Box<dyn Fn() + Send + 'static>,
+    on_regained: Box<dyn Fn() + Send + 'static>,
+) {
+    stop_focus_watch();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = Arc::clone(&stop);
+
+    let handle = thread::spawn(move || {
+        let mut was_matching = focus_target::focus_target_matches();
+        while !stop_worker.load(Ordering::SeqCst) {
+            thread::sleep(POLL_INTERVAL);
+            if stop_worker.load(Ordering::SeqCst) {
+                break;
+            }
+            let matching = focus_target::focus_target_matches();
+            if was_matching && !matching {
+                on_lost();
+            } else if !was_matching && matching {
+                on_regained();
+            }
+            was_matching = matching;
+        }
+    });
+
+    if let Ok(mut guard) = WATCH.lock() {
+        *guard = Some(WatchState {
+            stop,
+            handle: Some(handle),
+        });
+    }
+}
+
+#[cfg(not(windows))]
+pub fn start_focus_watch_abort(_session_id: u64, _on_lost: Box<dyn FnOnce() + Send>) {}
+
+#[cfg(not(windows))]
+pub fn start_focus_watch_defer(
+    _on_lost: Box<dyn Fn() + Send + 'static>,
+    _on_regained: Box<dyn Fn() + Send + 'static>,
+) {}
+
+/// Legacy entry: abort-on-loss one-shot (kept for call-site clarity).
+#[cfg(windows)]
+pub fn start_focus_watch(session_id: u64, on_lost: Box<dyn FnOnce() + Send>) {
+    start_focus_watch_abort(session_id, on_lost);
 }
 
 #[cfg(not(windows))]

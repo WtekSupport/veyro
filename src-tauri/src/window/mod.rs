@@ -26,8 +26,8 @@ const ABOUT_WINDOW_WIDTH: f64 = 360.0;
 const ABOUT_WINDOW_HEIGHT: f64 = 560.0;
 const INIT_WINDOW_WIDTH: f64 = 320.0;
 const INIT_WINDOW_HEIGHT: f64 = 132.0;
-const OVERLAY_WINDOW_WIDTH: f64 = 280.0;
-const OVERLAY_WINDOW_HEIGHT: f64 = 56.0;
+const OVERLAY_WINDOW_WIDTH: f64 = 140.0;
+const OVERLAY_WINDOW_HEIGHT: f64 = 40.0;
 const OVERLAY_CORNER_MARGIN: f64 = 16.0;
 /// Matches frontend `--bg-deep` (#0d0d0d).
 const SETTINGS_WINDOW_BG: Color = Color(13, 13, 13, 255);
@@ -717,8 +717,13 @@ fn configure_overlay_extended_style(_window: &WebviewWindow) {}
 #[cfg(windows)]
 fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+    use windows::Win32::Graphics::Dwm::{
+        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE,
+    };
     use windows::Win32::UI::Controls::MARGINS;
+
+    /// Win11+ draws an opaque Mica/acrylic plate unless backdrop is disabled.
+    const DWMSBT_NONE: i32 = 3;
 
     let Ok(raw) = window.hwnd() else {
         return;
@@ -730,7 +735,14 @@ fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
         cyTopHeight: -1,
         cyBottomHeight: -1,
     };
+    let backdrop_none = DWMSBT_NONE;
     unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            (&backdrop_none as *const i32).cast(),
+            std::mem::size_of::<i32>() as u32,
+        );
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
 }

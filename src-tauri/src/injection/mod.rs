@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub mod focus_defer_buffer;
 pub mod focus_target;
 pub mod focus_watch;
 pub mod injector;

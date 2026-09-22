@@ -594,6 +594,15 @@ body {
   border: none;
 }
 
+.status-quick-settings-storage .data-storage-path {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-muted, #a8a8a8);
+  word-break: break-all;
+}
+
 .status-quick-settings-body {
   display: flex;
   flex-direction: column;
@@ -1120,6 +1129,16 @@ body {
 .tab-panel--voice .settings-section--activation .voice-capslock-toggle {
   grid-column: 1 / -1;
   grid-row: 3;
+}
+
+.tab-panel--voice .settings-section--activation .voice-focus-loss-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.tab-panel--voice .settings-section--activation .voice-abort-focus-loss-toggle {
+  grid-column: 1;
 }
 
 .tab-panel--voice .voice-ptt-row:has(.voice-hotkey-field[hidden]):not(:has(.voice-ptt-hold-toggle:not([hidden]))) {

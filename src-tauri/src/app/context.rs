@@ -16,6 +16,7 @@ use crate::app::events::emit_activity_log;
 use crate::app::runtime::PipelineRuntime;
 use crate::audio::monitor::MicMonitor;
 use crate::audio::pipeline::AudioPipeline;
+use crate::injection::focus_defer_buffer::FocusDeferBuffer;
 use crate::injection::TextInjector;
 use crate::app::controller::SettingsUpdatePlan;
 use crate::app::model_idle::{dictation_activity_now_ms, note_dictation_activity};
@@ -42,6 +43,7 @@ pub struct AppContext {
     pub llm_dictation_activity_ms: Arc<AtomicU64>,
     pub ptt_postprocess: PttPostprocessSession,
     pub dictation_session: Arc<DictationSession>,
+    pub focus_defer_buffer: FocusDeferBuffer,
 }
 
 impl AppContext {
@@ -90,36 +92,134 @@ impl AppContext {
             llm_dictation_activity_ms,
             ptt_postprocess: PttPostprocessSession::new(),
             dictation_session,
+            focus_defer_buffer: FocusDeferBuffer::new(),
+        }
+    }
+
+    fn defer_injection_without_abort(&self) -> bool {
+        self.controller
+            .try_lock()
+            .ok()
+            .is_some_and(|c| !c.settings().abort_on_focus_loss)
+    }
+
+    fn capture_injection_target_and_sync_buffer(&self) {
+        let prev_target = crate::injection::focus_target::injection_target_hwnd();
+        #[cfg(windows)]
+        if self.defer_injection_without_abort()
+            && prev_target != 0
+            && !crate::injection::focus_target::focus_target_matches()
+        {
+            // PTT/VAD while another window is focused: keep the original field target.
+            return;
+        }
+        crate::injection::focus_target::capture_injection_target();
+        let next_target = crate::injection::focus_target::injection_target_hwnd();
+        if prev_target != 0 && next_target != 0 && prev_target != next_target {
+            self.focus_defer_buffer.clear();
         }
     }
 
     /// Starts a new dictation session (PTT press or idle→listening VAD).
     pub fn begin_dictation_session(&self, app: &AppHandle) -> u64 {
         let session_id = self.dictation_session.begin_session();
-        crate::injection::focus_target::capture_injection_target();
+        self.capture_injection_target_and_sync_buffer();
         self.maybe_start_focus_watch(app, session_id);
         session_id
     }
 
     pub fn maybe_start_focus_watch(&self, app: &AppHandle, session_id: u64) {
-        let enabled = self
+        let abort_on_loss = self
             .controller
             .try_lock()
             .ok()
             .is_some_and(|c| c.settings().abort_on_focus_loss);
-        if !enabled {
+        let app_abort = app.clone();
+        if abort_on_loss {
+            crate::injection::focus_watch::start_focus_watch_abort(session_id, Box::new(move || {
+                let Some(ctx) = app_abort.try_state::<Arc<AppContext>>() else {
+                    return;
+                };
+                ctx.inner().abort_dictation_on_focus_loss(&app_abort);
+            }));
             return;
         }
+
+        let app_lost = app.clone();
+        let app_regained = app.clone();
+        crate::injection::focus_watch::start_focus_watch_defer(
+            Box::new(move || {
+                let Some(ctx) = app_lost.try_state::<Arc<AppContext>>() else {
+                    return;
+                };
+                ctx.inner().on_focus_lost_defer(&app_lost);
+            }),
+            Box::new(move || {
+                let Some(ctx) = app_regained.try_state::<Arc<AppContext>>() else {
+                    return;
+                };
+                ctx.inner().schedule_flush_defer_buffer(&app_regained);
+            }),
+        );
+    }
+
+    pub fn should_defer_injection(&self) -> bool {
+        #[cfg(windows)]
+        {
+            let abort_on_loss = self
+                .controller
+                .try_lock()
+                .ok()
+                .is_some_and(|c| c.settings().abort_on_focus_loss);
+            if abort_on_loss {
+                return false;
+            }
+            !crate::injection::focus_target::focus_target_matches()
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = self;
+            false
+        }
+    }
+
+    pub fn on_focus_lost_defer(&self, app: &AppHandle) {
+        self.record_activity(
+            Some(app),
+            ActivityLevel::Info,
+            "activity.dictation.defer_focus_loss",
+            serde_json::json!({
+                "focus_hwnd": crate::injection::focus_target::injection_focus_hwnd(),
+            }),
+        );
+    }
+
+    pub fn schedule_flush_defer_buffer(&self, app: &AppHandle) {
         let app = app.clone();
-        crate::injection::focus_watch::start_focus_watch(session_id, Box::new(move || {
-            let Some(ctx) = app.try_state::<Arc<AppContext>>() else {
-                return;
-            };
-            ctx.inner().abort_dictation_on_focus_loss(&app);
-        }));
+        let ctx = app
+            .try_state::<Arc<AppContext>>()
+            .map(|state| state.inner().clone());
+        let Some(ctx) = ctx else {
+            return;
+        };
+        tauri::async_runtime::spawn(async move {
+            crate::app::runtime::flush_focus_defer_buffer(&app, &ctx).await;
+        });
+    }
+
+    pub fn append_deferred_injection(&self, normalized: String, press_enter: bool, defer_ai: bool) {
+        self.focus_defer_buffer
+            .push_prepared(normalized.clone(), press_enter);
+        if defer_ai {
+            self.ptt_postprocess
+                .record_phase1_injection(&normalized, press_enter);
+        }
     }
 
     pub fn maybe_stop_focus_watch(&self) {
+        if self.focus_defer_buffer.has_pending() {
+            return;
+        }
         if self.runtime.pending_count() > 0 {
             return;
         }
@@ -449,7 +549,7 @@ impl AppContext {
                 if was_ready && pending == 0 && !ptt_streaming {
                     ctx.begin_dictation_session(&app_handle);
                 } else {
-                    crate::injection::focus_target::capture_injection_target();
+                    ctx.capture_injection_target_and_sync_buffer();
                     let session_id = ctx.dictation_session.current_id();
                     if session_id == 0 {
                         ctx.begin_dictation_session(&app_handle);
@@ -581,6 +681,7 @@ impl AppContext {
         }
         self.root_cancel.cancel();
         self.ptt_postprocess.reset();
+        self.focus_defer_buffer.clear();
         if let Ok(audio) = self.audio.lock() {
             audio.set_ptt_vad_segments_on_silence(false);
         }
