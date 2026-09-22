@@ -25,9 +25,7 @@ impl DictationSession {
     }
 
     pub fn begin_session(&self) -> u64 {
-        let id = self.current_id.fetch_add(1, Ordering::SeqCst).saturating_add(1);
-        self.aborted_id.store(0, Ordering::SeqCst);
-        id
+        self.current_id.fetch_add(1, Ordering::SeqCst).saturating_add(1)
     }
 
     /// Marks the active session aborted. Returns the session id if one was active.
@@ -36,7 +34,9 @@ impl DictationSession {
         if current == 0 {
             return None;
         }
-        self.aborted_id.store(current, Ordering::SeqCst);
+        let _ = self
+            .aborted_id
+            .fetch_max(current, Ordering::SeqCst);
         Some(current)
     }
 
@@ -44,7 +44,7 @@ impl DictationSession {
         if session_id == 0 {
             return false;
         }
-        session_id == self.aborted_id.load(Ordering::SeqCst)
+        session_id <= self.aborted_id.load(Ordering::SeqCst)
     }
 }
 
