@@ -63,6 +63,8 @@ jobs:
         run: sudo apt-get install -y cmake
       - name: Drop stale sherpa prebuilt dir (rust-cache can restore partial trees)
         run: rm -rf target/sherpa-onnx-prebuilt
+      - name: Build sherpa prebuilt (link libs before test)
+        run: cargo build --no-default-features --features local-sherpa-stt,vad-silero --lib
       - run: cargo test --no-default-features --features local-sherpa-stt,vad-silero --lib
       - name: Lint sherpa STT (lib)
         env:
