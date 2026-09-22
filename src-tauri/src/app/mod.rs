@@ -1,5 +1,6 @@
 pub mod activity_log;
 pub mod context;
+pub mod dictation_session;
 pub mod memory;
 pub mod model_idle;
 pub mod controller;

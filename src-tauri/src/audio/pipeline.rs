@@ -18,37 +18,6 @@ const AUDIO_CHANNEL_CAPACITY: usize = 64;
 /// Time to wait for VAD to flush a PTT segment after key release.
 pub const PTT_FLUSH_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 
-type PreviewSenderSlot = Arc<Mutex<Option<Sender<AudioSegment>>>>;
-
-fn dispatch_preview_snapshot(
-    tx_slot: &PreviewSenderSlot,
-    detector: &VadDetector,
-    last_preview_at: &mut std::time::Instant,
-    preview_interval: std::time::Duration,
-) {
-    if last_preview_at.elapsed() < preview_interval {
-        return;
-    }
-    let Some(segment) = detector.preview_snapshot() else {
-        return;
-    };
-    let sender = tx_slot.lock().ok().and_then(|guard| guard.clone());
-    let Some(sender) = sender else {
-        return;
-    };
-    match sender.try_send(segment) {
-        Ok(()) => {
-            *last_preview_at = std::time::Instant::now();
-        }
-        Err(crossbeam_channel::TrySendError::Full(_)) => {
-            *last_preview_at = std::time::Instant::now();
-        }
-        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-            warn!("live preview channel disconnected");
-        }
-    }
-}
-
 enum AudioCommand {
     StartCapture {
         device_id: Option<String>,
@@ -93,7 +62,6 @@ pub struct AudioPipeline {
     ptt_flush_req_tx: Option<Sender<()>>,
     on_speech_started: Option<Arc<dyn Fn() + Send + Sync>>,
     on_speech_ended: Option<SegmentCallback>,
-    preview_sender: PreviewSenderSlot,
     mic_monitor: MicMonitor,
 }
 
@@ -140,7 +108,6 @@ impl AudioPipeline {
             ptt_flush_req_tx: None,
             on_speech_started: None,
             on_speech_ended: None,
-            preview_sender: Arc::new(Mutex::new(None)),
             mic_monitor: MicMonitor::new(),
         }
     }
@@ -169,14 +136,6 @@ impl AudioPipeline {
     pub fn set_ptt_vad_segments_on_silence(&self, enabled: bool) {
         self.ptt_vad_segments_on_silence
             .store(enabled, Ordering::SeqCst);
-    }
-
-    pub fn set_preview_sender(&mut self, sender: Sender<AudioSegment>) {
-        if let Ok(mut slot) = self.preview_sender.lock() {
-            *slot = Some(sender);
-        } else {
-            warn!("failed to store live preview sender: lock poisoned");
-        }
     }
 
     pub fn start(
@@ -475,27 +434,12 @@ impl AudioPipeline {
         let speech_active = Arc::clone(&self.speech_active);
         let on_speech_started = self.on_speech_started.clone();
         let on_speech_ended = self.on_speech_ended.clone();
-        let preview_sender = Arc::clone(&self.preview_sender);
-        if preview_sender
-            .lock()
-            .ok()
-            .and_then(|slot| slot.clone())
-            .is_none()
-        {
-            warn!("VAD worker started without live preview sender");
-        }
         let vad_config = self.vad_config.clone();
         let worker = std::thread::Builder::new()
             .name("vad-worker".into())
             .spawn(move || {
                 let mut detector = VadDetector::new(vad_config, sample_rate, channels);
                 let mut gate_was_active = ptt_gate.load(Ordering::SeqCst);
-                let preview_interval = std::time::Duration::from_millis(
-                    crate::audio::preview::PREVIEW_POLL_INTERVAL_MS,
-                );
-                let mut last_preview_at = std::time::Instant::now()
-                    .checked_sub(preview_interval)
-                    .unwrap_or_else(std::time::Instant::now);
                 if ptt_mode && gate_was_active {
                     detector.set_ptt_recording(true);
                 }
@@ -592,14 +536,6 @@ impl AudioPipeline {
                         Err(TryRecvError::Disconnected) => break,
                     }
 
-                    if !ptt_mode || ptt_gate.load(Ordering::SeqCst) {
-                        dispatch_preview_snapshot(
-                            &preview_sender,
-                            &detector,
-                            &mut last_preview_at,
-                            preview_interval,
-                        );
-                    }
                 }
 
                 if let Ok(Some(VadEvent::SpeechEnded(segment))) = detector.flush() {

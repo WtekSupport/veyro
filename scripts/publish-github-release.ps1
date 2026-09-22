@@ -1,114 +1,58 @@
-# Upload release/<semver>/ artifacts to GitHub Releases (Windows x64).
-# Requires: GITHUB_TOKEN (repo scope) or `gh auth token` if GitHub CLI is installed.
-
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Semver
+    [string] $Semver
 )
+
+# Publish a tagged GitHub Release from release/<semver>/ artifacts.
+# Requires: gh auth login (repo + write:packages if needed)
 
 $ErrorActionPreference = "Stop"
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$repo = "WtekSupport/veyro"
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $tag = "v$Semver"
-$root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$dir = Join-Path (Join-Path $root "release") $Semver
+$dir = Join-Path $repoRoot "release\$Semver"
 
-if (-not (Test-Path $dir)) {
-    Write-Error "Release folder not found: $dir"
+$ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+if ($ghCmd) {
+    $gh = $ghCmd.Source
+} elseif (Test-Path (Join-Path $repoRoot ".tools\gh\gh.exe")) {
+    $gh = Join-Path $repoRoot ".tools\gh\gh.exe"
+} else {
+    Write-Error "Install GitHub CLI: https://cli.github.com/"
 }
 
-$token = $env:GITHUB_TOKEN
-if (-not $token) {
-    $gh = Get-Command gh -ErrorAction SilentlyContinue
-    if ($gh) {
-        $token = (& gh auth token 2>$null).Trim()
-    }
+& $gh auth status | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Authenticate first: & `"$gh`" auth login"
+    exit 1
 }
-if (-not $token) {
-    Write-Error "Set GITHUB_TOKEN or install and authenticate GitHub CLI (gh auth login)."
-}
-
-$headers = @{
-    Authorization = "Bearer $token"
-    Accept        = "application/vnd.github+json"
-    "X-GitHub-Api-Version" = "2022-11-28"
-}
-
-function Invoke-GhApi {
-    param([string]$Method, [string]$Uri, $Body = $null, [hashtable]$ExtraHeaders = @{})
-    $h = $headers.Clone()
-    foreach ($k in $ExtraHeaders.Keys) { $h[$k] = $ExtraHeaders[$k] }
-    $params = @{ Method = $Method; Uri = $Uri; Headers = $h }
-    if ($null -ne $Body) { $params.Body = ($Body | ConvertTo-Json -Depth 8 -Compress) }
-    Invoke-RestMethod @params
-}
-
-function Get-ReleaseNotesFromChangelog {
-    param([string]$Version, [string]$ChangelogPath)
-    if (-not (Test-Path $ChangelogPath)) {
-        return "Windows installer, portable build, and updater manifest (``latest.json``)."
-    }
-    $text = Get-Content $ChangelogPath -Raw
-    $pattern = "(?ms)^## \[$([regex]::Escape($Version))\][^\r\n]*\r?\n(?<body>(?:- .+\r?\n)+)"
-    $match = [regex]::Match($text, $pattern)
-    if ($match.Success) {
-        return $match.Groups["body"].Value.TrimEnd()
-    }
-    return "Windows installer, portable build, and updater manifest (``latest.json``)."
-}
-
-$releaseNotes = Get-ReleaseNotesFromChangelog -Version $Semver -ChangelogPath (Join-Path $root "CHANGELOG.md")
-
-Write-Host "Creating release $tag ..."
-try {
-    Invoke-GhApi -Method POST -Uri "https://api.github.com/repos/$repo/releases" -Body @{
-        tag_name   = $tag
-        name       = "Veyro $Semver"
-        body       = $releaseNotes
-        draft      = $false
-        prerelease = $false
-    } | Out-Null
-} catch {
-    if ($_.Exception.Response.StatusCode.value__ -eq 422) {
-        Write-Host "Release $tag already exists; uploading assets."
-        $existing = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
-        Invoke-GhApi -Method PATCH -Uri "https://api.github.com/repos/$repo/releases/$($existing.id)" -Body @{
-            name = "Veyro $Semver"
-            body = $releaseNotes
-        } | Out-Null
-    } else {
-        throw
-    }
-}
-
-$release = Invoke-GhApi -Method GET -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
-$uploadBase = "https://uploads.github.com/repos/$repo/releases/$($release.id)/assets"
 
 $files = @(
-    "Veyro_${Semver}_x64-setup.exe",
-    "Veyro_${Semver}_x64-setup.exe.sig",
-    "Veyro_${Semver}_x64-portable.zip",
-    "latest.json"
+    (Join-Path $dir "Veyro_${Semver}_x64-setup.exe"),
+    (Join-Path $dir "Veyro_${Semver}_x64-setup.exe.sig"),
+    (Join-Path $dir "latest.json"),
+    (Join-Path $dir "Veyro_${Semver}_x64-portable.zip")
 )
-
-foreach ($name in $files) {
-    $path = Join-Path $dir $name
-    if (-not (Test-Path $path)) {
-        Write-Warning "Skip missing: $name"
-        continue
+foreach ($f in $files) {
+    if (-not (Test-Path $f)) {
+        Write-Error "Missing: $f (run npm run tauri:build)"
     }
-    $existingAssets = @($release.assets | Where-Object { $_.name -eq $name })
-    foreach ($asset in $existingAssets) {
-        Write-Host "Removing existing asset: $($asset.name) (id $($asset.id))"
-        Invoke-GhApi -Method DELETE -Uri "https://api.github.com/repos/$repo/releases/assets/$($asset.id)" | Out-Null
-    }
-    Write-Host "Uploading $name ..."
-    $encodedName = [System.Uri]::EscapeDataString($name)
-    $uri = "${uploadBase}?name=$encodedName"
-    Invoke-RestMethod -Method POST -Uri $uri -Headers @{
-        Authorization = "Bearer $token"
-        Accept        = "application/vnd.github+json"
-    } -InFile $path -ContentType "application/octet-stream" | Out-Null
 }
 
-Write-Host "Done: https://github.com/$repo/releases/tag/$tag"
+$notes = Join-Path $dir "RELEASE_NOTES.md"
+if (-not (Test-Path $notes)) {
+    Write-Error "Missing: $notes"
+}
+
+$releaseView = & $gh release view $tag --repo WtekSupport/veyro 2>&1
+if ($LASTEXITCODE -eq 0 -and $releaseView -notmatch "release not found") {
+    Write-Host "Uploading assets to existing $tag..."
+    & $gh release upload $tag @files --repo WtekSupport/veyro --clobber
+    exit $LASTEXITCODE
+}
+
+Write-Host "Creating $tag..."
+& $gh release create $tag @files `
+    --repo WtekSupport/veyro `
+    --title "Veyro $Semver" `
+    --notes-file $notes
+exit $LASTEXITCODE

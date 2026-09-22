@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::app::activity_log::{ActivityLevel, ActivityLog};
+use crate::app::dictation_session::DictationSession;
 use crate::app::model_idle::note_dictation_activity;
 use serde_json::{json, Value};
 use crate::app::context::AppContext;
@@ -54,12 +55,16 @@ struct SegmentJob {
     payload: SegmentPayload,
     settings: AppSettings,
     held_in_memory: bool,
+    session_id: u64,
 }
+
+const MAX_PENDING_SEGMENTS: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnqueueResult {
     Ok { pending: usize, spilled: bool },
     DiskQueueFull,
+    PendingQueueFull,
     QueueClosed,
 }
 
@@ -73,6 +78,7 @@ pub struct PipelineRuntime {
     queue_tx: UnboundedSender<SegmentJob>,
     activity_log: Arc<ActivityLog>,
     dictation_activity_ms: Arc<AtomicU64>,
+    dictation_session: Arc<DictationSession>,
 }
 
 impl PipelineRuntime {
@@ -82,14 +88,14 @@ impl PipelineRuntime {
         http: reqwest::Client,
         cancel: CancellationToken,
         activity_log: Arc<ActivityLog>,
-        llm_engine: LlmEngine,
+        llm_engine: Arc<RwLock<LlmEngine>>,
         dictation_activity_ms: Arc<AtomicU64>,
+        dictation_session: Arc<DictationSession>,
     ) -> Self {
         let pending = Arc::new(AtomicUsize::new(0));
         let memory_segments = Arc::new(AtomicUsize::new(0));
         let (queue_tx, mut queue_rx) = unbounded_channel();
         let transcriber = Arc::new(RwLock::new(transcriber));
-        let llm_engine = Arc::new(RwLock::new(llm_engine));
         let cancel = Arc::new(RwLock::new(cancel));
 
         let worker_transcriber = transcriber.clone();
@@ -102,6 +108,7 @@ impl PipelineRuntime {
         let worker_log = activity_log.clone();
         let worker_dictation_activity = dictation_activity_ms.clone();
         let worker_context = Arc::new(Mutex::new(String::new()));
+        let worker_dictation_session = dictation_session.clone();
 
         tauri::async_runtime::spawn(async move {
             while let Some(job) = queue_rx.recv().await {
@@ -122,6 +129,7 @@ impl PipelineRuntime {
                     worker_dictation_activity.clone(),
                     worker_context.clone(),
                     worker_llm_engine.clone(),
+                    worker_dictation_session.clone(),
                 )
                 .await;
             }
@@ -137,6 +145,7 @@ impl PipelineRuntime {
             queue_tx,
             activity_log,
             dictation_activity_ms,
+            dictation_session,
         }
     }
 
@@ -341,6 +350,20 @@ impl PipelineRuntime {
         duration_ms: u64,
         spilled: bool,
     ) -> EnqueueResult {
+        let max_pending = MAX_PENDING_SEGMENTS.max(settings.weak_pc_ram_segment_cap as usize * 2);
+        let current = self.pending.load(Ordering::SeqCst);
+        if current >= max_pending {
+            log_activity(
+                &self.activity_log,
+                &self.dictation_activity_ms,
+                Some(&app),
+                ActivityLevel::Warn,
+                "activity.segment_dropped_queue_full",
+                json!({ "ms": duration_ms, "pending": current, "max": max_pending }),
+            );
+            return EnqueueResult::PendingQueueFull;
+        }
+
         self.pending.fetch_add(1, Ordering::SeqCst);
         let queued = self.pending.load(Ordering::SeqCst);
         log_activity(
@@ -362,6 +385,7 @@ impl PipelineRuntime {
             );
         }
 
+        let session_id = self.dictation_session.current_id();
         if self
             .queue_tx
             .send(SegmentJob {
@@ -370,6 +394,7 @@ impl PipelineRuntime {
                 payload,
                 settings,
                 held_in_memory,
+                session_id,
             })
             .is_err()
         {
@@ -431,6 +456,14 @@ fn reload_stt_engine(
     info!("STT engine reloaded after transient OpenAI failure");
 }
 
+pub(crate) fn should_skip_dictation_job(
+    session: &DictationSession,
+    session_id: u64,
+    cancel: &CancellationToken,
+) -> bool {
+    cancel.is_cancelled() || session.is_session_aborted(session_id)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn process_one_segment(
     job: SegmentJob,
@@ -445,6 +478,7 @@ async fn process_one_segment(
     dictation_activity_ms: Arc<AtomicU64>,
     last_whisper_context: Arc<Mutex<String>>,
     llm_engine: Arc<RwLock<LlmEngine>>,
+    dictation_session: Arc<DictationSession>,
 ) {
     let SegmentJob {
         app,
@@ -452,6 +486,7 @@ async fn process_one_segment(
         payload,
         settings,
         held_in_memory,
+        session_id,
     } = job;
 
     let (mut segment, spill_path) = match payload {
@@ -474,7 +509,6 @@ async fn process_one_segment(
                 store.delete_pair_for_wav(&path);
             }
         }
-        clear_live_dictation_indicator(app, &injector).await;
         if pending.fetch_sub(1, Ordering::SeqCst) == 1 {
             let _ = with_controller(controller, app, |controller, handle| {
                 controller.recover_after_segment(handle)
@@ -490,6 +524,7 @@ async fn process_one_segment(
             )
             .await;
             tray::menu::refresh_tray_menu(app);
+            maybe_stop_focus_watch(app);
         }
     };
 
@@ -497,6 +532,20 @@ async fn process_one_segment(
         .read()
         .map(|guard| guard.child_token())
         .unwrap_or_else(|poisoned| poisoned.into_inner().child_token());
+
+    if should_skip_dictation_job(&dictation_session, session_id, &child_cancel) {
+        log_activity(
+            &activity_log,
+            &dictation_activity_ms,
+            Some(&app),
+            ActivityLevel::Warn,
+            "activity.dictation.session_skipped",
+            json!({ "session_id": session_id }),
+        );
+        clear_segment(&mut segment);
+        finish(&pending, &app, &controller).await;
+        return;
+    }
 
     if segment.is_empty() {
         log_activity(
@@ -530,7 +579,7 @@ async fn process_one_segment(
     notify_localized(&app, &settings, "notify.transcribing", &[]);
     tray::menu::refresh_tray_menu(&app);
 
-    if child_cancel.is_cancelled() {
+    if should_skip_dictation_job(&dictation_session, session_id, &child_cancel) {
         log_activity(
             &activity_log,
             &dictation_activity_ms,
@@ -687,14 +736,13 @@ async fn process_one_segment(
                 &pending,
                 &activity_log,
                 &dictation_activity_ms,
-                &injector,
             )
             .await;
             return;
         }
     };
 
-    if child_cancel.is_cancelled() {
+    if should_skip_dictation_job(&dictation_session, session_id, &child_cancel) {
         clear_segment(&mut segment);
         clear_segment(&mut captured);
         finish(&pending, &app, &controller).await;
@@ -721,6 +769,13 @@ async fn process_one_segment(
         );
     }
 
+    if should_skip_dictation_job(&dictation_session, session_id, &child_cancel) {
+        clear_segment(&mut segment);
+        clear_segment(&mut captured);
+        finish(&pending, &app, &controller).await;
+        return;
+    }
+
     if settings.text_processing_mode.uses_ai()
         && !defer_ai_postprocess
         && matches!(settings.text_rewrite_provider, TextRewriteProvider::Local)
@@ -733,7 +788,6 @@ async fn process_one_segment(
                 &pending,
                 &activity_log,
                 &dictation_activity_ms,
-                &injector,
             )
             .await;
             return;
@@ -765,7 +819,6 @@ async fn process_one_segment(
                 &pending,
                 &activity_log,
                 &dictation_activity_ms,
-                &injector,
             )
             .await;
             return;
@@ -876,25 +929,18 @@ async fn process_one_segment(
         json!({}),
     );
 
+    if should_skip_dictation_job(&dictation_session, session_id, &child_cancel) {
+        finish(&pending, &app, &controller).await;
+        return;
+    }
+
     normalized = ensure_spaces_after_punctuation(&normalized);
     normalized = ensure_trailing_block_separator(&normalized);
     let injected_char_count = normalized.chars().count() as u32;
 
-    let injection_result = if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
-        if ctx.live_dictation.has_injected() {
-            ctx.live_dictation
-                .finalize(&normalized, injector.clone(), &settings)
-                .await
-        } else {
-            injector
-                .insert_text(&normalized, settings.injection_mode_for_host())
-                .await
-        }
-    } else {
-        injector
-            .insert_text(&normalized, settings.injection_mode_for_host())
-            .await
-    };
+    let injection_result = injector
+        .insert_text(&normalized, settings.injection_mode_for_host())
+        .await;
 
     if let Err(error) = injection_result {
         handle_pipeline_error(
@@ -904,7 +950,6 @@ async fn process_one_segment(
             &pending,
             &activity_log,
             &dictation_activity_ms,
-            &injector,
         )
         .await;
         return;
@@ -919,7 +964,6 @@ async fn process_one_segment(
                 &pending,
                 &activity_log,
                 &dictation_activity_ms,
-                &injector,
             )
             .await;
             return;
@@ -1033,6 +1077,13 @@ async fn try_finish_ptt_postprocess(
     dictation_activity_ms: &AtomicU64,
     http: &reqwest::Client,
 ) {
+    if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
+        if ctx.runtime.cancel_token().is_cancelled() {
+            ctx.ptt_postprocess.reset();
+            return;
+        }
+    }
+
     let ptt_active = controller
         .lock()
         .ok()
@@ -1299,23 +1350,6 @@ async fn restore_phase1_injected_text(
     }
 }
 
-async fn clear_live_dictation_indicator(app: &AppHandle, injector: &Arc<dyn TextInjector>) {
-    let Some(ctx) = app.try_state::<Arc<AppContext>>() else {
-        return;
-    };
-    let settings = ctx
-        .controller
-        .lock()
-        .ok()
-        .map(|controller| controller.settings().clone());
-    let Some(settings) = settings else {
-        return;
-    };
-    ctx.live_dictation
-        .clear_field_indicator(injector.clone(), &settings)
-        .await;
-}
-
 fn notify_localized(
     app: &AppHandle,
     settings: &AppSettings,
@@ -1352,9 +1386,7 @@ async fn handle_pipeline_error(
     pending: &Arc<AtomicUsize>,
     activity_log: &ActivityLog,
     dictation_activity_ms: &AtomicU64,
-    injector: &Arc<dyn TextInjector>,
 ) {
-    clear_live_dictation_indicator(app, injector).await;
     warn!("pipeline error: {error}");
     let locale = controller
         .lock()
@@ -1409,5 +1441,35 @@ impl From<crate::injection::InjectionError> for AppError {
 impl From<crate::text::TextProcessingError> for AppError {
     fn from(error: crate::text::TextProcessingError) -> Self {
         AppError::Internal(error.to_string())
+    }
+}
+
+fn maybe_stop_focus_watch(app: &AppHandle) {
+    let Some(ctx) = app.try_state::<Arc<AppContext>>() else {
+        return;
+    };
+    ctx.maybe_stop_focus_watch();
+}
+
+#[cfg(test)]
+mod dictation_skip_tests {
+    use super::*;
+
+    #[test]
+    fn skip_when_session_aborted() {
+        let session = DictationSession::new();
+        let id = session.begin_session();
+        session.abort_current();
+        let cancel = CancellationToken::new();
+        assert!(should_skip_dictation_job(&session, id, &cancel));
+    }
+
+    #[test]
+    fn skip_when_cancelled() {
+        let session = DictationSession::new();
+        let id = session.begin_session();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        assert!(should_skip_dictation_job(&session, id, &cancel));
     }
 }

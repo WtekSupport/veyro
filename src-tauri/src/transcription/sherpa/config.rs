@@ -7,11 +7,6 @@ use sherpa_onnx::{
 use crate::settings::{AppSettings, SherpaOnnxLayout};
 use crate::transcription::local_stt_model_store::{effective_sherpa_bundle_dir, required_sherpa_files};
 
-#[derive(Debug, Clone, Copy)]
-pub struct SherpaBuildOptions {
-    pub preview: bool,
-}
-
 pub fn execution_provider(settings: &AppSettings) -> &'static str {
     if !settings.local_whisper_use_gpu {
         return "cpu";
@@ -34,7 +29,6 @@ pub fn execution_provider(settings: &AppSettings) -> &'static str {
 pub fn build_offline_config(
     settings: &AppSettings,
     _bundle_dir: &Path,
-    options: SherpaBuildOptions,
 ) -> Result<OfflineRecognizerConfig, String> {
     let variant = settings.local_stt_variant();
     let bundle_dir = effective_sherpa_bundle_dir(settings, variant).map_err(|e| e.to_string())?;
@@ -72,7 +66,7 @@ pub fn build_offline_config(
             config.model_config.model_type = Some("nemo_transducer".into());
         }
         SherpaOnnxLayout::Qwen3Int8 => {
-            let max_new_tokens = if options.preview { 64 } else { 128 };
+            let max_new_tokens = 128;
             config.feat_config.feature_dim = 128;
             config.model_config.qwen3_asr = OfflineQwen3ASRModelConfig {
                 conv_frontend: Some(path_string(&bundle_dir, "conv_frontend.onnx")?),

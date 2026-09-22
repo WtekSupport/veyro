@@ -41,15 +41,3 @@ void getSettings()
 void listen<{ active: boolean }>(EVENTS.overlayListening, (event) => {
   setListening(Boolean(event.payload.active));
 });
-
-void listen(EVENTS.listeningStarted, () => {
-  setListening(true);
-});
-
-void listen(EVENTS.listeningStopped, () => {
-  setListening(false);
-});
-
-void listen(EVENTS.transcriptionPartialClear, () => {
-  setListening(false);
-});

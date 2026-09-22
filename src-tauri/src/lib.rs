@@ -330,7 +330,8 @@ pub(crate) fn apply_ptt_active(
     active: bool,
 ) -> Result<bool, error::AppError> {
     if active {
-        crate::injection::focus_target::capture_injection_target();
+        ctx.runtime.reset_cancel();
+        ctx.begin_dictation_session(app);
         ctx.set_audio_callbacks_enabled(false);
         let vad_join = {
             let mut audio = ctx
@@ -349,7 +350,12 @@ pub(crate) fn apply_ptt_active(
             }
         }
         if let Ok(audio) = ctx.audio.lock() {
-            audio.set_ptt_vad_segments_on_silence(true);
+            let segment_on_silence = ctx
+                .controller
+                .try_lock()
+                .ok()
+                .is_some_and(|c| c.settings().push_to_talk && !c.settings().ptt_hold);
+            audio.set_ptt_vad_segments_on_silence(segment_on_silence);
         }
         let capture_status = ctx.audio.lock().ok().map(|audio| {
             json!({
@@ -469,6 +475,18 @@ pub(crate) fn complete_ptt_release(
                     Some(app),
                     ActivityLevel::Error,
                     "activity.segment_queue_disk_full",
+                    json!({ "ms": segment.duration_ms }),
+                );
+                if let Ok(mut audio) = ctx.audio.lock() {
+                    audio.drain_pending_segments();
+                }
+                return Ok(false);
+            }
+            crate::app::runtime::EnqueueResult::PendingQueueFull => {
+                ctx.record_activity(
+                    Some(app),
+                    ActivityLevel::Warn,
+                    "activity.segment_dropped_queue_full",
                     json!({ "ms": segment.duration_ms }),
                 );
                 if let Ok(mut audio) = ctx.audio.lock() {

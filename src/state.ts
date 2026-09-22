@@ -56,7 +56,6 @@ export interface UiState {
   homemakerHotkeyPresets: string[];
   homemakerConfigLoading: boolean;
   transcriptionLanguages: TranscriptionLanguageInfo[];
-  partialTranscript: string | null;
 }
 
 type Listener = (state: UiState) => void;
@@ -92,7 +91,6 @@ const initialState: UiState = {
   homemakerHotkeyPresets: [],
   homemakerConfigLoading: false,
   transcriptionLanguages: [],
-  partialTranscript: null,
 };
 
 let state: UiState = { ...initialState };
@@ -127,7 +125,7 @@ export function patchState(
 
 export function setStatus(status: StatusSnapshot): void {
   patchState({ status }, { render: false });
-  patchLiveStatusUi(status, state.partialTranscript);
+  patchLiveStatusUi(status);
 }
 
 export function setSettings(settings: AppSettings): void {

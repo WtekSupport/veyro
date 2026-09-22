@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const MAX_ENTRIES: usize = 120;
+const MAX_DISK_LOG_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityLevel {
@@ -89,6 +90,9 @@ impl ActivityLog {
             .lock()
             .expect("activity log lock poisoned")
             .clear();
+        if let Some(path) = activity_log_path() {
+            let _ = fs::write(&path, "");
+        }
     }
 }
 
@@ -103,6 +107,16 @@ fn activity_log_path() -> Option<PathBuf> {
     Some(dirs::config_dir()?.join("Veyro").join("debug").join("activity.log"))
 }
 
+fn truncate_disk_log_if_needed(path: &PathBuf) {
+    let Ok(metadata) = fs::metadata(path) else {
+        return;
+    };
+    if metadata.len() <= MAX_DISK_LOG_BYTES {
+        return;
+    }
+    let _ = fs::write(path, "");
+}
+
 fn persist_entry(entry: &ActivityLogEntry) {
     let Some(path) = activity_log_path() else {
         return;
@@ -113,6 +127,7 @@ fn persist_entry(entry: &ActivityLogEntry) {
     if fs::create_dir_all(parent).is_err() {
         return;
     }
+    truncate_disk_log_if_needed(&path);
     let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) else {
         return;
     };

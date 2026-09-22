@@ -124,22 +124,6 @@ impl VadDetector {
         Ok(None)
     }
 
-    /// Flush buffered audio on PTT key release even if VAD never entered Speaking.
-    /// Clone current in-progress audio for live transcription preview.
-    pub fn preview_snapshot(&self) -> Option<AudioSegment> {
-        let min_samples = crate::audio::preview::preview_min_samples(TARGET_SAMPLE_RATE);
-
-        let segment = if self.state == VadState::Speaking && self.segment.len() >= min_samples {
-            AudioSegment::new(self.segment.clone(), TARGET_SAMPLE_RATE, 1)
-        } else if self.ptt_recording && self.ptt_capture.len() >= min_samples {
-            AudioSegment::new(self.ptt_capture.clone(), TARGET_SAMPLE_RATE, 1)
-        } else {
-            return None;
-        };
-
-        crate::audio::preview::trim_for_live_dictation(&segment)
-    }
-
     pub fn flush_ptt(&mut self) -> Result<Option<VadEvent>, crate::error::AudioError> {
         self.drain_pending_frames()?;
 

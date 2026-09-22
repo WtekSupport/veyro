@@ -47,6 +47,7 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
       ? values.ptt_hold
       : (current?.ptt_hold ?? true),
     recording_indicator: values.recording_indicator,
+    abort_on_focus_loss: values.abort_on_focus_loss,
     microphone_device:
       values.microphone_device.length > 0 ? values.microphone_device : null,
     language: values.language === "auto" ? null : values.language,
@@ -92,7 +93,6 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     weak_pc_spill_to_disk: values.weak_pc_spill_to_disk,
     weak_pc_ram_segment_cap: values.weak_pc_ram_segment_cap,
     weak_pc_max_disk_queue_mb: values.weak_pc_max_disk_queue_mb,
-    weak_pc_reduce_preview: values.weak_pc_reduce_preview,
     weak_pc_reduce_prewarm: values.weak_pc_reduce_prewarm,
   };
 }
@@ -105,6 +105,7 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.ptt_hold !== current.ptt_hold ||
     patch.recording_indicator !==
       (current.recording_indicator ?? current.live_dictation_field_indicator) ||
+    patch.abort_on_focus_loss !== (current.abort_on_focus_loss ?? true) ||
     patch.microphone_device !== current.microphone_device ||
     patch.language !== current.language ||
     patch.transcription_provider !== current.transcription_provider ||
@@ -146,7 +147,6 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.weak_pc_spill_to_disk !== current.weak_pc_spill_to_disk ||
     patch.weak_pc_ram_segment_cap !== current.weak_pc_ram_segment_cap ||
     patch.weak_pc_max_disk_queue_mb !== current.weak_pc_max_disk_queue_mb ||
-    patch.weak_pc_reduce_preview !== current.weak_pc_reduce_preview ||
     patch.weak_pc_reduce_prewarm !== current.weak_pc_reduce_prewarm ||
     values.api_key.trim().length > 0
   );

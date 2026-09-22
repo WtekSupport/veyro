@@ -83,6 +83,7 @@ export interface AppSettings {
   push_to_talk: boolean;
   ptt_hold: boolean;
   recording_indicator: boolean;
+  abort_on_focus_loss: boolean;
   /** @deprecated use recording_indicator */
   live_dictation_field_indicator?: boolean;
   hotkey_game_mode: boolean;
@@ -139,7 +140,6 @@ export interface AppSettings {
   weak_pc_spill_to_disk: boolean;
   weak_pc_ram_segment_cap: number;
   weak_pc_max_disk_queue_mb: number;
-  weak_pc_reduce_preview: boolean;
   weak_pc_reduce_prewarm: boolean;
 }
 
@@ -149,6 +149,7 @@ export interface SettingsPatch {
   push_to_talk?: boolean;
   ptt_hold?: boolean;
   recording_indicator?: boolean;
+  abort_on_focus_loss?: boolean;
   live_dictation_field_indicator?: boolean;
   hotkey_game_mode?: boolean;
   hotkey_block_system?: boolean;
@@ -205,7 +206,6 @@ export interface SettingsPatch {
   weak_pc_spill_to_disk?: boolean;
   weak_pc_ram_segment_cap?: number;
   weak_pc_max_disk_queue_mb?: number;
-  weak_pc_reduce_preview?: boolean;
   weak_pc_reduce_prewarm?: boolean;
 }
 
@@ -284,19 +284,12 @@ export interface TranscriptionCompletedPayload {
   char_count: number;
 }
 
-export interface TranscriptionPartialPayload {
-  text: string;
-  stable: boolean;
-}
-
 export const EVENTS = {
   stateChanged: "app://state-changed",
   listeningStarted: "app://listening-started",
   listeningStopped: "app://listening-stopped",
   overlayListening: "app://overlay-listening",
   transcriptionStarted: "app://transcription-started",
-  transcriptionPartial: "app://transcription-partial",
-  transcriptionPartialClear: "app://transcription-partial-clear",
   transcriptionCompleted: "app://transcription-completed",
   injectionCompleted: "app://injection-completed",
   error: "app://error",
