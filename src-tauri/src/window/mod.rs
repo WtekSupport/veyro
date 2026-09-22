@@ -507,8 +507,6 @@ pub fn configure_overlay_window(window: &WebviewWindow) {
     )));
     position_overlay_corner(window);
     configure_overlay_extended_style(window);
-    #[cfg(windows)]
-    apply_overlay_dwm_transparency(window);
 }
 
 /// Hidden WebView for REC indicator (avoids creating the window during fullscreen capture).
@@ -540,9 +538,14 @@ fn ensure_overlay_window(app: &AppHandle) -> Result<WebviewWindow, String> {
             return;
         }
         OVERLAY_PAGE_READY.store(true, Ordering::Relaxed);
-        if OVERLAY_PENDING_LISTENING.load(Ordering::Relaxed) {
-            present_overlay_recording(&window);
+        if !OVERLAY_PENDING_LISTENING.load(Ordering::Relaxed) {
+            return;
         }
+        let window = window.clone();
+        let app = window.app_handle().clone();
+        let _ = app.run_on_main_thread(move || {
+            present_overlay_recording(&window);
+        });
     })
     .build()
     .map_err(|error| format!("failed to create overlay window: {error}"))?;
@@ -715,6 +718,23 @@ fn configure_overlay_extended_style(window: &WebviewWindow) {
 fn configure_overlay_extended_style(_window: &WebviewWindow) {}
 
 #[cfg(windows)]
+fn windows_build_number() -> u32 {
+    use windows::Win32::System::SystemInformation::{GetVersionExW, OSVERSIONINFOW};
+
+    unsafe {
+        let mut info = OSVERSIONINFOW {
+            dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
+            ..Default::default()
+        };
+        if GetVersionExW(&mut info).is_ok() {
+            info.dwBuildNumber
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(windows)]
 fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{
@@ -724,6 +744,8 @@ fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
 
     /// Win11+ draws an opaque Mica/acrylic plate unless backdrop is disabled.
     const DWMSBT_NONE: i32 = 3;
+    /// Windows 11 first public builds (DWM backdrop APIs are not safe on Win10).
+    const WIN11_MIN_BUILD: u32 = 22000;
 
     let Ok(raw) = window.hwnd() else {
         return;
@@ -735,14 +757,16 @@ fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
         cyTopHeight: -1,
         cyBottomHeight: -1,
     };
-    let backdrop_none = DWMSBT_NONE;
     unsafe {
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            (&backdrop_none as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
+        if windows_build_number() >= WIN11_MIN_BUILD {
+            let backdrop_none = DWMSBT_NONE;
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_SYSTEMBACKDROP_TYPE,
+                (&backdrop_none as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
 }

@@ -12,6 +12,10 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.49] — 2026-09-22
+
+- **Windows 10 REC overlay crash:** Do not apply Win11-only DWM backdrop on Windows 10; show the recording overlay on the UI thread after the WebView loads (fixes exit when the red REC indicator appears).
+
 ## [1.8.48] — 2026-09-22
 
 - **Focus defer buffer:** With **Focus control** off (new default), dictation keeps running when the injection field loses focus; text is buffered in memory and inserted when focus returns (already inserted text is kept).

@@ -81,8 +81,13 @@ if ($ghCmd) {
 if ($gh) {
     & $gh auth status 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        $releaseView = & $gh release view $tag --repo WtekSupport/veyro 2>&1
-        if ($LASTEXITCODE -eq 0 -and $releaseView -notmatch "release not found") {
+        $releaseView = $null
+        try {
+            $releaseView = & $gh release view $tag --repo WtekSupport/veyro 2>&1 | Out-String
+        } catch {
+            $releaseView = $_.Exception.Message
+        }
+        if ($LASTEXITCODE -eq 0 -and $releaseView -and $releaseView -notmatch "release not found") {
             Write-Host "Uploading assets to existing $tag..."
             & $gh release upload $tag @files --repo WtekSupport/veyro --clobber
             exit $LASTEXITCODE
