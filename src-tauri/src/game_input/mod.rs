@@ -479,12 +479,24 @@ pub fn report_elevation_mismatch(app: &AppHandle, notify: bool) {
 pub fn report_elevation_mismatch(_app: &AppHandle, _notify: bool) {}
 
 #[cfg(test)]
+static TOGGLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serialize tests that mutate process-global `TOGGLE_CAPTURE`.
+#[cfg(test)]
+pub fn toggle_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    TOGGLE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
 mod toggle_capture_tests {
     use super::*;
 
     /// `TOGGLE_CAPTURE` is process-global, so the lifecycle cases share one serialized test.
     #[test]
     fn toggle_capture_lifecycle() {
+        let _lock = toggle_test_lock();
         reset_toggle_capture();
         assert_eq!(toggle_capture_state(), ToggleCapture::Idle);
         assert!(!toggle_capture_active());

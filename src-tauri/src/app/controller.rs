@@ -566,6 +566,7 @@ mod tests {
 
     #[test]
     fn hold_mode_press_and_release() {
+        let _lock = crate::game_input::toggle_test_lock();
         crate::game_input::reset_toggle_capture();
         let mut controller = ptt_controller(true);
 
@@ -602,6 +603,7 @@ mod tests {
 
     #[test]
     fn scroll_lock_with_hold_ignores_second_press_until_release() {
+        let _lock = crate::game_input::toggle_test_lock();
         crate::game_input::reset_toggle_capture();
         let settings = AppSettings {
             push_to_talk: true,
@@ -675,6 +677,7 @@ mod tests {
 
     #[test]
     fn hold_mode_release_during_processing_stops_capture() {
+        let _lock = crate::game_input::toggle_test_lock();
         crate::game_input::reset_toggle_capture();
         assert!(crate::game_input::begin_toggle_start());
         crate::game_input::confirm_toggle_start();
