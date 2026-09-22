@@ -23,7 +23,14 @@ $paths = $required | ForEach-Object { Join-Path $assetsDir $_ }
 
 Write-Host "Assets ready in $assetsDir"
 
-$gh = Get-Command gh -ErrorAction SilentlyContinue
+$ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+if ($ghCmd) {
+    $gh = $ghCmd.Source
+} elseif (Test-Path (Join-Path $RepoRoot ".tools\gh\gh.exe")) {
+    $gh = Join-Path $RepoRoot ".tools\gh\gh.exe"
+} else {
+    $gh = $null
+}
 if (-not $gh) {
     Write-Host ""
     Write-Host "Install GitHub CLI (gh) and run: gh auth login"
@@ -38,13 +45,14 @@ if (-not $gh) {
 }
 
 $viewArgs = @("release", "view", $Tag, "--repo", $Repo)
-& gh @viewArgs 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$viewOut = & $gh @viewArgs 2>&1
+if ($LASTEXITCODE -ne 0 -or ($viewOut -match "release not found")) {
     Write-Host "Creating release $Tag on $Repo ..."
-    & gh release create $Tag @paths --repo $Repo --title "Silero TE assets" --notes "On-demand Silero TE model files for Veyro (model.pt, tokenizer.pt, meta.json)."
+    # Prerelease so GitHub /releases/latest stays the app installer (latest.json), not this asset bundle.
+    & $gh release create $Tag @paths --repo $Repo --prerelease --title "Silero TE assets" --notes "On-demand Silero TE model files for Veyro (model.pt, tokenizer.pt, meta.json)."
 } else {
     Write-Host "Updating assets on release $Tag ..."
-    & gh release upload $Tag @paths --repo $Repo --clobber
+    & $gh release upload $Tag @paths --repo $Repo --clobber
 }
 
 if ($LASTEXITCODE -ne 0) {

@@ -32,6 +32,7 @@ lerna-debug.log*
 
 # Silero TE weights (generate via scripts/extract-silero-te.py)
 src-tauri/resources/silero-te/model.pt
+src-tauri/resources/v2_4lang_q.pt
 todo/v2_4lang_q.pt
 todo/te_core.pt
 release.py

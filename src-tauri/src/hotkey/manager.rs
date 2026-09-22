@@ -1,4 +1,4 @@
-use std::sync::{Arc, MutexGuard};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::app::activity_log::ActivityLevel;
 use crate::app::context::AppContext;
-use crate::app::controller::{AppController, HotkeyPlan, SharedController};
+use crate::app::controller::HotkeyPlan;
 use crate::app::events::emit_listening_stopped;
 use crate::app::state::AppState;
 use crate::audio::segment::AudioSegment;
@@ -168,17 +168,6 @@ fn app_locale(app: &AppHandle) -> UiLocale {
         .unwrap_or(UiLocale::En)
 }
 
-/// Blocks until the controller mutex is free. Worker threads only — never call from the hook/gate path.
-fn lock_controller(controller: &SharedController) -> MutexGuard<'_, AppController> {
-    match controller.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            warn!("controller lock was poisoned; recovering inner state");
-            poisoned.into_inner()
-        }
-    }
-}
-
 fn log_ptt_trace(app: &AppHandle, trace: &'static str, detail: &str) {
     let Some(ctx) = app.try_state::<Arc<AppContext>>() else {
         info!(ptt_trace = trace, detail, "ptt (no app context)");
@@ -261,9 +250,6 @@ pub(crate) fn spawn_ptt_press(app: AppHandle, ctx: Arc<AppContext>) {
 
         if let Err(error) = crate::apply_ptt_active(&ctx, &app, true) {
             log_ptt_trace(&app, "spawn_ptt_press", "apply_ptt_active failed");
-            ctx.streaming_preview.stop_and_clear(&app);
-            ctx.live_dictation.stop();
-            ctx.live_dictation.reset();
             ctx.ptt_postprocess.reset();
             if let Ok(audio) = ctx.audio.lock() {
                 audio.set_ptt_vad_segments_on_silence(false);
@@ -286,16 +272,6 @@ pub(crate) fn spawn_ptt_press(app: AppHandle, ctx: Arc<AppContext>) {
             #[cfg(windows)]
             crate::game_input::hotkey_win::reset_ptt_key_state();
             return;
-        }
-        let ptt_hold = ctx
-            .controller
-            .lock()
-            .ok()
-            .map(|controller| controller.settings().ptt_hold)
-            .unwrap_or(true);
-        if ptt_hold {
-            ctx.start_live_dictation();
-            ctx.streaming_preview.start();
         }
         if matches!(
             crate::game_input::toggle_capture_state(),
@@ -351,10 +327,9 @@ fn finish_ptt_release_on_controller(
             }
             Err(_) if attempt + 1 == ATTEMPTS => {
                 warn!(
-                    "ptt release: controller busy after {}ms; forcing blocking lock",
+                    "ptt release: controller busy after {}ms; skipping finish_ptt_release (pipeline will recover state)",
                     ATTEMPTS * 10
                 );
-                controller = Some(lock_controller(&ctx.controller));
             }
             Err(_) => std::thread::sleep(Duration::from_millis(10)),
         }
@@ -388,51 +363,36 @@ pub(crate) fn spawn_ptt_release(
             .ok()
             .is_some_and(|c| c.settings().suppress_ptt_toasts());
         ctx.set_audio_callbacks_enabled(false);
-        ctx.streaming_preview.stop_and_clear(&app);
-        ctx.live_dictation.stop();
 
-        let speech_queued = {
+        let flush_rx = {
             let _ptt_guard = ctx.ptt_lock.lock().ok();
             log_ptt_trace(&app, "spawn_ptt_release", "ptt_lock acquired");
-            let flush_rx = flush_rx.or_else(|| {
+            flush_rx.or_else(|| {
                 ctx.audio
                     .lock()
                     .ok()
                     .and_then(|mut audio| audio.begin_ptt_release().ok().flatten())
-            });
+            })
+        };
 
-            match crate::complete_ptt_release(&ctx, &app, flush_rx) {
-                Ok(queued) => queued,
-                Err(error) => {
-                    warn!("hotkey ptt release failed: {error}");
-                    crate::notify::notify(
-                        &app,
-                        &i18n::translate(locale, "notify.error_title", &[]),
-                        &i18n::translate(
-                            locale,
-                            "notify.capture_stop_failed",
-                            &[("error", &error.to_string())],
-                        ),
-                    );
-                    false
-                }
+        let speech_queued = match crate::complete_ptt_release(&ctx, &app, flush_rx) {
+            Ok(queued) => queued,
+            Err(error) => {
+                warn!("hotkey ptt release failed: {error}");
+                crate::notify::notify(
+                    &app,
+                    &i18n::translate(locale, "notify.error_title", &[]),
+                    &i18n::translate(
+                        locale,
+                        "notify.capture_stop_failed",
+                        &[("error", &error.to_string())],
+                    ),
+                );
+                false
             }
         };
 
         feedback::play_ptt_stop();
-        if !speech_queued {
-            ctx.live_dictation.reset();
-            if let Ok(controller) = ctx.controller.try_lock() {
-                let settings = controller.settings().clone();
-                drop(controller);
-                let injector = ctx.runtime.injector();
-                let _ = tauri::async_runtime::block_on(
-                    ctx.live_dictation.rollback(injector, &settings),
-                );
-            } else {
-                warn!("ptt release: skipped live dictation rollback (controller busy)");
-            }
-        }
 
         finish_ptt_release_on_controller(&app, &ctx, speech_queued);
         if !speech_queued {

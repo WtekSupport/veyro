@@ -39,7 +39,7 @@ python scripts/extract-silero-te.py
 powershell -ExecutionPolicy Bypass -File scripts/package-silero-te-release.ps1 -RepoRoot .
 ```
 
-This creates or updates GitHub release **`silero-te-assets-v1`** with flat assets: `model.pt`, `tokenizer.pt`, `meta.json` (~88 MB total). Needs `gh auth login`.
+This creates or updates GitHub release **`silero-te-assets-v1`** with flat assets: `model.pt`, `tokenizer.pt`, `meta.json` (~88 MB total). Needs `gh auth login`. The release is published as **prerelease** so it does not become GitHub’s `/releases/latest` (the in-app updater expects `latest.json` on the newest **app** release).
 
 Override URLs for testing with `VEYRO_SILERO_TE_BASE_URL`. Debug builds can seed from `src-tauri/resources/silero-te` after extract when the release is not published yet.
 

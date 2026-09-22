@@ -332,6 +332,9 @@ pub struct AppSettings {
         alias = "live_dictation_field_indicator"
     )]
     pub recording_indicator: bool,
+    /// Stop queued STT/injection when the dictation field loses focus (Windows only).
+    #[serde(default = "default_abort_on_focus_loss")]
+    pub abort_on_focus_loss: bool,
     /// Use a low-level keyboard hook so PTT works in exclusive fullscreen games (Windows only).
     #[serde(default = "default_hotkey_game_mode")]
     pub hotkey_game_mode: bool,
@@ -409,7 +412,7 @@ pub struct AppSettings {
     /// Load and warm local STT/LLM at startup (and when the settings UI opens if enabled).
     #[serde(default)]
     pub prewarm_local_models_at_startup: bool,
-    /// Low-resource profile: disk spill queue, fewer previews/prewarms while backlogged.
+    /// Low-resource profile: disk spill queue; fewer prewarms while backlogged.
     #[serde(default)]
     pub weak_pc_mode: bool,
     #[serde(default = "default_weak_pc_spill_to_disk")]
@@ -418,8 +421,6 @@ pub struct AppSettings {
     pub weak_pc_ram_segment_cap: u32,
     #[serde(default = "default_weak_pc_max_disk_queue_mb")]
     pub weak_pc_max_disk_queue_mb: u32,
-    #[serde(default = "default_weak_pc_reduce_preview")]
-    pub weak_pc_reduce_preview: bool,
     #[serde(default = "default_weak_pc_reduce_prewarm")]
     pub weak_pc_reduce_prewarm: bool,
 }
@@ -434,10 +435,6 @@ fn default_weak_pc_ram_segment_cap() -> u32 {
 
 fn default_weak_pc_max_disk_queue_mb() -> u32 {
     512
-}
-
-fn default_weak_pc_reduce_preview() -> bool {
-    true
 }
 
 fn default_weak_pc_reduce_prewarm() -> bool {
@@ -461,6 +458,10 @@ fn default_check_updates_on_startup() -> bool {
 }
 
 fn default_recording_indicator() -> bool {
+    true
+}
+
+fn default_abort_on_focus_loss() -> bool {
     true
 }
 
@@ -501,6 +502,7 @@ impl Default for AppSettings {
             push_to_talk: true,
             ptt_hold: true,
             recording_indicator: true,
+            abort_on_focus_loss: default_abort_on_focus_loss(),
             hotkey_game_mode: default_hotkey_game_mode(),
             hotkey_block_system: default_hotkey_block_system(),
             microphone_device: None,
@@ -554,7 +556,6 @@ impl Default for AppSettings {
             weak_pc_spill_to_disk: default_weak_pc_spill_to_disk(),
             weak_pc_ram_segment_cap: default_weak_pc_ram_segment_cap(),
             weak_pc_max_disk_queue_mb: default_weak_pc_max_disk_queue_mb(),
-            weak_pc_reduce_preview: default_weak_pc_reduce_preview(),
             weak_pc_reduce_prewarm: default_weak_pc_reduce_prewarm(),
         }
     }
@@ -863,10 +864,6 @@ impl AppSettings {
         self.weak_pc_mode && self.weak_pc_spill_to_disk
     }
 
-    pub fn should_reduce_preview_when_backlogged(&self) -> bool {
-        self.weak_pc_mode && self.weak_pc_reduce_preview
-    }
-
     pub fn should_reduce_prewarm_when_backlogged(&self) -> bool {
         self.weak_pc_mode && self.weak_pc_reduce_prewarm
     }
@@ -892,6 +889,7 @@ pub struct SettingsPatch {
     pub push_to_talk: Option<bool>,
     pub ptt_hold: Option<bool>,
     pub recording_indicator: Option<bool>,
+    pub abort_on_focus_loss: Option<bool>,
     #[serde(alias = "live_dictation_field_indicator")]
     pub live_dictation_field_indicator: Option<bool>,
     pub hotkey_game_mode: Option<bool>,
@@ -949,7 +947,6 @@ pub struct SettingsPatch {
     pub weak_pc_spill_to_disk: Option<bool>,
     pub weak_pc_ram_segment_cap: Option<u32>,
     pub weak_pc_max_disk_queue_mb: Option<u32>,
-    pub weak_pc_reduce_preview: Option<bool>,
     pub weak_pc_reduce_prewarm: Option<bool>,
 }
 
@@ -972,6 +969,9 @@ impl SettingsPatch {
             settings.recording_indicator = recording_indicator;
         } else if let Some(live_dictation_field_indicator) = self.live_dictation_field_indicator {
             settings.recording_indicator = live_dictation_field_indicator;
+        }
+        if let Some(abort_on_focus_loss) = self.abort_on_focus_loss {
+            settings.abort_on_focus_loss = abort_on_focus_loss;
         }
         if let Some(hotkey_game_mode) = self.hotkey_game_mode {
             settings.hotkey_game_mode = hotkey_game_mode;
@@ -1152,9 +1152,6 @@ impl SettingsPatch {
         }
         if let Some(weak_pc_max_disk_queue_mb) = self.weak_pc_max_disk_queue_mb {
             settings.weak_pc_max_disk_queue_mb = weak_pc_max_disk_queue_mb;
-        }
-        if let Some(weak_pc_reduce_preview) = self.weak_pc_reduce_preview {
-            settings.weak_pc_reduce_preview = weak_pc_reduce_preview;
         }
         if let Some(weak_pc_reduce_prewarm) = self.weak_pc_reduce_prewarm {
             settings.weak_pc_reduce_prewarm = weak_pc_reduce_prewarm;

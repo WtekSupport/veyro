@@ -42,6 +42,7 @@ export interface SettingsFormValues {
   push_to_talk: boolean;
   ptt_hold: boolean;
   recording_indicator: boolean;
+  abort_on_focus_loss: boolean;
   microphone_device: string;
   language: string;
   injection_mode: InjectionMode;
@@ -87,7 +88,6 @@ export interface SettingsFormValues {
   weak_pc_spill_to_disk: boolean;
   weak_pc_ram_segment_cap: number;
   weak_pc_max_disk_queue_mb: number;
-  weak_pc_reduce_preview: boolean;
   weak_pc_reduce_prewarm: boolean;
   api_key: string;
   has_api_key: boolean;
@@ -252,6 +252,7 @@ export function settingsToForm(
       settings.recording_indicator ??
       settings.live_dictation_field_indicator ??
       true,
+    abort_on_focus_loss: settings.abort_on_focus_loss ?? true,
     microphone_device: settings.microphone_device ?? "",
     language: settings.language ?? "auto",
     injection_mode: settings.injection_mode,
@@ -300,7 +301,6 @@ export function settingsToForm(
     weak_pc_spill_to_disk: settings.weak_pc_spill_to_disk ?? true,
     weak_pc_ram_segment_cap: settings.weak_pc_ram_segment_cap ?? 2,
     weak_pc_max_disk_queue_mb: settings.weak_pc_max_disk_queue_mb ?? 512,
-    weak_pc_reduce_preview: settings.weak_pc_reduce_preview ?? true,
     weak_pc_reduce_prewarm: settings.weak_pc_reduce_prewarm ?? true,
     api_key: "",
     has_api_key: hasApiKey,
@@ -726,29 +726,9 @@ export function renderStatusQuickSettingsPopover(
 
           <label class="field">
             <span>${escapeHtml(t("settings.dataStorage"))}</span>
-            <div class="api-key-row">
-              <input
-                type="text"
-                value="${escapeHtml(values.data_storage_dir)}"
-                placeholder="${escapeHtml(t("settings.dataStoragePlaceholder"))}"
-                readonly
-                data-data-storage-display
-              />
-              <button
-                type="button"
-                class="icon-btn"
-                data-open-data-storage-folder
-                title="${escapeHtml(t("settings.dataStorageOpen"))}"
-                aria-label="${escapeHtml(t("settings.dataStorageOpen"))}"
-              >${iconFolder()}</button>
-              <button
-                type="button"
-                class="icon-btn"
-                data-pick-data-storage-dir
-                title="${escapeHtml(t("settings.dataStoragePick"))}"
-                aria-label="${escapeHtml(t("settings.dataStoragePick"))}"
-              >${iconImport()}</button>
-            </div>
+            <button type="button" class="btn-secondary" data-pick-data-storage-dir>
+              ${escapeHtml(t("settings.dataStoragePick"))}
+            </button>
           </label>
 
           ${renderWeakPcExpertSettings({
@@ -756,7 +736,6 @@ export function renderStatusQuickSettingsPopover(
             weak_pc_spill_to_disk: values.weak_pc_spill_to_disk,
             weak_pc_ram_segment_cap: values.weak_pc_ram_segment_cap,
             weak_pc_max_disk_queue_mb: values.weak_pc_max_disk_queue_mb,
-            weak_pc_reduce_preview: values.weak_pc_reduce_preview,
             weak_pc_reduce_prewarm: values.weak_pc_reduce_prewarm,
           })}
 
@@ -902,6 +881,11 @@ export function renderSettingsForm(
           <label class="field checkbox voice-recording-indicator-toggle">
             <input name="recording_indicator" type="checkbox" ${values.recording_indicator ? "checked" : ""} />
             <span>${escapeHtml(t("settings.recordingIndicator"))}</span>
+          </label>
+
+          <label class="field checkbox voice-abort-focus-loss-toggle">
+            <input name="abort_on_focus_loss" type="checkbox" ${values.abort_on_focus_loss ? "checked" : ""} />
+            <span>${escapeHtml(t("settings.abortOnFocusLoss"))}</span>
           </label>
           ${
             diagnostics?.capslock_ptt_supported
@@ -1199,6 +1183,7 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     push_to_talk: data.get("push_to_talk") === "on",
     ptt_hold: data.get("ptt_hold") === "on",
     recording_indicator: data.get("recording_indicator") === "on",
+    abort_on_focus_loss: data.get("abort_on_focus_loss") === "on",
     microphone_device: String(data.get("microphone_device") ?? ""),
     language: String(data.get("language") ?? "auto"),
     injection_mode: String(data.get("injection_mode") ?? "auto") as InjectionMode,
@@ -1266,9 +1251,7 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     local_llm_use_gpu: data.get("local_llm_use_gpu") === "on",
     ai_rewrite_skill: String(data.get("ai_rewrite_skill") ?? ""),
     whisper_prompt_prefix: String(data.get("whisper_prompt_prefix") ?? ""),
-    data_storage_dir: String(
-      form.querySelector<HTMLInputElement>("[data-data-storage-display]")?.value ?? "",
-    ).trim(),
+    data_storage_dir: getState().dataStorageDir.trim(),
     audio_preprocess_enabled: data.get("audio_preprocess_enabled") === "on",
     audio_noise_reduction_enabled: data.get("audio_noise_reduction_enabled") === "on",
     vad_pre_speech_buffer_ms: clampSegmentationMs(
@@ -1446,7 +1429,6 @@ export type WeakPcFormValues = Pick<
   | "weak_pc_spill_to_disk"
   | "weak_pc_ram_segment_cap"
   | "weak_pc_max_disk_queue_mb"
-  | "weak_pc_reduce_preview"
   | "weak_pc_reduce_prewarm"
 >;
 
@@ -1456,7 +1438,6 @@ export function weakPcValuesFromSettings(settings: AppSettings): WeakPcFormValue
     weak_pc_spill_to_disk: settings.weak_pc_spill_to_disk ?? true,
     weak_pc_ram_segment_cap: settings.weak_pc_ram_segment_cap ?? 2,
     weak_pc_max_disk_queue_mb: settings.weak_pc_max_disk_queue_mb ?? 512,
-    weak_pc_reduce_preview: settings.weak_pc_reduce_preview ?? true,
     weak_pc_reduce_prewarm: settings.weak_pc_reduce_prewarm ?? true,
   };
 }
@@ -1466,7 +1447,6 @@ export const DEFAULT_WEAK_PC_FORM: WeakPcFormValues = {
   weak_pc_spill_to_disk: true,
   weak_pc_ram_segment_cap: 2,
   weak_pc_max_disk_queue_mb: 512,
-  weak_pc_reduce_preview: true,
   weak_pc_reduce_prewarm: true,
 };
 
@@ -1490,7 +1470,6 @@ export function readWeakPcFormFields(form: HTMLFormElement): WeakPcFormValues {
     weak_pc_max_disk_queue_mb: clampWeakPcDiskMb(
       Number(data.get("weak_pc_max_disk_queue_mb") ?? 512),
     ),
-    weak_pc_reduce_preview: data.get("weak_pc_reduce_preview") === "on",
     weak_pc_reduce_prewarm: data.get("weak_pc_reduce_prewarm") === "on",
   };
 }
@@ -1507,10 +1486,6 @@ export function renderWeakPcExpertSettings(values: WeakPcFormValues): string {
               <label class="field checkbox status-quick-settings-span">
                 <input name="weak_pc_spill_to_disk" type="checkbox" ${values.weak_pc_spill_to_disk ? "checked" : ""} />
                 <span>${escapeHtml(t("settings.weakPcSpillToDisk"))}</span>
-              </label>
-              <label class="field checkbox status-quick-settings-span">
-                <input name="weak_pc_reduce_preview" type="checkbox" ${values.weak_pc_reduce_preview ? "checked" : ""} />
-                <span>${escapeHtml(t("settings.weakPcReducePreview"))}</span>
               </label>
               <label class="field checkbox status-quick-settings-span">
                 <input name="weak_pc_reduce_prewarm" type="checkbox" ${values.weak_pc_reduce_prewarm ? "checked" : ""} />

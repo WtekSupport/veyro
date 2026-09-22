@@ -28,7 +28,6 @@ import {
   getLlmModelStatus,
   getDictionaryPath,
   openAboutWindow,
-  openDataStorageFolder,
   getWhisperModelsDir,
   pickDataStorageDir,
   listAiSkills,
@@ -57,10 +56,6 @@ import {
   type StatusSnapshot,
   type TranscriptionCompletedPayload,
 } from "./api";
-import {
-  ensureSpacesAfterPunctuation,
-  mergeTranscriptChunks,
-} from "./lib/text-spacing";
 import { bindHotkeyInputs } from "./components/hotkey-input";
 import { showConfirmDialog } from "./components/confirm-dialog";
 import { FALLBACK_HOMEMAKER_HOTKEY_PRESETS } from "./components/homemaker-hotkeys";
@@ -113,7 +108,6 @@ import {
   runStartupUpdateCheck,
 } from "./components/update-banner";
 import {
-  patchLiveStatusUi,
   renderCompactStatusBar,
   renderErrorBanner,
   renderStatusBar,
@@ -262,8 +256,8 @@ function render(): void {
 
       ${
         homemaker
-          ? renderCompactStatusBar(status, getState().partialTranscript)
-          : `${renderStatusBar(status, getState().partialTranscript)}
+          ? renderCompactStatusBar(status)
+          : `${renderStatusBar(status)}
       ${renderUsageHint(status, diagnostics)}`
       }
 
@@ -563,7 +557,6 @@ async function persistHomemakerSettings(form: HTMLFormElement): Promise<void> {
   patch.weak_pc_spill_to_disk = weakPc.weak_pc_spill_to_disk;
   patch.weak_pc_ram_segment_cap = weakPc.weak_pc_ram_segment_cap;
   patch.weak_pc_max_disk_queue_mb = weakPc.weak_pc_max_disk_queue_mb;
-  patch.weak_pc_reduce_preview = weakPc.weak_pc_reduce_preview;
   patch.weak_pc_reduce_prewarm = weakPc.weak_pc_reduce_prewarm;
 
   if (switchingToLocal) {
@@ -977,13 +970,6 @@ function bindEvents(): void {
         setError({ code: "silero_vad_download", message });
       }
     })();
-  });
-
-  form.querySelector<HTMLButtonElement>("[data-open-data-storage-folder]")?.addEventListener("click", () => {
-    void openDataStorageFolder().catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      setError({ code: "data_storage_folder", message });
-    });
   });
 
   form.querySelector<HTMLButtonElement>("[data-pick-data-storage-dir]")?.addEventListener("click", () => {
@@ -1482,29 +1468,7 @@ async function bootstrap(): Promise<void> {
   });
 
   await subscribe<TranscriptionCompletedPayload>(EVENTS.transcriptionCompleted, () => {
-    patchState({ partialTranscript: null });
     void refreshDiagnostics();
-  });
-
-  await subscribe<import("./api").TranscriptionPartialPayload>(
-    EVENTS.transcriptionPartial,
-    (payload) => {
-      const raw = payload.text ?? "";
-      const previous = getState().partialTranscript ?? "";
-      const merged =
-        previous && raw.startsWith(previous.trim())
-          ? ensureSpacesAfterPunctuation(raw)
-          : mergeTranscriptChunks(previous, raw);
-      patchState({ partialTranscript: merged }, { render: false });
-      const currentStatus = getState().status;
-      if (currentStatus) {
-        patchLiveStatusUi(currentStatus, merged);
-      }
-    },
-  );
-
-  await subscribe(EVENTS.transcriptionPartialClear, () => {
-    patchState({ partialTranscript: null });
   });
 
   await subscribe<ActivityLogEntry[]>(EVENTS.activityLog, (entries) => {
@@ -1610,7 +1574,6 @@ async function bootstrap(): Promise<void> {
     EVENTS.listeningStopped,
     EVENTS.transcriptionStarted,
     EVENTS.injectionCompleted,
-    EVENTS.transcriptionPartialClear,
   ]) {
     await subscribe(event, () => {
       void refreshDiagnostics();

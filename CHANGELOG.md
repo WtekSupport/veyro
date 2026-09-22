@@ -12,6 +12,16 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.45] — 2026-09-22
+
+- **Stability (weak PCs):** Narrower PTT release locking, inline PTT gate dispatch (no per-signal thread spawn), segment queue cap with activity logging, activity log disk cap, shared LLM engine handle; PTT hold always ends capture on key-up even while a prior segment is still transcribing.
+- **REC overlay:** Fix stuck white overlay window on slow machines (hide HWND before clearing UI; show after page load; re-apply DWM transparency; overlay no longer reacts to global “listening stopped” during transcription).
+- **Focus control (Windows):** Optional **Контроль фокуса** / **Focus control** — aborts dictation, clears pending recognition, and drops disk queue buffers when the injection target loses focus (already inserted text is kept).
+- **Removed live preview:** Streaming partial transcription under the status bar and live dictation “…” indicator in the target field are gone (less CPU/GPU load; REC overlay remains).
+- **Basic cleanup:** Fewer spurious mid-sentence capitals in **Basic** / fast PTT phase (abbreviations and proper-noun heuristics).
+- **Settings UI:** Data storage row is a single **Choose folder** button; shorter focus-control label.
+- **Release tooling:** GitHub publish script and Silero TE asset packaging updates.
+
 ## [1.8.39] — 2026-09-21
 
 - **Local STT catalog:** Pick **family** and **quantization** (Whisper Q4–Q8, sherpa INT8/FP16/FP32) with a spec card—disk size, RAM/VRAM, speed & accuracy tiers, language summary—driven by `describe_local_stt_variant`.

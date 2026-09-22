@@ -131,23 +131,7 @@ function stateClass(state: StatusSnapshot["state"]): string {
 
 }
 
-function livePartialMarkup(
-  partialTranscript: string | null,
-  compact: boolean,
-): string {
-  const trimmed = partialTranscript?.trim();
-  if (!trimmed) {
-    return "";
-  }
-  const tag = compact ? "span" : "p";
-  const max = compact ? 80 : 120;
-  return `<${tag} class="status-partial" aria-live="polite">${escapeHtml(truncatePartial(trimmed, max))}</${tag}>`;
-}
-
-export function patchLiveStatusUi(
-  status: StatusSnapshot | null,
-  partialTranscript: string | null = null,
-): void {
+export function patchLiveStatusUi(status: StatusSnapshot | null): void {
   if (!status) {
     return;
   }
@@ -165,55 +149,24 @@ export function patchLiveStatusUi(
       text.textContent = label;
     }
   });
-
-  const compactPartial = livePartialMarkup(partialTranscript, true);
-  document.querySelectorAll(".status-bar--compact").forEach((bar) => {
-    const existing = bar.querySelector(".status-partial");
-    if (existing) {
-      existing.remove();
-    }
-    if (compactPartial) {
-      bar.insertAdjacentHTML("beforeend", compactPartial);
-    }
-  });
-
-  const fullPartial = livePartialMarkup(partialTranscript, false);
-  document.querySelectorAll(".status-bar:not(.status-bar--compact)").forEach((bar) => {
-    let sibling = bar.nextElementSibling;
-    if (sibling?.classList.contains("status-partial")) {
-      sibling.remove();
-      sibling = bar.nextElementSibling;
-    }
-    if (fullPartial) {
-      bar.insertAdjacentHTML("afterend", fullPartial);
-    }
-  });
 }
 
-export function renderCompactStatusBar(
-  status: StatusSnapshot | null,
-  partialTranscript: string | null = null,
-): string {
+export function renderCompactStatusBar(status: StatusSnapshot | null): string {
   if (!status) {
     return `<div class="status-bar status-bar--compact"><span class="status-dot idle"></span><span class="status-text">${escapeHtml(t("status.loading"))}</span></div>`;
   }
 
   const label = translateState(status.state);
-  const partial = livePartialMarkup(partialTranscript, true);
 
   return `
     <div class="status-bar status-bar--compact">
       <span class="${stateClass(status.state)}"></span>
       <span class="status-text">${escapeHtml(label)}</span>
-      ${partial}
     </div>
   `;
 }
 
-export function renderStatusBar(
-  status: StatusSnapshot | null,
-  partialTranscript: string | null = null,
-): string {
+export function renderStatusBar(status: StatusSnapshot | null): string {
 
   if (!status) {
 
@@ -224,7 +177,6 @@ export function renderStatusBar(
 
 
   const label = translateState(status.state);
-  const partial = livePartialMarkup(partialTranscript, false);
 
   return `
 
@@ -238,18 +190,8 @@ export function renderStatusBar(
 
     </div>
 
-    ${partial}
-
   `;
 
-}
-
-function truncatePartial(text: string, maxChars: number): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= maxChars) {
-    return trimmed;
-  }
-  return `${trimmed.slice(0, maxChars - 1)}…`;
 }
 
 

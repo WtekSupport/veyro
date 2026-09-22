@@ -34,6 +34,14 @@ const SETTINGS_WINDOW_BG: Color = Color(13, 13, 13, 255);
 const OVERLAY_WINDOW_BG: Color = Color(0, 0, 0, 0);
 
 static OVERLAY_PENDING_LISTENING: AtomicBool = AtomicBool::new(false);
+static OVERLAY_PAGE_READY: AtomicBool = AtomicBool::new(false);
+
+fn present_overlay_recording(window: &WebviewWindow) {
+    configure_overlay_window(window);
+    position_overlay_corner(window);
+    show_overlay_without_activation(window);
+    sync_overlay_listening(window, true);
+}
 
 #[derive(Clone, Serialize)]
 struct OverlayListeningPayload {
@@ -47,7 +55,7 @@ pub fn sync_overlay_listening(window: &WebviewWindow, active: bool) {
     );
     let hidden = !active;
     let script = format!(
-        "(function(){{var r=document.querySelector('[data-overlay-rec]');if(!r)return;r.hidden={hidden};r.setAttribute('aria-hidden','{aria}');}})()",
+        "(function(){{var r=document.querySelector('[data-overlay-rec]');var d=document.querySelector('[data-overlay-listening-dots]');if(r){{r.hidden={hidden};r.setAttribute('aria-hidden','{aria}');}}if(d){{d.hidden={hidden};d.setAttribute('aria-hidden','{aria}');}}}})()",
         hidden = hidden,
         aria = if active { "false" } else { "true" },
     );
@@ -305,6 +313,7 @@ fn destroy_idle_overlay_webview(app: &AppHandle) {
     if overlay.is_visible().unwrap_or(false) {
         return;
     }
+    OVERLAY_PAGE_READY.store(false, Ordering::Relaxed);
     let _ = overlay.destroy();
     log_webview_released(app, OVERLAY_WINDOW_LABEL);
 }
@@ -527,10 +536,12 @@ fn ensure_overlay_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .visible(false)
     .skip_taskbar(true)
     .on_page_load(|window, payload| {
-        if payload.event() == PageLoadEvent::Finished
-            && OVERLAY_PENDING_LISTENING.load(Ordering::Relaxed)
-        {
-            sync_overlay_listening(&window, true);
+        if payload.event() != PageLoadEvent::Finished {
+            return;
+        }
+        OVERLAY_PAGE_READY.store(true, Ordering::Relaxed);
+        if OVERLAY_PENDING_LISTENING.load(Ordering::Relaxed) {
+            present_overlay_recording(&window);
         }
     })
     .build()
@@ -544,10 +555,9 @@ pub fn show_overlay_recording(app: &AppHandle) -> Result<(), String> {
     OVERLAY_PENDING_LISTENING.store(true, Ordering::Relaxed);
     let window = ensure_overlay_window(app)?;
 
-    configure_overlay_window(&window);
-    position_overlay_corner(&window);
-    show_overlay_without_activation(&window);
-    sync_overlay_listening(&window, true);
+    if OVERLAY_PAGE_READY.load(Ordering::Relaxed) {
+        present_overlay_recording(&window);
+    }
     Ok(())
 }
 
@@ -556,8 +566,8 @@ pub fn hide_overlay(app: &AppHandle) {
     let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
         return;
     };
-    sync_overlay_listening(&window, false);
     hide_overlay_without_activation(&window);
+    sync_overlay_listening(&window, false);
 }
 
 #[cfg(windows)]
@@ -587,6 +597,7 @@ fn show_overlay_without_activation(window: &WebviewWindow) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
     }
+    apply_overlay_dwm_transparency(window);
 }
 
 #[cfg(not(windows))]

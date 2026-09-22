@@ -337,12 +337,8 @@ impl AppController {
         if crate::hotkey::ptt_mode::press_to_toggle(&self.settings) {
             return Ok(HotkeyPlan::None);
         }
-        if self.is_ptt_pipeline_busy() {
-            return Ok(HotkeyPlan::None);
-        }
-        if !matches!(self.state, AppState::Ready | AppState::Listening) {
-            return Ok(HotkeyPlan::None);
-        }
+        // Always honor key-up in hold mode: close capture even if a prior VAD split is still
+        // transcribing (common on slow machines when silence segmentation was enabled).
         if !crate::game_input::begin_toggle_stop() {
             return Ok(HotkeyPlan::None);
         }
@@ -678,16 +674,21 @@ mod tests {
     }
 
     #[test]
-    fn hold_mode_release_during_processing_is_ignored() {
+    fn hold_mode_release_during_processing_stops_capture() {
+        crate::game_input::reset_toggle_capture();
+        assert!(crate::game_input::begin_toggle_start());
+        crate::game_input::confirm_toggle_start();
+
         let mut controller = ptt_controller(true);
         controller.push_to_talk_active = true;
         controller.state = AppState::Processing;
 
         assert_eq!(
             controller.plan_hotkey_released().unwrap(),
-            HotkeyPlan::None
+            HotkeyPlan::PttRelease
         );
-        assert!(controller.push_to_talk_active);
+        assert!(!controller.push_to_talk_active);
+        crate::game_input::reset_toggle_capture();
     }
 
     #[test]
