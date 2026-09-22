@@ -105,7 +105,7 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.ptt_hold !== current.ptt_hold ||
     patch.recording_indicator !==
       (current.recording_indicator ?? current.live_dictation_field_indicator) ||
-    patch.abort_on_focus_loss !== (current.abort_on_focus_loss ?? true) ||
+    patch.abort_on_focus_loss !== (current.abort_on_focus_loss ?? false) ||
     patch.microphone_device !== current.microphone_device ||
     patch.language !== current.language ||
     patch.transcription_provider !== current.transcription_provider ||

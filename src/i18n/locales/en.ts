@@ -123,7 +123,7 @@ export const en = {
   "settings.ptt": "Push-to-talk",
   "settings.pttHold": "Hold to talk",
   "settings.recordingIndicator": "Recording indication",
-  "settings.abortOnFocusLoss": "Focus control",
+  "settings.abortOnFocusLoss": "Stop when focus is lost",
   "settings.modePtt": "PTT",
   "settings.modeContinuous": "Continuous",
   "settings.modeHintPtt": "PTT mode: hold the hotkey while speaking, release to transcribe and inject.",
@@ -435,6 +435,12 @@ export const en = {
   "activity.ai.cancelled": "AI: transcription cancelled",
   "activity.dictation.aborted_focus_loss":
     "Dictation aborted: input field lost focus (session {session_id})",
+  "activity.dictation.defer_focus_loss":
+    "Dictation: focus left the field — text is buffered until you return",
+  "activity.inject.deferred":
+    "Inject deferred: {chars} chars buffered (focus not on field)",
+  "activity.inject.defer_flushed":
+    "Buffered text inserted into field ({chars} chars)",
   "activity.dictation.session_skipped":
     "Dictation: skipped queued work (session {session_id})",
   "activity.ai.empty": "AI: transcript empty after cleanup",

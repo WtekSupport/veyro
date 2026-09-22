@@ -78,6 +78,8 @@ pub fn local_llm_gpu_backend_label() -> &'static str {
 pub enum VadEngine {
     #[default]
     Silero,
+    /// JSON/UI use `webrtc`; keep `web_rtc` alias for older saved configs.
+    #[serde(rename = "webrtc", alias = "web_rtc")]
     WebRtc,
 }
 
@@ -462,7 +464,7 @@ fn default_recording_indicator() -> bool {
 }
 
 fn default_abort_on_focus_loss() -> bool {
-    true
+    false
 }
 
 fn default_silero_te() -> bool {
@@ -1175,6 +1177,16 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(settings.vad_config().silence_timeout_ms, 1200);
+    }
+
+    #[test]
+    fn vad_engine_json_uses_webrtc_token() {
+        let engine: VadEngine = serde_json::from_str("\"webrtc\"").unwrap();
+        assert_eq!(engine, VadEngine::WebRtc);
+        assert_eq!(serde_json::to_string(&engine).unwrap(), "\"webrtc\"");
+
+        let legacy: VadEngine = serde_json::from_str("\"web_rtc\"").unwrap();
+        assert_eq!(legacy, VadEngine::WebRtc);
     }
 
     #[test]
