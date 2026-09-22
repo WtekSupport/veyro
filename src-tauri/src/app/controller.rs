@@ -418,6 +418,21 @@ impl AppController {
         self.transition(app, next)
     }
 
+    /// UI state for inserting text (pipeline or deferred focus-buffer flush).
+    pub fn transition_for_injection(&mut self, app: &AppHandle) -> Result<(), AppError> {
+        match self.state {
+            AppState::Injecting => Ok(()),
+            AppState::Processing | AppState::Transcribing => {
+                self.transition(app, AppState::Injecting)
+            }
+            AppState::Ready => {
+                self.transition(app, AppState::Processing)?;
+                self.transition(app, AppState::Injecting)
+            }
+            _ => self.transition(app, AppState::Injecting),
+        }
+    }
+
     pub fn recover_to_ready(&mut self, app: &AppHandle) -> Result<(), AppError> {
         self.recover_after_segment(app)
     }

@@ -1,7 +1,7 @@
 {
   "name": "veyro",
   "private": true,
-  "version": "1.8.45",
+  "version": "1.8.48",
   "type": "module",
   "scripts": {
     "prepare": "node scripts/ensure-git-hooks.mjs",
@@ -15,6 +15,7 @@
     "tauri:build": "powershell -ExecutionPolicy Bypass -File scripts/tauri-build-local.ps1",
     "tauri:dev:local": "powershell -ExecutionPolicy Bypass -File scripts/tauri-dev-local.ps1",
     "tauri:build:local": "powershell -ExecutionPolicy Bypass -File scripts/tauri-build-local.ps1",
+    "tauri:build:release": "powershell -ExecutionPolicy Bypass -File scripts/tauri-build-local.ps1 -SkipVersionBump",
     "tauri:dev:mac": "node scripts/tauri-macos.mjs dev",
     "tauri:build:mac": "node scripts/tauri-macos.mjs build",
     "start:release": "powershell -ExecutionPolicy Bypass -File scripts/launch-release.ps1"

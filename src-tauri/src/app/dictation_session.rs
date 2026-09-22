@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub struct DictationSession {
     current_id: AtomicU64,
     aborted_id: AtomicU64,
+    /// Successful text injections in the active session (multi-segment / continuous).
+    injection_count: AtomicU64,
 }
 
 impl Default for DictationSession {
@@ -17,6 +19,7 @@ impl DictationSession {
         Self {
             current_id: AtomicU64::new(0),
             aborted_id: AtomicU64::new(0),
+            injection_count: AtomicU64::new(0),
         }
     }
 
@@ -25,7 +28,16 @@ impl DictationSession {
     }
 
     pub fn begin_session(&self) -> u64 {
+        self.injection_count.store(0, Ordering::SeqCst);
         self.current_id.fetch_add(1, Ordering::SeqCst).saturating_add(1)
+    }
+
+    pub fn injection_count(&self) -> u64 {
+        self.injection_count.load(Ordering::SeqCst)
+    }
+
+    pub fn record_injection(&self) {
+        self.injection_count.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Marks the active session aborted. Returns the session id if one was active.

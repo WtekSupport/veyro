@@ -133,8 +133,8 @@ pub fn apply_basic_cleanup(text: &str) -> String {
         .join("\n\n");
     text = crate::text::basic_cleanup::collapse_orphan_dot_artifacts(&text);
     text = wrap_into_readable_paragraphs(&text);
-    text = crate::text::basic_cleanup::fix_spurious_mid_sentence_capitals(&text);
     text = capitalize_paragraphs(&text);
+    text = crate::text::basic_cleanup::fix_spurious_mid_sentence_capitals(&text);
     ensure_trailing_space_after_terminal_punctuation(&text)
 }
 

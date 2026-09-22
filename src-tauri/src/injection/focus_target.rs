@@ -31,6 +31,10 @@ pub fn injection_focus_hwnd() -> isize {
     INJECTION_FOCUS.load(Ordering::SeqCst)
 }
 
+pub fn injection_target_hwnd() -> isize {
+    INJECTION_TARGET.load(Ordering::SeqCst)
+}
+
 /// Whether the captured field/window still has input focus.
 pub fn focus_target_matches() -> bool {
     #[cfg(windows)]
