@@ -66,6 +66,7 @@ jobs:
           LIB_DIR="target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-linux-x64-shared-lib/lib"
           if [ -d target/sherpa-onnx-prebuilt ] && [ ! -f "$LIB_DIR/libsherpa-onnx-c-api.so" ]; then
             rm -rf target/sherpa-onnx-prebuilt
+            cargo clean -p sherpa-onnx-sys
           fi
       - name: Build sherpa stack (download prebuilt when missing)
         run: cargo build --no-default-features --features local-sherpa-stt,vad-silero --lib
