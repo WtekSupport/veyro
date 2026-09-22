@@ -12,6 +12,25 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.45] — 2026-09-22
+
+- **Stability (weak PCs):** Narrower PTT release locking, inline PTT gate dispatch (no per-signal thread spawn), segment queue cap with activity logging, activity log disk cap, shared LLM engine handle; PTT hold always ends capture on key-up even while a prior segment is still transcribing.
+- **REC overlay:** Fix stuck white overlay window on slow machines (hide HWND before clearing UI; show after page load; re-apply DWM transparency; overlay no longer reacts to global “listening stopped” during transcription).
+- **Focus control (Windows):** Optional **Контроль фокуса** / **Focus control** — aborts dictation, clears pending recognition, and drops disk queue buffers when the injection target loses focus (already inserted text is kept).
+- **Removed live preview:** Streaming partial transcription under the status bar and live dictation “…” indicator in the target field are gone (less CPU/GPU load; REC overlay remains).
+- **Basic cleanup:** Fewer spurious mid-sentence capitals in **Basic** / fast PTT phase (abbreviations and proper-noun heuristics).
+- **Settings UI:** Data storage row is a single **Choose folder** button; shorter focus-control label.
+- **Release tooling:** GitHub publish script and Silero TE asset packaging updates.
+
+## [1.8.39] — 2026-09-21
+
+- **Local STT catalog:** Pick **family** and **quantization** (Whisper Q4–Q8, sherpa INT8/FP16/FP32) with a spec card—disk size, RAM/VRAM, speed & accuracy tiers, language summary—driven by `describe_local_stt_variant`.
+- **Lossless segment queue:** VAD/PTT segments are queued instead of dropped when the pipeline is busy; optional **weak PC** profile spills overflow to disk under `{data_storage}/segment-queue/` with startup replay and cancel cleanup.
+- **Inference memory:** Switching STT provider/model, cloud transcription model, LLM, or Silero TE purges loaded weights (transcriber replace + unload, Silero TE engine, idle/manual unload); activity `memory.inference_purged`.
+- **Silero TE assets:** Weights are no longer bundled in the installer; the app downloads them on demand (GitHub release `silero-te-assets-v1`; publish via `scripts/package-silero-te-release.ps1`).
+- **Status & settings UI:** Quick settings popover on Status (expert weak-PC options); STT picker component refactor; homemaker weak-PC switch only; overlay/status event wiring cleanup.
+- **Silero VAD:** Dedicated on-disk model store path for Silero VAD weights (aligned with local model layout).
+
 ## [1.8.18] — 2026-09-20
 
 - **Windows (Silero TE):** Bundle libtorch runtime DLLs (`c10.dll`, `torch_cpu.dll`, MKL/OpenMP, etc.) next to the app and in NSIS/portable builds via `stage-libtorch-dlls.ps1` — fixes startup error when Silero TE is enabled.

@@ -3,15 +3,15 @@ use std::sync::{
     Arc, Mutex, RwLock,
 };
 
-use crossbeam_channel::bounded;
-
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 
 use serde_json::Value;
 use crate::app::activity_log::{ActivityLevel, ActivityLog};
 use crate::app::controller::{AppController, SharedController};
+use crate::app::dictation_session::DictationSession;
 use crate::app::ptt_postprocess::PttPostprocessSession;
+use crate::app::state::AppState;
 use crate::app::events::emit_activity_log;
 use crate::app::runtime::PipelineRuntime;
 use crate::audio::monitor::MicMonitor;
@@ -23,9 +23,7 @@ use crate::app::memory::{collect_memory_snapshot, needs_local_stt, MemorySnapsho
 use crate::llm::LlmEngine;
 use crate::llm::model_store::needs_local_llm;
 use crate::settings::{has_api_key, AppSettings};
-use crate::transcription::{
-    create_transcriber, streaming::StreamingPreview, LiveDictationSession, TranscriptionProvider,
-};
+use crate::transcription::{create_transcriber, TranscriptionProvider};
 
 pub struct AppContext {
     pub controller: SharedController,
@@ -42,9 +40,8 @@ pub struct AppContext {
     pub mic_monitor: MicMonitor,
     pub llm_engine: Arc<RwLock<LlmEngine>>,
     pub llm_dictation_activity_ms: Arc<AtomicU64>,
-    pub streaming_preview: StreamingPreview,
-    pub live_dictation: LiveDictationSession,
     pub ptt_postprocess: PttPostprocessSession,
+    pub dictation_session: Arc<DictationSession>,
 }
 
 impl AppContext {
@@ -61,17 +58,16 @@ impl AppContext {
         let llm_engine = Arc::new(RwLock::new(LlmEngine::unloaded(None)));
         let llm_dictation_activity_ms =
             Arc::new(AtomicU64::new(dictation_activity_now_ms()));
+        let dictation_session = Arc::new(DictationSession::new());
         let runtime = Arc::new(PipelineRuntime::new(
             transcriber,
             injector,
             http.clone(),
             root_cancel.clone(),
             activity_log.clone(),
-            llm_engine
-                .read()
-                .map(|guard| guard.clone())
-                .unwrap_or_else(|poisoned| poisoned.into_inner().clone()),
+            Arc::clone(&llm_engine),
             Arc::clone(&llm_dictation_activity_ms),
+            Arc::clone(&dictation_session),
         ));
         let mic_monitor = MicMonitor::new();
         let mut audio = AudioPipeline::new(settings.vad_config());
@@ -92,27 +88,103 @@ impl AppContext {
             ptt_lock: Mutex::new(()),
             llm_engine: llm_engine.clone(),
             llm_dictation_activity_ms,
-            streaming_preview: StreamingPreview::new(),
-            live_dictation: LiveDictationSession::new(),
             ptt_postprocess: PttPostprocessSession::new(),
+            dictation_session,
         }
+    }
+
+    /// Starts a new dictation session (PTT press or idle→listening VAD).
+    pub fn begin_dictation_session(&self, app: &AppHandle) -> u64 {
+        let session_id = self.dictation_session.begin_session();
+        crate::injection::focus_target::capture_injection_target();
+        self.maybe_start_focus_watch(app, session_id);
+        session_id
+    }
+
+    pub fn maybe_start_focus_watch(&self, app: &AppHandle, session_id: u64) {
+        let enabled = self
+            .controller
+            .try_lock()
+            .ok()
+            .is_some_and(|c| c.settings().abort_on_focus_loss);
+        if !enabled {
+            return;
+        }
+        let app = app.clone();
+        crate::injection::focus_watch::start_focus_watch(session_id, Box::new(move || {
+            let Some(ctx) = app.try_state::<Arc<AppContext>>() else {
+                return;
+            };
+            ctx.inner().abort_dictation_on_focus_loss(&app);
+        }));
+    }
+
+    pub fn maybe_stop_focus_watch(&self) {
+        if self.runtime.pending_count() > 0 {
+            return;
+        }
+        if self.ptt_postprocess.has_injected_text() {
+            return;
+        }
+        let listening = self
+            .controller
+            .try_lock()
+            .ok()
+            .is_some_and(|c| c.status().state == AppState::Listening);
+        if listening {
+            return;
+        }
+        crate::injection::focus_watch::stop_focus_watch();
+    }
+
+    pub fn abort_dictation_on_focus_loss(&self, app: &AppHandle) {
+        let enabled = self
+            .controller
+            .try_lock()
+            .ok()
+            .is_some_and(|c| c.settings().abort_on_focus_loss);
+        if !enabled {
+            return;
+        }
+        let Some(aborted_id) = self.dictation_session.abort_current() else {
+            return;
+        };
+
+        self.cancel_pending();
+
+        if let Ok(mut audio) = self.audio.lock() {
+            audio.drain_pending_segments();
+            let _ = audio.begin_ptt_release();
+        }
+
+        if let Ok(mut controller) = self.controller.try_lock() {
+            if controller.is_push_to_talk_active() {
+                controller.reset_ptt_active();
+            }
+            let _ = controller.abort_processing(app);
+        }
+
+        crate::game_input::overlay::router::on_listening_stopped(app);
+        crate::game_input::reset_toggle_capture();
+        #[cfg(windows)]
+        crate::game_input::hotkey_win::reset_ptt_key_state();
+
+        self.record_activity(
+            Some(app),
+            ActivityLevel::Warn,
+            "activity.dictation.aborted_focus_loss",
+            serde_json::json!({
+                "session_id": aborted_id,
+                "focus_hwnd": crate::injection::focus_target::injection_focus_hwnd(),
+            }),
+        );
+
+        crate::injection::focus_watch::stop_focus_watch();
+        crate::tray::menu::refresh_tray_menu(app);
     }
 
     pub async fn unload_transcriber(&self) {
         self.runtime.unload_transcriber().await;
-    }
-
-    pub fn start_live_dictation(&self) {
-        let field_indicator = self
-            .controller
-            .try_lock()
-            .ok()
-            .map(|controller| {
-                let settings = controller.settings();
-                settings.push_to_talk && settings.ptt_hold
-            })
-            .unwrap_or(false);
-        self.live_dictation.start(field_indicator);
     }
 
     fn transcriber_cancel_token(&self) -> CancellationToken {
@@ -123,7 +195,7 @@ impl AppContext {
     }
 
     /// Cancel in-flight STT work and issue a fresh token for the next transcriber instance.
-    fn rotate_transcriber_cancel(&self) -> CancellationToken {
+    pub(crate) fn rotate_transcriber_cancel(&self) -> CancellationToken {
         let mut guard = self
             .transcriber_cancel
             .lock()
@@ -133,13 +205,19 @@ impl AppContext {
         guard.clone()
     }
 
-    pub fn reload_transcriber(&self, settings: &AppSettings) {
+    pub async fn reload_transcriber(&self, settings: &AppSettings) {
         let transcriber = create_transcriber(
             settings,
             self.http.clone(),
             self.transcriber_cancel_token(),
         );
-        self.runtime.set_transcriber(transcriber);
+        self.runtime.replace_transcriber(transcriber).await;
+    }
+
+    pub fn unload_silero_te_engine(&self) {
+        if let Ok(engine) = crate::text::silero_te::SileroTeEngine::global().lock() {
+            engine.unload();
+        }
     }
 
     pub fn sync_llm_engine(&self, settings: &AppSettings) {
@@ -219,13 +297,22 @@ impl AppContext {
         let llm_was_ready = self.llm_engine.read().map(|e| e.is_ready()).unwrap_or(false);
         let whisper_was_loaded = self.runtime.is_whisper_model_loaded();
 
+        if plan.purge_inference_memory {
+            self.unload_silero_te_engine();
+            self.record_activity(
+                app,
+                ActivityLevel::Info,
+                "activity.memory.inference_purged",
+                Value::Object(Default::default()),
+            );
+        }
+
         if plan.reload_transcriber {
             let _ = self.rotate_transcriber_cancel();
-            self.unload_transcriber().await;
-            self.reload_transcriber(settings);
+            self.reload_transcriber(settings).await;
         } else if !needs_local_stt(settings) && whisper_was_loaded {
             let _ = self.rotate_transcriber_cancel();
-            self.unload_transcriber().await;
+            self.reload_transcriber(settings).await;
         }
 
         if plan.reload_llm_engine || !needs_local_llm(settings) {
@@ -299,6 +386,15 @@ impl AppContext {
     }
 
     pub fn wire_audio_callbacks(self: &Arc<Self>, app: &tauri::AppHandle) {
+        if let Ok(controller) = self.controller.lock() {
+            let settings = controller.settings().clone();
+            self.runtime.replay_spilled_segments(
+                app.clone(),
+                Arc::clone(&self.controller),
+                settings,
+            );
+        }
+
         let ctx = Arc::clone(self);
         let app_handle = app.clone();
         let callbacks_enabled = Arc::clone(&self.audio_callbacks_enabled);
@@ -332,7 +428,10 @@ impl AppContext {
             );
 
             let settings = controller.settings().clone();
-            ctx.spawn_local_stt_load_in_background(&settings);
+            let backlogged = ctx.runtime.pending_count() > 0;
+            if !backlogged || !settings.should_reduce_prewarm_when_backlogged() {
+                ctx.spawn_local_stt_load_in_background(&settings);
+            }
             let ptt_streaming = settings.push_to_talk
                 && controller.is_push_to_talk_active()
                 && settings.ptt_hold;
@@ -346,11 +445,18 @@ impl AppContext {
             }
 
             if stream_live || ptt_streaming {
-                crate::injection::focus_target::capture_injection_target();
-                ctx.streaming_preview.start();
-            }
-            if stream_live {
-                ctx.start_live_dictation();
+                let pending = ctx.runtime.pending_count();
+                if was_ready && pending == 0 && !ptt_streaming {
+                    ctx.begin_dictation_session(&app_handle);
+                } else {
+                    crate::injection::focus_target::capture_injection_target();
+                    let session_id = ctx.dictation_session.current_id();
+                    if session_id == 0 {
+                        ctx.begin_dictation_session(&app_handle);
+                    } else {
+                        ctx.maybe_start_focus_watch(&app_handle, session_id);
+                    }
+                }
             }
         });
 
@@ -405,61 +511,50 @@ impl AppContext {
                 return;
             }
 
-            ctx.record_activity(
-                Some(&app_handle),
-                ActivityLevel::Info,
-                "activity.vad.segment_ended",
-                serde_json::json!({ "ms": segment.duration_ms }),
-            );
-
-            let keep_preview = ctx.controller.try_lock().ok().is_some_and(|controller| {
-                let ptt_active = controller.is_push_to_talk_active();
-                if !ptt_active {
-                    return false;
-                }
-                settings.ai_postprocess_mode().is_some()
-                    || (settings.push_to_talk && settings.ptt_hold)
-            });
-            if !keep_preview {
-                ctx.streaming_preview.stop_and_clear(&app_handle);
-            }
-
-            ctx.runtime.process_segment(
+            match ctx.runtime.enqueue_segment(
                 app_handle.clone(),
                 ctx.controller.clone(),
-                segment,
+                segment.clone(),
                 settings,
-            );
-        });
-
-        let (preview_tx, preview_rx) =
-            bounded::<crate::audio::segment::AudioSegment>(4);
-        let ctx_preview = Arc::clone(self);
-        let app_preview = app.clone();
-        std::thread::Builder::new()
-            .name("live-preview".into())
-            .spawn(move || {
-                while let Ok(segment) = preview_rx.recv() {
-                    ctx_preview.record_activity(
-                        Some(&app_preview),
+            ) {
+                crate::app::runtime::EnqueueResult::Ok { .. } => {
+                    ctx.record_activity(
+                        Some(&app_handle),
                         ActivityLevel::Info,
-                        "activity.live.snapshot",
+                        "activity.vad.segment_ended",
                         serde_json::json!({ "ms": segment.duration_ms }),
                     );
-
-                    ctx_preview.streaming_preview.handle_snapshot(
-                        app_preview.clone(),
-                        Arc::clone(&ctx_preview),
-                        segment,
+                }
+                crate::app::runtime::EnqueueResult::DiskQueueFull => {
+                    ctx.record_activity(
+                        Some(&app_handle),
+                        ActivityLevel::Error,
+                        "activity.segment_queue_disk_full",
+                        serde_json::json!({ "ms": segment.duration_ms }),
                     );
                 }
-            })
-            .expect("live preview receiver thread");
+                crate::app::runtime::EnqueueResult::PendingQueueFull => {
+                    ctx.record_activity(
+                        Some(&app_handle),
+                        ActivityLevel::Warn,
+                        "activity.segment_dropped_queue_full",
+                        serde_json::json!({ "ms": segment.duration_ms }),
+                    );
+                }
+                crate::app::runtime::EnqueueResult::QueueClosed => {
+                    ctx.record_activity(
+                        Some(&app_handle),
+                        ActivityLevel::Warn,
+                        "activity.segment_dropped_busy",
+                        Value::Object(Default::default()),
+                    );
+                }
+            }
+        });
 
         match self.audio.lock() {
             Ok(mut audio) => {
                 audio.set_callbacks(on_speech_started, on_speech_ended);
-                audio.set_preview_sender(preview_tx);
             }
             Err(_) => {
                 self.record_activity(
@@ -481,6 +576,9 @@ impl AppContext {
 
     pub fn cancel_pending(&self) {
         self.runtime.cancel_pending();
+        if let Ok(controller) = self.controller.try_lock() {
+            self.runtime.clear_spill_queue(controller.settings());
+        }
         self.root_cancel.cancel();
         self.ptt_postprocess.reset();
         if let Ok(audio) = self.audio.lock() {

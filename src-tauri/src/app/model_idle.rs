@@ -215,14 +215,52 @@ impl AppContext {
         if !self.runtime.is_whisper_model_loaded() {
             return;
         }
-        if let Ok(engine) = crate::text::silero_te::SileroTeEngine::global().lock() {
-            engine.unload();
-        }
-        self.unload_transcriber().await;
+        self.unload_silero_te_engine();
+        let settings = self
+            .controller
+            .lock()
+            .map(|c| c.settings().clone())
+            .unwrap_or_else(|_| crate::settings::AppSettings::default());
+        let _ = self.rotate_transcriber_cancel();
+        self.reload_transcriber(&settings).await;
         self.record_activity(
             app,
             ActivityLevel::Info,
             "activity.memory.stt_idle_unloaded",
+            serde_json::Value::Object(Default::default()),
+        );
+    }
+
+    /// Drop in-memory local STT / LLM / Silero TE weights (manual action from the status UI).
+    pub async fn force_unload_loaded_models(&self, app: Option<&AppHandle>) {
+        let llm_loaded = self
+            .llm_engine
+            .read()
+            .map(|engine| engine.is_ready())
+            .unwrap_or(false);
+        let stt_loaded = self.runtime.is_whisper_model_loaded();
+        let te_loaded = crate::text::silero_te::SileroTeEngine::global()
+            .lock()
+            .map(|engine| engine.is_loaded())
+            .unwrap_or(false);
+
+        if !llm_loaded && !stt_loaded && !te_loaded {
+            return;
+        }
+
+        if llm_loaded {
+            self.unload_local_llm_for_idle(app);
+        }
+        if stt_loaded {
+            self.unload_local_stt_for_idle(app).await;
+        } else if te_loaded {
+            self.unload_silero_te_engine();
+        }
+
+        self.record_activity(
+            app,
+            ActivityLevel::Info,
+            "activity.memory.force_unloaded",
             serde_json::Value::Object(Default::default()),
         );
     }

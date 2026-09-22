@@ -42,7 +42,7 @@ use settings::{
 };
 use setup::HomemakerLocalSetup;
 use text::dictionary::{
-    ensure_dictionary_file, open_dictionary_folder, resolve_dictionary_path,
+    ensure_dictionary_file,
 };
 use text::skill::{import_skill, list_skills, open_skills_folder, AiSkillInfo};
 use tauri::{AppHandle, Emitter, Manager};
@@ -134,7 +134,8 @@ pub(crate) fn apply_audio_action(
             result
         }
         AudioAction::Disable => {
-            ctx.runtime.cancel_pending();
+            ctx.cancel_pending();
+            ctx.runtime.reset_cancel();
             ctx.set_audio_callbacks_enabled(false);
             let vad_join = {
                 let mut audio = ctx
@@ -329,7 +330,8 @@ pub(crate) fn apply_ptt_active(
     active: bool,
 ) -> Result<bool, error::AppError> {
     if active {
-        crate::injection::focus_target::capture_injection_target();
+        ctx.runtime.reset_cancel();
+        ctx.begin_dictation_session(app);
         ctx.set_audio_callbacks_enabled(false);
         let vad_join = {
             let mut audio = ctx
@@ -348,7 +350,12 @@ pub(crate) fn apply_ptt_active(
             }
         }
         if let Ok(audio) = ctx.audio.lock() {
-            audio.set_ptt_vad_segments_on_silence(true);
+            let segment_on_silence = ctx
+                .controller
+                .try_lock()
+                .ok()
+                .is_some_and(|c| c.settings().push_to_talk && !c.settings().ptt_hold);
+            audio.set_ptt_vad_segments_on_silence(segment_on_silence);
         }
         let capture_status = ctx.audio.lock().ok().map(|audio| {
             json!({
@@ -456,12 +463,44 @@ pub(crate) fn complete_ptt_release(
             "activity.ptt.released_flushed",
             json!({ "ms": segment.duration_ms }),
         );
-        ctx.runtime.process_segment(
+        match ctx.runtime.enqueue_segment(
             app.clone(),
             ctx.controller.clone(),
-            segment,
+            segment.clone(),
             settings,
-        );
+        ) {
+            crate::app::runtime::EnqueueResult::Ok { .. } => {}
+            crate::app::runtime::EnqueueResult::DiskQueueFull => {
+                ctx.record_activity(
+                    Some(app),
+                    ActivityLevel::Error,
+                    "activity.segment_queue_disk_full",
+                    json!({ "ms": segment.duration_ms }),
+                );
+                if let Ok(mut audio) = ctx.audio.lock() {
+                    audio.drain_pending_segments();
+                }
+                return Ok(false);
+            }
+            crate::app::runtime::EnqueueResult::PendingQueueFull => {
+                ctx.record_activity(
+                    Some(app),
+                    ActivityLevel::Warn,
+                    "activity.segment_dropped_queue_full",
+                    json!({ "ms": segment.duration_ms }),
+                );
+                if let Ok(mut audio) = ctx.audio.lock() {
+                    audio.drain_pending_segments();
+                }
+                return Ok(false);
+            }
+            crate::app::runtime::EnqueueResult::QueueClosed => {
+                if let Ok(mut audio) = ctx.audio.lock() {
+                    audio.drain_pending_segments();
+                }
+                return Ok(false);
+            }
+        }
         if let Ok(mut audio) = ctx.audio.lock() {
             audio.drain_pending_segments();
         }
@@ -693,7 +732,7 @@ async fn recover_engine(
             .map_err(|_| "application controller lock poisoned".to_string())?;
         controller.settings().clone()
     };
-    ctx.reload_transcriber(&settings);
+    ctx.reload_transcriber(&settings).await;
     spawn_prewarm_microphone(
         ctx.clone(),
         Some(app.clone()),
@@ -721,6 +760,19 @@ fn prewarm_microphone(
     device_id: Option<String>,
 ) -> Result<(), String> {
     spawn_prewarm_microphone(ctx.inner().clone(), Some(app), device_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn force_unload_local_models(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<(), String> {
+    let ctx = ctx.inner().clone();
+    if ctx.runtime.pending_count() > 0 {
+        return Err("models_unload_busy".to_string());
+    }
+    ctx.force_unload_loaded_models(Some(&app)).await;
     Ok(())
 }
 
@@ -877,6 +929,8 @@ async fn calibrate_vad_threshold(
 
     save_settings(&plan.settings).map_err(|error| error.to_string())?;
 
+    let _ = app.emit("app://settings-changed", &plan.settings);
+
     Ok(threshold)
 }
 
@@ -893,19 +947,16 @@ struct WhisperModelStatus {
 
 #[tauri::command]
 fn get_whisper_model_status(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<WhisperModelStatus, String> {
-    let settings = ctx
-        .inner()
-        .controller
-        .lock()
-        .map_err(|_| "application controller lock poisoned".to_string())?
-        .settings()
-        .clone();
-    let kind = settings.local_stt_model;
+    let settings = settings_for_models_dir(ctx.inner())?;
+    let variant = crate::settings::normalize_variant(crate::settings::LocalSttVariant::new(
+        settings.local_stt_family,
+        settings.local_stt_quant,
+    ));
     let path =
         transcription::local_stt_model_store::resolve_model_bundle(&settings).map_err(|e| e.to_string())?;
     Ok(WhisperModelStatus {
         path: path.display().to_string(),
-        exists: transcription::local_stt_model_store::bundle_ready(&path, kind),
+        exists: transcription::local_stt_model_store::bundle_ready_for_settings(&settings, variant),
     })
 }
 
@@ -972,7 +1023,7 @@ async fn download_whisper_model(
     );
 
     if settings.local_stt_model.whisper_kind() == Some(model) {
-        ctx.inner().reload_transcriber(&settings);
+        ctx.inner().reload_transcriber(&settings).await;
         spawn_prewarm_local_models(ctx.inner().clone(), Some(app.clone()), settings);
     }
 
@@ -983,14 +1034,27 @@ async fn download_whisper_model(
 fn list_local_stt_models(
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<Vec<transcription::local_stt_model_store::LocalSttModelInfo>, String> {
-    let settings = ctx
-        .inner()
-        .controller
-        .try_lock()
-        .map_err(|_| "application is busy, try again".to_string())?
-        .settings()
-        .clone();
+    let settings = settings_for_models_dir(ctx.inner())?;
     transcription::local_stt_model_store::list_models(&settings).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_local_stt_families() -> Vec<transcription::local_stt_model_store::LocalSttFamilyInfo> {
+    transcription::local_stt_model_store::list_families()
+}
+
+#[tauri::command]
+fn describe_local_stt_variant(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    family: crate::settings::LocalSttFamily,
+    quant: crate::settings::LocalSttQuant,
+) -> Result<transcription::local_stt_model_store::LocalSttVariantInfo, String> {
+    let settings = settings_for_models_dir(ctx.inner())?;
+    let variant = crate::settings::normalize_variant(crate::settings::LocalSttVariant::new(
+        family, quant,
+    ));
+    transcription::local_stt_model_store::describe_variant(&settings, variant)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -998,6 +1062,17 @@ async fn download_local_stt_model(
     app: AppHandle,
     ctx: tauri::State<'_, Arc<AppContext>>,
     model: LocalSttModelKind,
+) -> Result<String, String> {
+    let variant = crate::settings::migrate_from_legacy_stt_model(model);
+    download_local_stt_variant(app, ctx, variant.family, variant.quant).await
+}
+
+#[tauri::command]
+async fn download_local_stt_variant(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    family: crate::settings::LocalSttFamily,
+    quant: crate::settings::LocalSttQuant,
 ) -> Result<String, String> {
     use crate::app::events::WHISPER_MODEL_DOWNLOAD_PROGRESS;
 
@@ -1009,17 +1084,18 @@ async fn download_local_stt_model(
         .settings()
         .clone();
 
+    let variant = crate::settings::LocalSttVariant::new(family, quant);
     let http = transcription::local_stt_model_store::download_client_for_stt()
         .map_err(|error| error.to_string())?;
     ctx.inner().record_activity(
         Some(&app),
         ActivityLevel::Info,
         "activity.model.download_started",
-        json!({ "model": model.as_api_str() }),
+        json!({ "model": variant.as_api_id() }),
     );
 
     let app_for_progress = app.clone();
-    let path = transcription::local_stt_model_store::download_model(&http, &settings, model, |progress| {
+    let path = transcription::local_stt_model_store::download_model(&http, &settings, variant, |progress| {
         let _ = app_for_progress.emit(WHISPER_MODEL_DOWNLOAD_PROGRESS, progress);
     })
     .await
@@ -1039,23 +1115,27 @@ async fn download_local_stt_model(
         json!({ "path": path.display().to_string() }),
     );
 
-    if settings.local_stt_model == model {
-        ctx.inner().reload_transcriber(&settings);
+    if settings.local_stt_variant() == variant {
+        ctx.inner().reload_transcriber(&settings).await;
         spawn_prewarm_local_models(ctx.inner().clone(), Some(app.clone()), settings);
     }
 
     Ok(path.display().to_string())
 }
 
+fn settings_for_models_dir(ctx: &AppContext) -> Result<crate::settings::AppSettings, String> {
+    let mut settings = if let Ok(controller) = ctx.controller.try_lock() {
+        controller.settings().clone()
+    } else {
+        crate::settings::load_settings().map_err(|error| error.to_string())?
+    };
+    settings.repair_local_stt_selection();
+    Ok(settings)
+}
+
 #[tauri::command]
 fn get_whisper_models_dir(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<String, String> {
-    let settings = ctx
-        .inner()
-        .controller
-        .lock()
-        .map_err(|_| "application controller lock poisoned".to_string())?
-        .settings()
-        .clone();
+    let settings = settings_for_models_dir(ctx.inner())?;
     model_store::resolve_models_dir(&settings)
         .map(|path| path.display().to_string())
         .map_err(|error| error.to_string())
@@ -1170,13 +1250,7 @@ async fn download_llm_model(
 
 #[tauri::command]
 fn get_llm_models_dir(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<String, String> {
-    let settings = ctx
-        .inner()
-        .controller
-        .lock()
-        .map_err(|_| "application controller lock poisoned".to_string())?
-        .settings()
-        .clone();
+    let settings = settings_for_models_dir(ctx.inner())?;
     llm_model_store::resolve_models_dir(&settings)
         .map(|path| path.display().to_string())
         .map_err(|error| error.to_string())
@@ -1187,6 +1261,185 @@ fn pick_llm_models_dir() -> Result<Option<String>, String> {
     Ok(rfd::FileDialog::new()
         .pick_folder()
         .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[derive(serde::Serialize)]
+struct SileroTeModelStatus {
+    path: String,
+    exists: bool,
+    size_mb: u32,
+}
+
+#[tauri::command]
+fn get_silero_te_model_status(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<SileroTeModelStatus, String> {
+    #[cfg(not(feature = "silero-te"))]
+    {
+        let _ = ctx;
+        return Ok(SileroTeModelStatus {
+            path: String::new(),
+            exists: false,
+            size_mb: 0,
+        });
+    }
+    #[cfg(feature = "silero-te")]
+    {
+        let settings = settings_for_models_dir(ctx.inner())?;
+        let status = crate::text::silero_te::model_store::status(&settings)
+            .map_err(|error| error.to_string())?;
+        Ok(SileroTeModelStatus {
+            path: status.path,
+            exists: status.exists,
+            size_mb: status.size_mb,
+        })
+    }
+}
+
+#[tauri::command]
+async fn download_silero_te_model(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<String, String> {
+    #[cfg(not(feature = "silero-te"))]
+    {
+        let _ = (app, ctx);
+        return Err("Silero TE is not compiled into this build".to_string());
+    }
+    #[cfg(feature = "silero-te")]
+    {
+        use crate::app::events::SILERO_TE_DOWNLOAD_PROGRESS;
+
+        let settings = settings_for_models_dir(ctx.inner())?;
+
+        let http = crate::text::silero_te::model_store::download_http_client()
+            .map_err(|error| error.to_string())?;
+        ctx.inner().record_activity(
+            Some(&app),
+            ActivityLevel::Info,
+            "activity.silero_te.download_started",
+            json!({}),
+        );
+
+        let app_for_progress = app.clone();
+        let _ = app_for_progress.emit(
+            SILERO_TE_DOWNLOAD_PROGRESS,
+            transcription::model_store::DownloadProgress::new(0, None),
+        );
+        let path = crate::text::silero_te::model_store::download_assets(&http, &settings, |progress| {
+            let _ = app_for_progress.emit(SILERO_TE_DOWNLOAD_PROGRESS, progress);
+        })
+        .await
+        .inspect_err(|error| {
+            ctx.inner().record_activity(
+                Some(&app),
+                ActivityLevel::Error,
+                "activity.silero_te.download_failed",
+                json!({ "error": error.clone() }),
+            );
+        })?;
+
+        ctx.inner().record_activity(
+            Some(&app),
+            ActivityLevel::Info,
+            "activity.silero_te.download_done",
+            json!({ "path": path.display().to_string() }),
+        );
+
+        if let Ok(engine) = crate::text::silero_te::SileroTeEngine::global().lock() {
+            engine.unload();
+        }
+
+        Ok(path.display().to_string())
+    }
+}
+
+#[derive(serde::Serialize)]
+struct SileroVadModelStatus {
+    path: String,
+    exists: bool,
+    size_mb: u32,
+}
+
+#[tauri::command]
+fn get_silero_vad_model_status(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<SileroVadModelStatus, String> {
+    #[cfg(not(feature = "vad-silero"))]
+    {
+        let _ = ctx;
+        return Ok(SileroVadModelStatus {
+            path: String::new(),
+            exists: false,
+            size_mb: 0,
+        });
+    }
+    #[cfg(feature = "vad-silero")]
+    {
+        let settings = settings_for_models_dir(ctx.inner())?;
+        let status = crate::vad::silero_model::status(&settings)
+            .map_err(|error| error.to_string())?;
+        Ok(SileroVadModelStatus {
+            path: status.path,
+            exists: status.exists,
+            size_mb: status.size_mb,
+        })
+    }
+}
+
+#[tauri::command]
+async fn download_silero_vad_model(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<String, String> {
+    #[cfg(not(feature = "vad-silero"))]
+    {
+        let _ = (app, ctx);
+        return Err("Silero VAD is not compiled into this build".to_string());
+    }
+    #[cfg(feature = "vad-silero")]
+    {
+        use crate::app::events::SILERO_VAD_DOWNLOAD_PROGRESS;
+
+        let settings = ctx
+            .inner()
+            .controller
+            .lock()
+            .map_err(|_| "application controller lock poisoned".to_string())?
+            .settings()
+            .clone();
+
+        let http = crate::vad::silero_model::download_http_client().map_err(|error| error.to_string())?;
+        ctx.inner().record_activity(
+            Some(&app),
+            ActivityLevel::Info,
+            "activity.silero_vad.download_started",
+            json!({}),
+        );
+
+        let app_for_progress = app.clone();
+        let path = crate::vad::silero_model::download_model(&http, &settings, |progress| {
+            let _ = app_for_progress.emit(SILERO_VAD_DOWNLOAD_PROGRESS, progress);
+        })
+        .await
+        .inspect_err(|error| {
+            ctx.inner().record_activity(
+                Some(&app),
+                ActivityLevel::Error,
+                "activity.silero_vad.download_failed",
+                json!({ "error": error.clone() }),
+            );
+        })?;
+
+        ctx.inner().record_activity(
+            Some(&app),
+            ActivityLevel::Info,
+            "activity.silero_vad.download_done",
+            json!({ "path": path.display().to_string() }),
+        );
+
+        Ok(path.display().to_string())
+    }
 }
 
 #[tauri::command]
@@ -1250,31 +1503,55 @@ fn get_dictionary_path(
         .map_err(|_| "application controller lock poisoned".to_string())?
         .settings()
         .clone();
-    resolve_dictionary_path(settings.transcription_dictionary_path.as_deref())
+    crate::settings::resolve_dictionary_file_path(&settings)
         .map(|path| path.display().to_string())
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn open_transcription_dictionary_folder(
-    ctx: tauri::State<'_, Arc<AppContext>>,
-) -> Result<(), String> {
+fn get_data_storage_dir(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<String, String> {
     let settings = ctx
         .controller
         .lock()
         .map_err(|_| "application controller lock poisoned".to_string())?
         .settings()
         .clone();
-    open_dictionary_folder(settings.transcription_dictionary_path.as_deref())
+    crate::settings::resolve_data_storage_root(&settings)
+        .map(|path| path.display().to_string())
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn pick_transcription_dictionary() -> Result<Option<String>, String> {
+fn pick_data_storage_dir() -> Result<Option<String>, String> {
     Ok(rfd::FileDialog::new()
-        .add_filter("Dictionary", &["toml"])
-        .pick_file()
+        .pick_folder()
         .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn open_data_storage_folder(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<(), String> {
+    let settings = ctx
+        .controller
+        .lock()
+        .map_err(|_| "application controller lock poisoned".to_string())?
+        .settings()
+        .clone();
+    let root = crate::settings::resolve_data_storage_root(&settings)
+        .map_err(|error| error.to_string())?;
+    crate::settings::ensure_data_storage_layout(&root).map_err(|error| error.to_string())?;
+    crate::text::dictionary::open_folder(&root).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_transcription_dictionary_folder(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<(), String> {
+    open_data_storage_folder(ctx)
+}
+
+#[tauri::command]
+fn pick_transcription_dictionary() -> Result<Option<String>, String> {
+    pick_data_storage_dir()
 }
 
 #[tauri::command]
@@ -1367,6 +1644,7 @@ pub fn run() {
             get_devices,
             prewarm_microphone,
             prewarm_local_models,
+            force_unload_local_models,
             set_api_key,
             clear_api_key_command,
             has_api_key_command,
@@ -1381,6 +1659,9 @@ pub fn run() {
             list_transcription_languages,
             list_whisper_models,
             list_local_stt_models,
+            list_local_stt_families,
+            describe_local_stt_variant,
+            download_local_stt_variant,
             download_whisper_model,
             download_local_stt_model,
             get_whisper_models_dir,
@@ -1390,11 +1671,18 @@ pub fn run() {
             download_llm_model,
             get_llm_models_dir,
             pick_llm_models_dir,
+            get_silero_te_model_status,
+            download_silero_te_model,
+            get_silero_vad_model_status,
+            download_silero_vad_model,
             list_ai_skills,
             open_ai_skills_folder,
             import_ai_skill,
             pick_and_import_ai_skill,
             get_dictionary_path,
+            get_data_storage_dir,
+            pick_data_storage_dir,
+            open_data_storage_folder,
             open_transcription_dictionary_folder,
             pick_transcription_dictionary,
             get_app_info,
@@ -1508,10 +1796,6 @@ pub fn run() {
             });
 
             tray::menu::refresh_tray_menu(&handle);
-
-            if let Ok(resource_dir) = handle.path().resource_dir() {
-                crate::text::silero_te::store::set_bundled_dir(resource_dir.join("silero-te"));
-            }
 
             if settings.recording_indicator {
                 let overlay_prewarm = handle.clone();

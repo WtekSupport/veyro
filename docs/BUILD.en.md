@@ -21,7 +21,7 @@ Detailed Russian guide: [BUILD.md](BUILD.md).
 
 Default Windows builds enable **local Whisper + sherpa-onnx STT (Parakeet / Qwen3-ASR) + local LLM** and pick the best GPU backend when SDKs are present.
 
-Sherpa models download on demand into `{models}/sherpa/…` (tar.bz2 from [k2-fsa/sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)). Runtime EPs: **CoreML** (Apple Silicon), **DirectML** (Windows, feature `local-sherpa-directml`), **CUDA** (`local-sherpa-cuda`), else CPU.
+Local STT uses **model family + quantization** in Voice settings (Whisper Q4/Q5/Q8 from HF `ggerganov/whisper.cpp`; Sherpa INT8 from [k2-fsa asr-models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models); Parakeet FP16/FP32 from pinned Hugging Face archives). Sherpa bundles live under `{models}/sherpa/{family}/{int8|fp16|fp32}/`. Runtime EPs: **CoreML** (Apple Silicon), **DirectML** (Windows), **CUDA**, else CPU.
 
 ## Cloud-only / minimal build (matches GitHub CI)
 

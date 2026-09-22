@@ -8,11 +8,11 @@ pub mod device;
 pub mod level;
 pub mod monitor;
 pub mod pipeline;
-pub mod preview;
 pub mod warmup;
 pub mod resampler;
 pub mod ring_buffer;
 pub mod segment;
+pub mod segment_queue_store;
 pub mod stream;
 
 pub use capture::CaptureMode;

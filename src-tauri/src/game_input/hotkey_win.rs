@@ -183,7 +183,7 @@ fn dispatch_latched_keydown() {
 }
 
 /// Latched keys (ScrollLock etc.) bypass the bounded hook worker queue so edges are never dropped
-/// when live dictation or other keys flood `EVENT_TX`.
+/// when injected keys or other events flood `EVENT_TX`.
 fn try_dispatch_latched_key_direct(vk: u32, pressed: bool) -> bool {
     let Some((binding, _block_system)) = current_runtime_config() else {
         return false;
@@ -612,7 +612,7 @@ unsafe extern "system" fn keyboard_proc(
     if pressed && (kb.flags.0 & LLKHF_REPEAT) != 0 {
         return CallNextHookEx(None, code, wparam, lparam);
     }
-    // Ignore our own injected keystrokes (live dictation dots/backspaces); otherwise they flood
+    // Ignore our own injected keystrokes; otherwise they flood
     // the hook queue and real hotkey edges (ScrollLock stop) get dropped on try_send.
     if (kb.flags.0 & LLKHF_INJECTED) != 0
         || windows_keyboard::is_tagged_injection(kb.dwExtraInfo)

@@ -5,8 +5,6 @@ pub fn show_recording_overlay(app: &AppHandle) {
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
         let _ = crate::window::show_overlay_recording(&app);
-        #[cfg(windows)]
-        crate::injection::focus_target::restore_injection_target();
     });
 }
 

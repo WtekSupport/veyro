@@ -7,9 +7,13 @@ use crate::audio::device::list_devices;
 use crate::error::ConfigError;
 use crate::llm::ai_rewrite_available;
 use crate::settings::config::{AppSettings, LlmModelKind, TextProcessingMode, UiLocale};
+use crate::settings::local_stt::LocalSttModelKind;
+use crate::settings::stt_catalog::{
+    migrate_from_legacy_stt_model, normalize_variant, LocalSttVariant,
+};
 use crate::settings::homemaker::normalize_homemaker_settings;
 use crate::setup::apply_homemaker_local_recommendations;
-use crate::settings::{local_llm_gpu_compiled, whisper_gpu_compiled};
+use crate::settings::{local_llm_gpu_compiled, local_stt_gpu_compiled};
 use crate::settings::encryption::{decrypt_json, encrypt_json, EncryptedEnvelope};
 use crate::settings::secrets::has_api_key;
 
@@ -51,6 +55,8 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
     let llm_gpu_normalized = normalize_local_llm_gpu_settings(&mut settings);
     let homemaker_normalized = normalize_homemaker_settings(&mut settings);
     let locale_normalized = normalize_locale_dependent_settings(&mut settings);
+    let stt_normalized = normalize_local_stt_selection(&mut settings);
+    let storage_normalized = crate::settings::normalize_data_storage(&mut settings);
     settings.validate()?;
 
     if migrated_from_plaintext
@@ -61,6 +67,8 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         || llm_gpu_normalized
         || homemaker_normalized
         || locale_normalized
+        || stt_normalized
+        || storage_normalized
     {
         save_settings(&settings)?;
     }
@@ -104,11 +112,15 @@ fn parse_settings_json(contents: &str) -> Result<AppSettings, ConfigError> {
 
     migrate_legacy_fields(&mut value);
 
-    serde_json::from_value(value).map_err(|error| ConfigError::Invalid(error.to_string()))
+    let mut settings: AppSettings =
+        serde_json::from_value(value).map_err(|error| ConfigError::Invalid(error.to_string()))?;
+    normalize_local_stt_selection(&mut settings);
+    settings.sync_local_stt_model_from_variant();
+    Ok(settings)
 }
 
 fn normalize_gpu_settings(settings: &mut AppSettings) -> bool {
-    if !whisper_gpu_compiled() {
+    if !local_stt_gpu_compiled() {
         if settings.local_whisper_use_gpu {
             settings.local_whisper_use_gpu = false;
             return true;
@@ -219,6 +231,56 @@ fn sanitize_microphone_device(settings: &mut AppSettings) -> bool {
     before != settings.microphone_device
 }
 
+#[cfg(test)]
+mod stt_migration_tests {
+    use super::*;
+    use crate::settings::local_stt::LocalSttModelKind;
+    use crate::settings::stt_catalog::{LocalSttFamily, LocalSttQuant};
+
+    #[test]
+    fn migrates_local_stt_model_to_family_and_quant() {
+        let mut value = serde_json::json!({
+            "local_stt_model": "parakeet_tdt_0_6b_v3"
+        });
+        migrate_legacy_fields(&mut value);
+        assert_eq!(
+            value["local_stt_family"].as_str(),
+            Some("parakeet_tdt_0_6b_v3")
+        );
+        assert_eq!(value["local_stt_quant"].as_str(), Some("int8"));
+    }
+
+    #[test]
+    fn parse_settings_json_syncs_legacy_kind() {
+        let json = r#"{"local_stt_family":"whisper_base","local_stt_quant":"legacy","local_stt_model":"small"}"#;
+        let settings = parse_settings_json(json).expect("settings");
+        assert_eq!(settings.local_stt_family, LocalSttFamily::WhisperBase);
+        assert_eq!(settings.local_stt_quant, LocalSttQuant::Legacy);
+        assert_eq!(settings.local_stt_model, LocalSttModelKind::WhisperBase);
+    }
+
+    #[test]
+    fn parse_settings_json_repairs_sherpa_model_with_whisper_family() {
+        let json = r#"{"local_stt_family":"whisper_base","local_stt_quant":"q5","local_stt_model":"qwen3_asr_0_6b"}"#;
+        let settings = parse_settings_json(json).expect("settings");
+        assert_eq!(settings.local_stt_family, LocalSttFamily::Qwen3Asr06b);
+        assert_eq!(settings.local_stt_quant, LocalSttQuant::Int8);
+        assert_eq!(settings.local_stt_model, LocalSttModelKind::Qwen3Asr06b);
+    }
+}
+
+fn normalize_local_stt_selection(settings: &mut AppSettings) -> bool {
+    if !settings.local_stt_model.is_whisper() && settings.local_stt_family.is_whisper() {
+        let variant = LocalSttVariant::from_legacy_kind(settings.local_stt_model);
+        settings.set_local_stt_variant(variant);
+        return true;
+    }
+
+    let before = (settings.local_stt_family, settings.local_stt_quant);
+    settings.set_local_stt_variant(normalize_variant(settings.local_stt_variant()));
+    (settings.local_stt_family, settings.local_stt_quant) != before
+}
+
 fn migrate_legacy_fields(value: &mut Value) {
     if value.get("text_processing_mode").is_none() {
         let mode = value
@@ -259,6 +321,20 @@ fn migrate_legacy_fields(value: &mut Value) {
     if value.get("local_stt_model").is_none() {
         if let Some(legacy) = value.get("local_whisper_model").cloned() {
             value["local_stt_model"] = legacy;
+        }
+    }
+
+    if value.get("local_stt_family").is_none() {
+        if let Some(model_value) = value.get("local_stt_model").cloned() {
+            if let Ok(kind) = serde_json::from_value::<LocalSttModelKind>(model_value) {
+                let variant = migrate_from_legacy_stt_model(kind);
+                if let Ok(family) = serde_json::to_value(variant.family) {
+                    value["local_stt_family"] = family;
+                }
+                if let Ok(quant) = serde_json::to_value(variant.quant) {
+                    value["local_stt_quant"] = quant;
+                }
+            }
         }
     }
 

@@ -50,22 +50,11 @@ impl DownloadProgress {
 }
 
 pub fn default_models_dir() -> Result<PathBuf, ConfigError> {
-    let base = dirs::config_dir().ok_or_else(|| {
-        ConfigError::Read("unable to resolve OS config directory".to_string())
-    })?;
-    Ok(base.join("Veyro").join("llm-models"))
+    Ok(crate::settings::default_data_storage_root()?.join(crate::settings::SUBDIR_LLM_MODELS))
 }
 
 pub fn resolve_models_dir(settings: &AppSettings) -> Result<PathBuf, ConfigError> {
-    if let Some(dir) = settings
-        .local_llm_models_dir
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        return Ok(PathBuf::from(dir));
-    }
-    default_models_dir()
+    crate::settings::resolve_llm_models_dir(settings)
 }
 
 pub fn model_path_for(settings: &AppSettings, kind: LlmModelKind) -> Result<PathBuf, ConfigError> {

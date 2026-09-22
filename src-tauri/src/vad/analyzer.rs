@@ -26,7 +26,7 @@ impl VoiceAnalyzer {
         let effective = effective_engine(engine);
         #[cfg(feature = "vad-silero")]
         let silero = if effective == VadEngine::Silero {
-            match wavekat_vad::backends::silero::SileroVad::new(16_000) {
+            match open_silero_vad() {
                 Ok(vad) => {
                     SILERO_RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
                     Some(wavekat_vad::FrameAdapter::new(Box::new(vad)))
@@ -126,6 +126,21 @@ impl VoiceAnalyzer {
             webrtc_voice
         }
     }
+}
+
+#[cfg(feature = "vad-silero")]
+fn open_silero_vad() -> Result<wavekat_vad::backends::silero::SileroVad, String> {
+    use wavekat_vad::backends::silero::SileroVad;
+
+    let settings = crate::settings::load_settings().map_err(|error| error.to_string())?;
+    let path = crate::vad::silero_model::model_path(&settings).map_err(|error| error.to_string())?;
+    if !path.is_file() {
+        return Err(format!(
+            "Silero VAD model not found at {} — download required",
+            path.display()
+        ));
+    }
+    SileroVad::from_file(&path, 16_000).map_err(|error| error.to_string())
 }
 
 pub fn effective_engine(engine: VadEngine) -> VadEngine {

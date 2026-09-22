@@ -47,12 +47,7 @@ pub fn dispatch_signal(app: &AppHandle, signal: PttSignal) {
 
 fn gate_loop(app: AppHandle, rx: Receiver<PttSignal>) {
     while let Ok(signal) = rx.recv() {
-        let app = app.clone();
-        std::thread::Builder::new()
-            .name("veyro-ptt-dispatch".into())
-            .spawn(move || dispatch_signal(&app, signal))
-            .map_err(|error| warn!("ptt dispatch thread failed: {error}"))
-            .ok();
+        dispatch_signal(&app, signal);
     }
 }
 

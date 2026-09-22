@@ -8,21 +8,23 @@ use tokio_util::sync::CancellationToken;
 use crate::audio::resampler::TARGET_SAMPLE_RATE;
 use crate::audio::segment::AudioSegment;
 use crate::settings::AppSettings;
-use crate::transcription::local_stt_model_store::{bundle_ready, sherpa_bundle_path};
+use crate::settings::LocalSttVariant;
+use crate::transcription::local_stt_model_store::{
+    bundle_ready_for_settings, effective_sherpa_bundle_dir,
+};
 use crate::transcription::models::{TranscriptionOptions, TranscriptionResult};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
-use crate::transcription::sherpa::{build_offline_config, SherpaBuildOptions};
+use crate::transcription::sherpa::build_offline_config;
 
 struct SharedSherpa {
     bundle_dir: PathBuf,
     settings_snapshot: SherpaSettingsSnapshot,
     recognizer: Mutex<Option<OfflineRecognizer>>,
-    loaded_preview: Mutex<Option<bool>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SherpaSettingsSnapshot {
-    model: crate::settings::LocalSttModelKind,
+    variant: LocalSttVariant,
     use_gpu: bool,
     num_threads: u32,
 }
@@ -32,17 +34,16 @@ impl SharedSherpa {
         Self {
             bundle_dir,
             settings_snapshot: SherpaSettingsSnapshot {
-                model: settings.local_stt_model,
+                variant: settings.local_stt_variant(),
                 use_gpu: settings.local_whisper_use_gpu,
                 num_threads: settings.local_sherpa_num_threads,
             },
             recognizer: Mutex::new(None),
-            loaded_preview: Mutex::new(None),
         }
     }
 
     fn settings_match(&self, settings: &AppSettings) -> bool {
-        self.settings_snapshot.model == settings.local_stt_model
+        self.settings_snapshot.variant == settings.local_stt_variant()
             && self.settings_snapshot.use_gpu == settings.local_whisper_use_gpu
             && self.settings_snapshot.num_threads == settings.local_sherpa_num_threads
     }
@@ -50,9 +51,6 @@ impl SharedSherpa {
     fn unload(&self) {
         if let Ok(mut guard) = self.recognizer.lock() {
             *guard = None;
-        }
-        if let Ok(mut preview) = self.loaded_preview.lock() {
-            *preview = None;
         }
     }
 
@@ -63,46 +61,29 @@ impl SharedSherpa {
             .is_some_and(|guard| guard.is_some())
     }
 
-    fn ensure_loaded(
-        &self,
-        settings: &AppSettings,
-        preview: bool,
-    ) -> Result<(), TranscriptionError> {
+    fn ensure_loaded(&self, settings: &AppSettings) -> Result<(), TranscriptionError> {
         let mut guard = self
             .recognizer
             .lock()
             .map_err(|_| TranscriptionError::InferenceFailed("sherpa lock poisoned".to_string()))?;
 
-        let same_preview = self
-            .loaded_preview
-            .lock()
-            .ok()
-            .and_then(|p| *p)
-            .is_some_and(|loaded| loaded == preview);
-        if guard.is_some() && self.settings_match(settings) && same_preview {
+        if guard.is_some() && self.settings_match(settings) {
             return Ok(());
         }
 
-        if !bundle_ready(&self.bundle_dir, settings.local_stt_model) {
+        if !bundle_ready_for_settings(settings, settings.local_stt_variant()) {
             return Err(TranscriptionError::ModelNotFound(
                 self.bundle_dir.display().to_string(),
             ));
         }
 
-        let config = build_offline_config(
-            settings,
-            &self.bundle_dir,
-            SherpaBuildOptions { preview },
-        )
-        .map_err(TranscriptionError::InferenceFailed)?;
+        let config = build_offline_config(settings, &self.bundle_dir)
+            .map_err(TranscriptionError::InferenceFailed)?;
 
         let recognizer = OfflineRecognizer::create(&config).ok_or_else(|| {
             TranscriptionError::InferenceFailed("failed to create sherpa recognizer".to_string())
         })?;
         *guard = Some(recognizer);
-        if let Ok(mut loaded) = self.loaded_preview.lock() {
-            *loaded = Some(preview);
-        }
         Ok(())
     }
 
@@ -111,9 +92,8 @@ impl SharedSherpa {
         settings: &AppSettings,
         audio: &AudioSegment,
         options: &TranscriptionOptions,
-        preview: bool,
     ) -> Result<String, TranscriptionError> {
-        self.ensure_loaded(settings, preview)?;
+        self.ensure_loaded(settings)?;
 
         let guard = self
             .recognizer
@@ -144,8 +124,8 @@ pub struct LocalSherpaProvider {
 
 impl LocalSherpaProvider {
     pub fn new(settings: AppSettings, cancel: CancellationToken) -> Result<Self, TranscriptionError> {
-        let kind = settings.local_stt_model;
-        let bundle_dir = sherpa_bundle_path(&settings, kind).map_err(|error| {
+        let variant = settings.local_stt_variant();
+        let bundle_dir = effective_sherpa_bundle_dir(&settings, variant).map_err(|error| {
             TranscriptionError::ModelNotFound(error.to_string())
         })?;
         Ok(Self {
@@ -183,9 +163,7 @@ impl TranscriptionProvider for LocalSherpaProvider {
         options: TranscriptionOptions,
     ) -> Result<TranscriptionResult, TranscriptionError> {
         let settings = self.current_settings()?;
-        let text = self
-            .model
-            .decode_segment(&settings, &audio, &options, false)?;
+        let text = self.model.decode_segment(&settings, &audio, &options)?;
         Ok(TranscriptionResult {
             text,
             confidence: None,
@@ -205,25 +183,8 @@ impl TranscriptionProvider for LocalSherpaProvider {
             &settings,
             &segment,
             &TranscriptionOptions::default(),
-            true,
         )?;
         Ok(())
-    }
-
-    fn transcribe_preview_sync(
-        &self,
-        audio: AudioSegment,
-        options: TranscriptionOptions,
-    ) -> Result<Option<String>, TranscriptionError> {
-        let settings = self.current_settings()?;
-        let text = self
-            .model
-            .decode_segment(&settings, &audio, &options, true)?;
-        if text.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(text))
-        }
     }
 
     async fn unload(&self) -> Result<(), TranscriptionError> {

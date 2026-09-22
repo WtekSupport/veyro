@@ -4,12 +4,8 @@ use sherpa_onnx::{
     OfflineQwen3ASRModelConfig, OfflineRecognizerConfig, OfflineTransducerModelConfig,
 };
 
-use crate::settings::{AppSettings, LocalSttModelKind};
-
-#[derive(Debug, Clone, Copy)]
-pub struct SherpaBuildOptions {
-    pub preview: bool,
-}
+use crate::settings::{AppSettings, SherpaOnnxLayout};
+use crate::transcription::local_stt_model_store::{effective_sherpa_bundle_dir, required_sherpa_files};
 
 pub fn execution_provider(settings: &AppSettings) -> &'static str {
     if !settings.local_whisper_use_gpu {
@@ -32,10 +28,13 @@ pub fn execution_provider(settings: &AppSettings) -> &'static str {
 
 pub fn build_offline_config(
     settings: &AppSettings,
-    bundle_dir: &Path,
-    options: SherpaBuildOptions,
+    _bundle_dir: &Path,
 ) -> Result<OfflineRecognizerConfig, String> {
-    let kind = settings.local_stt_model;
+    let variant = settings.local_stt_variant();
+    let bundle_dir = effective_sherpa_bundle_dir(settings, variant).map_err(|e| e.to_string())?;
+    let layout = crate::settings::variant_spec(variant)
+        .sherpa_layout
+        .ok_or_else(|| "not a sherpa STT variant".to_string())?;
     let mut config = OfflineRecognizerConfig::default();
     config.feat_config.sample_rate = 16000;
     config.feat_config.feature_dim = 80;
@@ -43,24 +42,37 @@ pub fn build_offline_config(
     config.model_config.provider = Some(execution_provider(settings).to_string());
     config.model_config.debug = false;
 
-    match kind {
-        LocalSttModelKind::ParakeetTdt06bV3 => {
+    for relative in required_sherpa_files(variant) {
+        path_string(&bundle_dir, relative)?;
+    }
+
+    match layout {
+        SherpaOnnxLayout::NemoInt8 => {
             config.model_config.transducer = OfflineTransducerModelConfig {
-                encoder: Some(path_string(bundle_dir, "encoder.int8.onnx")?),
-                decoder: Some(path_string(bundle_dir, "decoder.int8.onnx")?),
-                joiner: Some(path_string(bundle_dir, "joiner.int8.onnx")?),
+                encoder: Some(path_string(&bundle_dir, "encoder.int8.onnx")?),
+                decoder: Some(path_string(&bundle_dir, "decoder.int8.onnx")?),
+                joiner: Some(path_string(&bundle_dir, "joiner.int8.onnx")?),
             };
-            config.model_config.tokens = Some(path_string(bundle_dir, "tokens.txt")?);
+            config.model_config.tokens = Some(path_string(&bundle_dir, "tokens.txt")?);
             config.model_config.model_type = Some("nemo_transducer".into());
         }
-        LocalSttModelKind::Qwen3Asr06b | LocalSttModelKind::Qwen3Asr17b => {
-            let max_new_tokens = if options.preview { 64 } else { 128 };
+        SherpaOnnxLayout::NemoFpOnnx => {
+            config.model_config.transducer = OfflineTransducerModelConfig {
+                encoder: Some(path_string(&bundle_dir, "encoder.onnx")?),
+                decoder: Some(path_string(&bundle_dir, "decoder.onnx")?),
+                joiner: Some(path_string(&bundle_dir, "joiner.onnx")?),
+            };
+            config.model_config.tokens = Some(path_string(&bundle_dir, "tokens.txt")?);
+            config.model_config.model_type = Some("nemo_transducer".into());
+        }
+        SherpaOnnxLayout::Qwen3Int8 => {
+            let max_new_tokens = 128;
             config.feat_config.feature_dim = 128;
             config.model_config.qwen3_asr = OfflineQwen3ASRModelConfig {
-                conv_frontend: Some(path_string(bundle_dir, "conv_frontend.onnx")?),
-                encoder: Some(path_string(bundle_dir, "encoder.int8.onnx")?),
-                decoder: Some(path_string(bundle_dir, "decoder.int8.onnx")?),
-                tokenizer: Some(path_string(bundle_dir, "tokenizer")?),
+                conv_frontend: Some(path_string(&bundle_dir, "conv_frontend.onnx")?),
+                encoder: Some(path_string(&bundle_dir, "encoder.int8.onnx")?),
+                decoder: Some(path_string(&bundle_dir, "decoder.int8.onnx")?),
+                tokenizer: Some(path_string(&bundle_dir, "tokenizer")?),
                 max_total_len: 512,
                 max_new_tokens,
                 temperature: 1e-6,
@@ -69,7 +81,6 @@ pub fn build_offline_config(
                 hotwords: None,
             };
         }
-        _ => return Err("not a sherpa STT model".to_string()),
     }
 
     Ok(config)

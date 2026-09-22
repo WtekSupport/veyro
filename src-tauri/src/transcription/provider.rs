@@ -56,24 +56,6 @@ pub trait TranscriptionProvider: Send + Sync {
         Ok(())
     }
 
-    /// Partial transcription while audio is still being captured (local Whisper only).
-    async fn transcribe_preview(
-        &self,
-        _audio: AudioSegment,
-        _options: TranscriptionOptions,
-    ) -> Result<Option<String>, TranscriptionError> {
-        Ok(None)
-    }
-
-    /// Synchronous preview path for the dedicated preview worker thread.
-    fn transcribe_preview_sync(
-        &self,
-        _audio: AudioSegment,
-        _options: TranscriptionOptions,
-    ) -> Result<Option<String>, TranscriptionError> {
-        Ok(None)
-    }
-
     /// Release resident model weights when switching away from local STT.
     async fn unload(&self) -> Result<(), TranscriptionError> {
         Ok(())

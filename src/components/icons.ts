@@ -9,6 +9,7 @@ import {
   Mic,
   MicAudioLines,
   Plus,
+  Settings,
   Speech,
   TextAlignStart,
   TextCursorInput,
@@ -37,6 +38,10 @@ export function iconPlus(): string {
 
 export function iconTrash(): string {
   return icon(Trash2);
+}
+
+export function iconSettings(): string {
+  return icon(Settings);
 }
 
 /** Audio pipeline (capture / playback). */
