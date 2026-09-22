@@ -162,34 +162,65 @@ impl TranscriptionProvider for LocalSherpaProvider {
         audio: AudioSegment,
         options: TranscriptionOptions,
     ) -> Result<TranscriptionResult, TranscriptionError> {
+        if self._cancel.is_cancelled() {
+            return Err(TranscriptionError::Cancelled);
+        }
+
         let settings = self.current_settings()?;
-        let text = self.model.decode_segment(&settings, &audio, &options)?;
-        Ok(TranscriptionResult {
-            text,
-            confidence: None,
-            whisper_segments: None,
-            timed_segments: None,
-            audio_peak: None,
-            audio_rms: None,
-            detected_language: options.language.clone(),
+        let model = Arc::clone(&self.model);
+        let cancel = self._cancel.clone();
+        let language = options.language.clone();
+
+        tokio::task::spawn_blocking(move || {
+            if cancel.is_cancelled() {
+                return Err(TranscriptionError::Cancelled);
+            }
+            let text = model.decode_segment(&settings, &audio, &options)?;
+            Ok(TranscriptionResult {
+                text,
+                confidence: None,
+                whisper_segments: None,
+                timed_segments: None,
+                audio_peak: None,
+                audio_rms: None,
+                detected_language: language,
+            })
         })
+        .await
+        .map_err(|error| TranscriptionError::InferenceFailed(error.to_string()))?
     }
 
     async fn prewarm(&self) -> Result<(), TranscriptionError> {
+        if self._cancel.is_cancelled() {
+            return Err(TranscriptionError::Cancelled);
+        }
+
         let settings = self.current_settings()?;
+        let model = Arc::clone(&self.model);
+        let cancel = self._cancel.clone();
         let sample_count = (TARGET_SAMPLE_RATE as usize * 300) / 1000;
         let segment = AudioSegment::new(vec![0.0; sample_count], TARGET_SAMPLE_RATE, 1);
-        let _ = self.model.decode_segment(
-            &settings,
-            &segment,
-            &TranscriptionOptions::default(),
-        )?;
-        Ok(())
+        let options = TranscriptionOptions::default();
+
+        tokio::task::spawn_blocking(move || {
+            if cancel.is_cancelled() {
+                return Err(TranscriptionError::Cancelled);
+            }
+            let _ = model.decode_segment(&settings, &segment, &options)?;
+            Ok(())
+        })
+        .await
+        .map_err(|error| TranscriptionError::InferenceFailed(error.to_string()))?
     }
 
     async fn unload(&self) -> Result<(), TranscriptionError> {
-        self.model.unload();
-        Ok(())
+        let model = Arc::clone(&self.model);
+        tokio::task::spawn_blocking(move || {
+            model.unload();
+            Ok(())
+        })
+        .await
+        .map_err(|error| TranscriptionError::InferenceFailed(error.to_string()))?
     }
 
     fn is_model_loaded(&self) -> bool {

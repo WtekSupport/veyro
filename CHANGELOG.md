@@ -12,6 +12,10 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.50] — 2026-09-22
+
+- **Sherpa local STT crash:** Run sherpa-onnx decode/prewarm/unload on the blocking thread pool (same as Whisper). Fixes process exit when the tray turns red at transcription start on Windows.
+
 ## [1.8.49] — 2026-09-22
 
 - **Windows 10 REC overlay crash:** Do not apply Win11-only DWM backdrop on Windows 10; show the recording overlay on the UI thread after the WebView loads (fixes exit when the red REC indicator appears).
