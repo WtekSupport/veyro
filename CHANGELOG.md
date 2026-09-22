@@ -12,6 +12,15 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.48] — 2026-09-22
+
+- **Focus defer buffer:** With **Focus control** off (new default), dictation keeps running when the injection field loses focus; text is buffered in memory and inserted when focus returns (already inserted text is kept).
+- **PTT across windows:** Push-to-talk works while focus is in another app; injection target is preserved in defer mode; PTT state is reconciled after missed key-up (e.g. Alt+Tab).
+- **Focus control default:** **Abort on focus loss** / **Контроль фокуса** is **off** by default — use the toggle to abort and clear queues on focus loss (previous default behavior).
+- **REC overlay:** Smaller overlay window; DWM backdrop and frame tweaks to remove the visible square plate behind the REC indicator.
+- **Settings:** Quick settings show the resolved **data storage** path; WebRTC VAD choice saves correctly in config (`webrtc` JSON key).
+- **Text pipeline:** Silero TE tokenizer accepts TorchScript `IntList`; deferred flush uses a valid controller transition; minor Basic cleanup and normalization tweaks.
+
 ## [1.8.45] — 2026-09-22
 
 - **Stability (weak PCs):** Narrower PTT release locking, inline PTT gate dispatch (no per-signal thread spawn), segment queue cap with activity logging, activity log disk cap, shared LLM engine handle; PTT hold always ends capture on key-up even while a prior segment is still transcribing.
