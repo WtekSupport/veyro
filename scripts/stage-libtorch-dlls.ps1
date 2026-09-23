@@ -52,7 +52,7 @@ if (-not $libDir) {
 New-Item -ItemType Directory -Force -Path $binariesDir | Out-Null
 New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
 
-$stagedLibtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|mkl_|pytorch_jni)-'
+$stagedLibtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|pytorch_jni|mkl)'
 Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match $stagedLibtorchPattern } |
     Remove-Item -Force
@@ -82,11 +82,8 @@ foreach ($dll in Get-ChildItem $libDir -Filter "*.dll") {
 
 if (Test-Path $mklDispatchDir) {
     foreach ($dll in Get-ChildItem $mklDispatchDir -Filter "mkl*.dll" -File -ErrorAction SilentlyContinue) {
-        $exeDest = Join-Path $profileDir $dll.Name
-        if (-not (Test-Path $exeDest)) {
-            Stage-LibtorchDll $dll.FullName
-            $copied++
-        }
+        Stage-LibtorchDll $dll.FullName
+        $copied++
     }
 }
 

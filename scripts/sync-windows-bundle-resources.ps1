@@ -33,7 +33,8 @@ foreach ($entry in $destMap.GetEnumerator()) {
     }
 }
 
-$libtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|mkl_|pytorch_jni)-'
+# mkl*.dll use dots in the base name (mkl_core.1-…), not mkl_-…
+$libtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|pytorch_jni|mkl)'
 foreach ($staged in Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue) {
     if ($staged.Name -notmatch $libtorchPattern) {
         continue
