@@ -144,15 +144,19 @@ pub async fn process_transcription_immediate(
         timed_segments.map(|segments| segments.to_vec());
 
     tokio::task::spawn_blocking(move || {
-        process_transcription_immediate_sync(
-            &raw,
-            timed_owned.as_deref(),
-            &settings,
-            whisper_lang.as_deref(),
-        )
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            process_transcription_immediate_sync(
+                &raw,
+                timed_owned.as_deref(),
+                &settings,
+                whisper_lang.as_deref(),
+            )
+        }))
+        .map_err(|_| TextProcessingError::Failed("text processing panicked".to_string()))?
     })
     .await
     .map_err(|error| TextProcessingError::Failed(error.to_string()))?
+    .and_then(|inner| inner)
 }
 
 /// Phase 2: AI rewrite on text that already went through phase 1.

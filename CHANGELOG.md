@@ -12,6 +12,11 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.53] — 2026-09-23
+
+- **Sherpa Qwen3 (Windows):** Use CPU execution provider instead of DirectML (avoids hard crash during decode); run sherpa on a dedicated thread with a global inference lock; catch native panics and reload the recognizer.
+- **Text pipeline:** Catch panics during post-STT cleanup; harden Silero TE unicode token parsing.
+
 ## [1.8.52] — 2026-09-23
 
 - **Silero TE:** Normalize tokenizer `IntList` / 1D token tensors to `[1, seq]` before padding (fixes “index out of bounds” panic during text processing after STT).
