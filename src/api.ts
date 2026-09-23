@@ -330,6 +330,9 @@ export interface SileroTeModelStatus {
   path: string;
   exists: boolean;
   size_mb: number;
+  runtime_ready: boolean;
+  assets_ready: boolean;
+  runtime_path: string;
 }
 
 export interface SileroVadModelStatus {
@@ -745,6 +748,10 @@ export async function importAiSkill(fromPath: string): Promise<AiSkillInfo> {
 
 export async function pickAndImportAiSkill(): Promise<AiSkillInfo> {
   return invoke<AiSkillInfo>("pick_and_import_ai_skill");
+}
+
+export async function deleteAiSkill(filename: string): Promise<void> {
+  return invoke<void>("delete_ai_skill", { filename });
 }
 
 export interface AppInfo {

@@ -42,6 +42,7 @@ pub struct SkillImportFlowPayload {
 pub enum SkillImportPhase {
     Preparing,
     Preview,
+    AlreadyInstalled,
     Installing,
     Done,
     Error,

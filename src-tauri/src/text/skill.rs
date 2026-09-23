@@ -210,6 +210,32 @@ pub fn load_skill_body(filename: Option<&str>) -> Result<Option<String>, ConfigE
     Ok(Some(body))
 }
 
+pub fn is_skill_filename_installed(filename: &str) -> Result<bool, ConfigError> {
+    let filename = filename.trim();
+    if filename.is_empty() {
+        return Ok(false);
+    }
+    validate_skill_basename(filename)?;
+    let target = ensure_skills_dir()?.join(filename);
+    Ok(target.is_file())
+}
+
+pub fn validate_skill_basename(filename: &str) -> Result<(), ConfigError> {
+    let filename = filename.trim();
+    if filename.is_empty() || filename.contains('/') || filename.contains('\\') || filename.contains("..")
+    {
+        return Err(ConfigError::Invalid("skill_file_invalid_name".to_string()));
+    }
+    if Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        != Some("md")
+    {
+        return Err(ConfigError::Invalid("skill_file_not_markdown".to_string()));
+    }
+    Ok(())
+}
+
 pub fn inspect_skill_file(from_path: &str) -> Result<(AiSkillInfo, u64), ConfigError> {
     let source = Path::new(from_path.trim());
     if !source.is_file() {
@@ -229,16 +255,37 @@ pub fn inspect_skill_file(from_path: &str) -> Result<(AiSkillInfo, u64), ConfigE
         .ok_or_else(|| ConfigError::Invalid("skill_file_invalid_name".to_string()))?
         .to_string();
 
+    inspect_skill_file_as(from_path, &filename)
+}
+
+pub fn inspect_skill_file_as(
+    from_path: &str,
+    install_filename: &str,
+) -> Result<(AiSkillInfo, u64), ConfigError> {
+    validate_skill_basename(install_filename)?;
+
+    let source = Path::new(from_path.trim());
+    if !source.is_file() {
+        return Err(ConfigError::Invalid(format!(
+            "skill_file_not_found:{}",
+            source.display()
+        )));
+    }
+
+    if source.extension().and_then(|value| value.to_str()) != Some("md") {
+        return Err(ConfigError::Invalid("skill_file_not_markdown".to_string()));
+    }
+
     let size_bytes = fs::metadata(source)
         .map_err(|error| ConfigError::Read(format!("{}: {error}", source.display())))?
         .len();
 
     let contents = fs::read_to_string(source)
         .map_err(|error| ConfigError::Read(format!("{}: {error}", source.display())))?;
-    let (name, description, _) = parse_skill_markdown(&contents, &filename);
+    let (name, description, _) = parse_skill_markdown(&contents, install_filename);
     Ok((
         AiSkillInfo {
-            filename,
+            filename: install_filename.to_string(),
             name,
             description,
         },
@@ -265,20 +312,61 @@ pub fn import_skill(from_path: &str) -> Result<AiSkillInfo, ConfigError> {
         .ok_or_else(|| ConfigError::Invalid("skill_file_invalid_name".to_string()))?
         .to_string();
 
+    import_skill_as(from_path, &filename)
+}
+
+pub fn import_skill_as(from_path: &str, install_filename: &str) -> Result<AiSkillInfo, ConfigError> {
+    validate_skill_basename(install_filename)?;
+
+    let source = Path::new(from_path.trim());
+    if !source.is_file() {
+        return Err(ConfigError::Invalid(format!(
+            "skill_file_not_found:{}",
+            source.display()
+        )));
+    }
+
+    if source.extension().and_then(|value| value.to_str()) != Some("md") {
+        return Err(ConfigError::Invalid("skill_file_not_markdown".to_string()));
+    }
+
     let dir = ensure_skills_dir()?;
-    let target = dir.join(&filename);
+    let target = dir.join(install_filename);
     fs::copy(source, &target).map_err(|error| {
         ConfigError::Write(format!("{}: {error}", target.display()))
     })?;
 
     let contents = fs::read_to_string(&target)
         .map_err(|error| ConfigError::Read(format!("{}: {error}", target.display())))?;
-    let (name, description, _) = parse_skill_markdown(&contents, &filename);
+    let (name, description, _) = parse_skill_markdown(&contents, install_filename);
     Ok(AiSkillInfo {
-        filename,
+        filename: install_filename.to_string(),
         name,
         description,
     })
+}
+
+pub fn delete_skill(filename: &str) -> Result<(), ConfigError> {
+    validate_skill_basename(filename)?;
+    let path = ensure_skills_dir()?.join(filename);
+    if !path.is_file() {
+        return Err(ConfigError::Invalid(format!(
+            "skill_file_not_found:{}",
+            path.display()
+        )));
+    }
+    fs::remove_file(&path).map_err(|error| {
+        ConfigError::Write(format!("{}: {error}", path.display()))
+    })?;
+    if let Ok(mut guard) = SKILL_CACHE.lock() {
+        if guard
+            .as_ref()
+            .is_some_and(|(cached_name, _)| cached_name == filename)
+        {
+            *guard = None;
+        }
+    }
+    Ok(())
 }
 
 pub fn open_skills_folder() -> Result<(), ConfigError> {
