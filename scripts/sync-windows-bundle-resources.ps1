@@ -33,14 +33,19 @@ foreach ($entry in $destMap.GetEnumerator()) {
     }
 }
 
+$bundleLibtorch = $env:VEYRO_BUNDLE_LIBTORCH -eq "1"
 # mkl*.dll use dots in the base name (mkl_core.1-…), not mkl_-…
 $libtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|pytorch_jni|mkl)'
-foreach ($staged in Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue) {
-    if ($staged.Name -notmatch $libtorchPattern) {
-        continue
+if ($bundleLibtorch) {
+    foreach ($staged in Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue) {
+        if ($staged.Name -notmatch $libtorchPattern) {
+            continue
+        }
+        $destName = $staged.Name -replace "-$([regex]::Escape($triple))\.dll$", ".dll"
+        $resources["binaries/$($staged.Name)"] = $destName
     }
-    $destName = $staged.Name -replace "-$([regex]::Escape($triple))\.dll$", ".dll"
-    $resources["binaries/$($staged.Name)"] = $destName
+} else {
+    Write-Host "Skipping libtorch/MKL DLLs in installer bundle (on-demand silero-te-runtime-v1). Set VEYRO_BUNDLE_LIBTORCH=1 to bundle."
 }
 
 if ($resources.Count -le 1) {

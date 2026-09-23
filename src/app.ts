@@ -34,7 +34,7 @@ import {
   listLlmModels,
   listTranscriptionLanguages,
   listLocalSttModels,
-  openAiSkillsFolder,
+  deleteAiSkill,
   pickAndImportAiSkill,
   getSettings,
   getStatus,
@@ -361,9 +361,10 @@ function syncAiSkillUi(form: HTMLFormElement, mode?: TextProcessingMode): void {
   const skillSelect = form.querySelector<HTMLSelectElement>(
     'select[name="ai_rewrite_skill"]',
   );
-  const folderBtn = form.querySelector<HTMLButtonElement>("[data-open-skills-folder]");
   const importBtn = form.querySelector<HTMLButtonElement>("[data-import-skill]");
+  const deleteBtn = form.querySelector<HTMLButtonElement>("[data-delete-skill]");
   const catalogBtn = form.querySelector<HTMLButtonElement>("[data-open-skill-catalog]");
+  const hasSkillSelected = Boolean(skillSelect?.value);
 
   if (field) {
     field.hidden = !enabled;
@@ -371,8 +372,8 @@ function syncAiSkillUi(form: HTMLFormElement, mode?: TextProcessingMode): void {
   if (skillSelect) {
     skillSelect.disabled = !enabled;
   }
-  folderBtn?.toggleAttribute("disabled", !enabled);
   importBtn?.toggleAttribute("disabled", !enabled);
+  deleteBtn?.toggleAttribute("disabled", !enabled || !hasSkillSelected);
   catalogBtn?.toggleAttribute("disabled", !enabled);
 }
 
@@ -1067,12 +1068,6 @@ function bindEvents(): void {
       });
   });
 
-  form.querySelector<HTMLButtonElement>("[data-open-skills-folder]")?.addEventListener("click", () => {
-    void openAiSkillsFolder().then(async () => {
-      patchState({ aiSkills: await listAiSkills() });
-    });
-  });
-
   form.querySelector<HTMLButtonElement>("[data-open-skill-catalog]")?.addEventListener("click", () => {
     void openUrl(skillCatalogUrl(getLocale()));
   });
@@ -1085,6 +1080,7 @@ function bindEvents(): void {
         if (select) {
           select.value = skill.filename;
         }
+        syncAiSkillUi(form);
         schedulePersistSettings();
       })
       .catch((error) => {
@@ -1097,6 +1093,45 @@ function bindEvents(): void {
           message,
         });
       });
+  });
+
+  form.querySelector<HTMLSelectElement>('select[name="ai_rewrite_skill"]')?.addEventListener("change", () => {
+    syncAiSkillUi(form);
+  });
+
+  form.querySelector<HTMLButtonElement>("[data-delete-skill]")?.addEventListener("click", () => {
+    void (async () => {
+      const select = form.querySelector<HTMLSelectElement>('select[name="ai_rewrite_skill"]');
+      const filename = select?.value ?? "";
+      if (!filename) {
+        return;
+      }
+      const skills = getState().aiSkills ?? [];
+      const skill = skills.find((entry) => entry.filename === filename);
+      const label = skill?.name?.trim() || filename;
+      const confirmed = await showConfirmDialog({
+        message: t("settings.aiSkillDeleteConfirm", { name: label }),
+        confirmLabel: t("settings.aiSkillDelete"),
+      });
+      if (!confirmed) {
+        return;
+      }
+      await deleteAiSkill(filename);
+      const aiSkills = await listAiSkills();
+      patchState({ aiSkills });
+      if (getState().settings?.ai_rewrite_skill === filename) {
+        if (select) {
+          select.value = aiSkills[0]?.filename ?? "";
+        }
+        schedulePersistSettings();
+      }
+      syncAiSkillUi(form);
+    })().catch((error) => {
+      setError({
+        code: "skill_delete",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
   });
 
   form
@@ -1544,9 +1579,12 @@ async function bootstrap(): Promise<void> {
     }
 
     const stillExists = aiSkills.some((skill) => skill.filename === currentSkill);
-    if (!stillExists && aiSkills.length > 0) {
-      select.value = aiSkills[0].filename;
+    if (!stillExists) {
+      select.value = aiSkills[0]?.filename ?? "";
       schedulePersistSettings();
+      if (form) {
+        syncAiSkillUi(form);
+      }
     }
   });
 

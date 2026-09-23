@@ -43,6 +43,20 @@ This creates or updates GitHub release **`silero-te-assets-v1`** with flat asset
 
 Override URLs for testing with `VEYRO_SILERO_TE_BASE_URL`. Debug builds can seed from `src-tauri/resources/silero-te` after extract when the release is not published yet.
 
+## Silero TE runtime (libtorch + MKL, Windows)
+
+Release installers **do not** bundle libtorch/MKL DLLs. The app downloads them into `{models}/silero-te-runtime/` before Silero TE model weights.
+
+**One-time publish** (after a `silero-te` release build has staged DLLs):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package-silero-te-runtime.ps1 -RepoRoot .
+```
+
+This creates or updates GitHub release **`silero-te-runtime-v1`** with `silero-te-runtime-win-x64.zip` and `runtime-manifest.json` (prerelease). Override with `VEYRO_SILERO_TE_RUNTIME_BASE_URL` for testing.
+
+To bundle libtorch in the installer again (legacy): set `VEYRO_BUNDLE_LIBTORCH=1` before `npm run tauri:build`.
+
 ## Tag and upload
 
 The only git remote is **GitHub** (`origin` → `https://github.com/WtekSupport/veyro.git`). Do not add GitLab or other remotes; CI, releases, and the updater manifest all use GitHub.
