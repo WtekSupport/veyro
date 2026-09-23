@@ -1,0 +1,202 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+  background: #0d0d0d;
+  color: #f0f0f0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.skill-import-body {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.skill-import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  box-sizing: border-box;
+}
+
+.skill-import-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.skill-import-logo {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 8px rgba(255, 193, 69, 0.3));
+}
+
+.skill-import-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #a89880;
+}
+
+.skill-import-state {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.skill-import-state--preparing {
+  flex: 0;
+  gap: 14px;
+}
+
+.skill-import-state[hidden] {
+  display: none !important;
+}
+
+.skill-import-preparing-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.skill-import-message {
+  margin: 0;
+  flex: 1;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  color: #e8c547;
+}
+
+.skill-import-spinner {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 2px solid rgba(201, 162, 39, 0.25);
+  border-top-color: #e8c547;
+  border-radius: 50%;
+  animation: skill-import-spin 0.75s linear infinite;
+}
+
+@keyframes skill-import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.skill-import-meta {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 0.82rem;
+  overflow-y: auto;
+  max-height: 220px;
+  padding-right: 2px;
+}
+
+.skill-import-meta dt {
+  margin: 0;
+  color: #8a8070;
+  font-weight: 600;
+}
+
+.skill-import-meta dd {
+  margin: 2px 0 0;
+  color: #f0f0f0;
+  word-break: break-word;
+}
+
+.skill-import-source {
+  font-family: Consolas, "Segoe UI Mono", monospace;
+  font-size: 0.78rem;
+  color: #c9b896;
+}
+
+.skill-import-question {
+  margin: 2px 0 0;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: #d4c4a8;
+}
+
+.skill-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+  flex-shrink: 0;
+}
+
+.skill-import-actions--preparing {
+  margin-top: 0;
+  justify-content: stretch;
+}
+
+.skill-import-actions--preparing .btn {
+  width: 100%;
+}
+
+.btn {
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  background: transparent;
+  color: #f0f0f0;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, #3d3528 0%, #2a241c 100%);
+  border-color: rgba(232, 197, 71, 0.55);
+  color: #e8c547;
+}
+
+.btn-secondary:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.skill-import-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(201, 162, 39, 0.2);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.skill-import-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: #e8c547;
+  transition: width 0.25s ease;
+}
+
+.skill-import-error {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #f0a0a0;
+  white-space: pre-wrap;
+}

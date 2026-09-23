@@ -21,7 +21,35 @@ pub const LLM_MODEL_DOWNLOAD_PROGRESS: &str = "app://llm-model-download-progress
 pub const SILERO_TE_DOWNLOAD_PROGRESS: &str = "app://silero-te-download-progress";
 pub const SILERO_VAD_DOWNLOAD_PROGRESS: &str = "app://silero-vad-download-progress";
 pub const SKILL_IMPORTED: &str = "app://skill-imported";
+pub const SKILL_IMPORT_FLOW: &str = "app://skill-import-flow";
 pub const SKILLS_CHANGED: &str = "app://skills-changed";
+
+#[derive(Clone, Serialize)]
+pub struct SkillImportFlowPayload {
+    pub phase: SkillImportPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill: Option<crate::text::skill::AiSkillInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillImportPhase {
+    Preparing,
+    Preview,
+    Installing,
+    Done,
+    Error,
+}
+
+pub fn emit_skill_import_flow(app: &AppHandle, payload: SkillImportFlowPayload) {
+    let _ = app.emit(SKILL_IMPORT_FLOW, payload);
+}
 
 #[derive(Clone, Serialize)]
 pub struct SkillImportedPayload {

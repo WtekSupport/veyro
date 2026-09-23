@@ -17,6 +17,7 @@ use crate::settings::{UiLocale, UiMode};
 pub const SETTINGS_WINDOW_LABEL: &str = "main";
 pub const ABOUT_WINDOW_LABEL: &str = "about";
 pub const INIT_WINDOW_LABEL: &str = "init";
+pub const SKILL_IMPORT_WINDOW_LABEL: &str = "skill-import";
 pub const OVERLAY_WINDOW_LABEL: &str = "overlay";
 
 const WINDOW_WIDTH: f64 = 400.0;
@@ -26,6 +27,9 @@ const ABOUT_WINDOW_WIDTH: f64 = 360.0;
 const ABOUT_WINDOW_HEIGHT: f64 = 560.0;
 const INIT_WINDOW_WIDTH: f64 = 320.0;
 const INIT_WINDOW_HEIGHT: f64 = 132.0;
+const SKILL_IMPORT_WINDOW_WIDTH: f64 = 400.0;
+const SKILL_IMPORT_WINDOW_HEIGHT: f64 = 300.0;
+const SKILL_IMPORT_WINDOW_HEIGHT_PREVIEW: f64 = 420.0;
 const OVERLAY_WINDOW_WIDTH: f64 = 140.0;
 const OVERLAY_WINDOW_HEIGHT: f64 = 40.0;
 const OVERLAY_CORNER_MARGIN: f64 = 16.0;
@@ -245,6 +249,80 @@ pub fn hide_init_window(app: &AppHandle) {
     };
     let _ = window.hide();
     destroy_idle_init_webview(app);
+}
+
+pub fn configure_skill_import_window(window: &WebviewWindow) {
+    let _ = window.set_resizable(false);
+    let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
+    configure_settings_window_chrome(window);
+    enforce_window_size(window, SKILL_IMPORT_WINDOW_WIDTH, SKILL_IMPORT_WINDOW_HEIGHT);
+}
+
+pub fn resize_skill_import_window(window: &WebviewWindow, preview: bool) {
+    configure_skill_import_window(window);
+    let height = if preview {
+        SKILL_IMPORT_WINDOW_HEIGHT_PREVIEW
+    } else {
+        SKILL_IMPORT_WINDOW_HEIGHT
+    };
+    enforce_window_size(window, SKILL_IMPORT_WINDOW_WIDTH, height);
+}
+
+fn ensure_skill_import_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(SKILL_IMPORT_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        SKILL_IMPORT_WINDOW_LABEL,
+        WebviewUrl::App("skill-import.html".into()),
+    )
+    .title("Veyro")
+    .inner_size(SKILL_IMPORT_WINDOW_WIDTH, SKILL_IMPORT_WINDOW_HEIGHT)
+    .resizable(false)
+    .maximizable(false)
+    .center()
+    .visible(false)
+    .build()
+    .map_err(|error| format!("failed to create skill import window: {error}"))?;
+
+    configure_skill_import_window(&window);
+    Ok(window)
+}
+
+pub fn show_skill_import_window(app: &AppHandle) {
+    let Ok(window) = ensure_skill_import_window(app) else {
+        debug!("skill import window not available");
+        return;
+    };
+
+    let locale = settings_ui_locale(app);
+    let _ = window.set_title(&crate::i18n::translate(
+        locale,
+        "skill_import.window_title",
+        &[],
+    ));
+    configure_skill_import_window(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_skip_taskbar(false);
+
+    #[cfg(windows)]
+    activate_window(&window);
+
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+}
+
+pub fn hide_skill_import_window(app: &AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(SKILL_IMPORT_WINDOW_LABEL) else {
+        return Ok(());
+    };
+    let _ = window.hide();
+    let _ = window.set_skip_taskbar(true);
+    Ok(())
 }
 
 fn ensure_settings_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -506,7 +584,8 @@ pub fn configure_overlay_window(window: &WebviewWindow) {
         OVERLAY_WINDOW_HEIGHT,
     )));
     position_overlay_corner(window);
-    configure_overlay_extended_style(window);
+    #[cfg(windows)]
+    sync_overlay_win32_chrome(window);
 }
 
 /// Hidden WebView for REC indicator (avoids creating the window during fullscreen capture).
@@ -524,7 +603,7 @@ fn ensure_overlay_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         OVERLAY_WINDOW_LABEL,
         WebviewUrl::App("overlay.html".into()),
     )
-    .title("Veyro Recording")
+    .title("")
     .inner_size(OVERLAY_WINDOW_WIDTH, OVERLAY_WINDOW_HEIGHT)
     .decorations(false)
     .transparent(true)
@@ -581,7 +660,7 @@ fn show_overlay_without_activation(window: &WebviewWindow) {
         SW_SHOWNOACTIVATE,
     };
 
-    configure_overlay_extended_style(window);
+    sync_overlay_win32_chrome(window);
     let Ok(raw) = window.hwnd() else {
         let _ = window.show();
         let _ = window.set_always_on_top(true);
@@ -600,7 +679,7 @@ fn show_overlay_without_activation(window: &WebviewWindow) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
     }
-    apply_overlay_dwm_transparency(window);
+    sync_overlay_win32_chrome(window);
 }
 
 #[cfg(not(windows))]
@@ -642,6 +721,8 @@ fn position_overlay_corner(window: &WebviewWindow) {
             x: x.round() as i32,
             y: y.round() as i32,
         }));
+        #[cfg(windows)]
+        sync_overlay_win32_chrome(window);
     }
 }
 
@@ -694,28 +775,8 @@ fn foreground_monitor(window: &WebviewWindow) -> Option<tauri::Monitor> {
     window.current_monitor().ok().flatten()
 }
 
-#[cfg(windows)]
-fn configure_overlay_extended_style(window: &WebviewWindow) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    };
-
-    if let Ok(hwnd) = window.hwnd() {
-        let hwnd = HWND(hwnd.0 as _);
-        unsafe {
-            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(
-                hwnd,
-                GWL_EXSTYLE,
-                style | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize,
-            );
-        }
-    }
-}
-
 #[cfg(not(windows))]
-fn configure_overlay_extended_style(_window: &WebviewWindow) {}
+fn sync_overlay_win32_chrome(_window: &WebviewWindow) {}
 
 #[cfg(windows)]
 fn windows_build_number() -> u32 {
@@ -734,13 +795,20 @@ fn windows_build_number() -> u32 {
     }
 }
 
+/// Frameless transparent REC surface: strip caption/sysmenu, DWM glass, re-apply after move/show.
 #[cfg(windows)]
-fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
+fn sync_overlay_win32_chrome(window: &WebviewWindow) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{
-        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE,
+        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMWA_NCRENDERING_POLICY,
+        DWMWA_SYSTEMBACKDROP_TYPE,
     };
     use windows::Win32::UI::Controls::MARGINS;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_CAPTION, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    };
 
     /// Win11+ draws an opaque Mica/acrylic plate unless backdrop is disabled.
     const DWMSBT_NONE: i32 = 3;
@@ -758,6 +826,26 @@ fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
         cyBottomHeight: -1,
     };
     unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let chrome = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
+        let style = style & !(chrome.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_EXSTYLE,
+            ex_style | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize,
+        );
+
+        let nc_disabled = DWMNCRP_DISABLED.0;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_NCRENDERING_POLICY,
+            (&nc_disabled as *const i32).cast(),
+            std::mem::size_of::<i32>() as u32,
+        );
+
         if windows_build_number() >= WIN11_MIN_BUILD {
             let backdrop_none = DWMSBT_NONE;
             let _ = DwmSetWindowAttribute(
@@ -768,11 +856,18 @@ fn apply_overlay_dwm_transparency(window: &WebviewWindow) {
             );
         }
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
     }
 }
-
-#[cfg(not(windows))]
-fn apply_overlay_dwm_transparency(_window: &WebviewWindow) {}
 
 #[cfg(windows)]
 fn activate_window(window: &WebviewWindow) {

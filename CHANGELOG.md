@@ -12,6 +12,18 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.65] — 2026-09-23
+
+### Added
+
+- **Skill import (veyro://):** Install text skills from aiStructEdit catalog links (`veyro://translate-en.md`, `veyro://import?path=…`, remote URL query). Permission preview, progress UI, copy into skills folder, auto-select skill in text settings.
+- **Skill import window:** Dedicated `skill-import` webview with EN/RU strings; deeplink forwarded from single-instance and startup argv.
+
+### Fixed
+
+- **Skill deeplinks:** Catalog slug resolution before local path checks; CSP allows `aistructedit.com`; capabilities include `skill-import` webview (fixes spinner / invoke errors).
+- **Windows REC overlay:** Frameless transparent surface — strip caption/sysmenu, disable DWM NC rendering and Win11 backdrop, re-apply after monitor move and show (no black plate or close button).
+
 ## [1.8.59] — 2026-09-23
 
 ### Fixed

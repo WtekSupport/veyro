@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Minimal capabilities for Veyro main window",
-  "windows": ["main", "about", "overlay", "init"],
+  "windows": ["main", "about", "overlay", "init", "skill-import"],
   "permissions": [
     "core:default",
     "core:tray:default",
