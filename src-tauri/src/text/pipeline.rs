@@ -137,12 +137,22 @@ pub async fn process_transcription_immediate(
     settings: &AppSettings,
     whisper_detected_language: Option<&str>,
 ) -> Result<ProcessedText, TextProcessingError> {
-    process_transcription_immediate_sync(
-        raw,
-        timed_segments,
-        settings,
-        whisper_detected_language,
-    )
+    let raw = raw.to_string();
+    let settings = settings.clone();
+    let whisper_lang = whisper_detected_language.map(str::to_string);
+    let timed_owned: Option<Vec<TimedTextSegment>> =
+        timed_segments.map(|segments| segments.to_vec());
+
+    tokio::task::spawn_blocking(move || {
+        process_transcription_immediate_sync(
+            &raw,
+            timed_owned.as_deref(),
+            &settings,
+            whisper_lang.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| TextProcessingError::Failed(error.to_string()))?
 }
 
 /// Phase 2: AI rewrite on text that already went through phase 1.

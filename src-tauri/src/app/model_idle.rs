@@ -270,6 +270,12 @@ impl AppContext {
         if !needs_local_stt(settings) || !selected_local_stt_ready(settings) {
             return;
         }
+        if self.runtime.transcriber().is_model_loaded() {
+            return;
+        }
+        if self.runtime.pending_count() > 0 {
+            return;
+        }
         let runtime = self.runtime.clone();
         std::thread::spawn(move || {
             let _ = tauri::async_runtime::block_on(runtime.prewarm_transcriber());
