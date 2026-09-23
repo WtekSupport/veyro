@@ -12,6 +12,7 @@ export default defineConfig(() => ({
         about: path.resolve(__dirname, "about.html"),
         overlay: path.resolve(__dirname, "overlay.html"),
         init: path.resolve(__dirname, "init.html"),
+        skillImport: path.resolve(__dirname, "skill-import.html"),
       },
     },
   },
