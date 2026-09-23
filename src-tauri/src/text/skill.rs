@@ -210,10 +210,49 @@ pub fn load_skill_body(filename: Option<&str>) -> Result<Option<String>, ConfigE
     Ok(Some(body))
 }
 
+pub fn inspect_skill_file(from_path: &str) -> Result<(AiSkillInfo, u64), ConfigError> {
+    let source = Path::new(from_path.trim());
+    if !source.is_file() {
+        return Err(ConfigError::Invalid(format!(
+            "skill_file_not_found:{}",
+            source.display()
+        )));
+    }
+
+    if source.extension().and_then(|value| value.to_str()) != Some("md") {
+        return Err(ConfigError::Invalid("skill_file_not_markdown".to_string()));
+    }
+
+    let filename = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| ConfigError::Invalid("skill_file_invalid_name".to_string()))?
+        .to_string();
+
+    let size_bytes = fs::metadata(source)
+        .map_err(|error| ConfigError::Read(format!("{}: {error}", source.display())))?
+        .len();
+
+    let contents = fs::read_to_string(source)
+        .map_err(|error| ConfigError::Read(format!("{}: {error}", source.display())))?;
+    let (name, description, _) = parse_skill_markdown(&contents, &filename);
+    Ok((
+        AiSkillInfo {
+            filename,
+            name,
+            description,
+        },
+        size_bytes,
+    ))
+}
+
 pub fn import_skill(from_path: &str) -> Result<AiSkillInfo, ConfigError> {
     let source = Path::new(from_path.trim());
     if !source.is_file() {
-        return Err(ConfigError::Invalid("skill_file_not_found".to_string()));
+        return Err(ConfigError::Invalid(format!(
+            "skill_file_not_found:{}",
+            source.display()
+        )));
     }
 
     if source.extension().and_then(|value| value.to_str()) != Some("md") {
@@ -307,6 +346,10 @@ fn parse_skill_markdown(contents: &str, fallback_name: &str) -> (String, String,
         let line = line.trim();
         if let Some(value) = line.strip_prefix("name:") {
             name = value.trim().trim_matches('"').to_string();
+        } else if let Some(value) = line.strip_prefix("title:") {
+            if name == fallback_name {
+                name = value.trim().trim_matches('"').to_string();
+            }
         } else if let Some(value) = line.strip_prefix("description:") {
             description = value.trim().trim_matches('"').to_string();
         }

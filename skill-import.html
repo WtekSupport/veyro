@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles/skill-import.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Veyro</title>
+    <script type="module" src="/src/skill-import.ts" defer></script>
+  </head>
+  <body class="skill-import-body">
+    <main class="skill-import-panel" role="dialog" aria-modal="true" aria-labelledby="skill-import-title">
+      <header class="skill-import-header">
+        <img class="skill-import-logo" src="/src/assets/logo.png" alt="" width="32" height="32" />
+        <h1 id="skill-import-title" class="skill-import-title" data-skill-import-title>Skill import</h1>
+      </header>
+
+      <section class="skill-import-state skill-import-state--preparing" data-skill-import-preparing hidden>
+        <div class="skill-import-preparing-row">
+          <p class="skill-import-message" data-skill-import-preparing-message>Loading…</p>
+          <span class="skill-import-spinner" aria-hidden="true"></span>
+        </div>
+        <div class="skill-import-actions skill-import-actions--preparing">
+          <button type="button" class="btn btn-secondary" data-skill-import-preparing-cancel>Cancel</button>
+        </div>
+      </section>
+
+      <section class="skill-import-state" data-skill-import-preview hidden>
+        <dl class="skill-import-meta">
+          <div>
+            <dt data-skill-import-label-name>Name</dt>
+            <dd data-skill-import-name>—</dd>
+          </div>
+          <div>
+            <dt data-skill-import-label-filename>File</dt>
+            <dd data-skill-import-filename>—</dd>
+          </div>
+          <div>
+            <dt data-skill-import-label-size>Size</dt>
+            <dd data-skill-import-size>—</dd>
+          </div>
+          <div>
+            <dt data-skill-import-label-source>Source</dt>
+            <dd class="skill-import-source" data-skill-import-source>—</dd>
+          </div>
+          <div data-skill-import-description-row hidden>
+            <dt data-skill-import-label-description>Description</dt>
+            <dd data-skill-import-description>—</dd>
+          </div>
+        </dl>
+        <p class="skill-import-question" data-skill-import-question>Install this skill?</p>
+        <div class="skill-import-actions">
+          <button type="button" class="btn btn-secondary" data-skill-import-cancel>Cancel</button>
+          <button type="button" class="btn btn-primary" data-skill-import-install>Install</button>
+        </div>
+      </section>
+
+      <section class="skill-import-state" data-skill-import-installing hidden>
+        <p class="skill-import-message" data-skill-import-installing-message>Installing…</p>
+        <span class="skill-import-spinner" aria-hidden="true"></span>
+        <div class="skill-import-progress" aria-hidden="true">
+          <div class="skill-import-progress-bar" data-skill-import-progress></div>
+        </div>
+      </section>
+
+      <section class="skill-import-state" data-skill-import-error hidden>
+        <p class="skill-import-error" data-skill-import-error-text></p>
+        <div class="skill-import-actions">
+          <button type="button" class="btn btn-secondary" data-skill-import-error-close>Close</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

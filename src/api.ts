@@ -300,6 +300,7 @@ export const EVENTS = {
   sileroTeDownloadProgress: "app://silero-te-download-progress",
   sileroVadDownloadProgress: "app://silero-vad-download-progress",
   skillImported: "app://skill-imported",
+  skillImportFlow: "app://skill-import-flow",
   skillsChanged: "app://skills-changed",
   settingsChanged: "app://settings-changed",
   appStats: "app-stats",

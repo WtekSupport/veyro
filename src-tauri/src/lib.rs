@@ -1458,6 +1458,26 @@ fn import_ai_skill(from_path: String) -> Result<AiSkillInfo, String> {
 }
 
 #[tauri::command]
+fn get_skill_import_flow_snapshot() -> Option<app::events::SkillImportFlowPayload> {
+    deeplink::get_skill_import_flow_snapshot()
+}
+
+#[tauri::command]
+fn confirm_deeplink_skill_import() {
+    deeplink::confirm_deeplink_skill_import();
+}
+
+#[tauri::command]
+fn cancel_deeplink_skill_import(app: AppHandle) {
+    deeplink::cancel_deeplink_skill_import(&app);
+}
+
+#[tauri::command]
+fn skill_import_ui_ready(app: AppHandle) {
+    deeplink::replay_skill_import_flow(&app);
+}
+
+#[tauri::command]
 fn pick_and_import_ai_skill() -> Result<AiSkillInfo, String> {
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Markdown", &["md"])
@@ -1585,6 +1605,8 @@ fn apply_window_locale(app: &AppHandle, locale: settings::UiLocale) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    deeplink::prepare_windows_deeplink_launch();
+
     let (mut settings, settings_loaded) = match load_settings() {
         Ok(settings) => (settings, true),
         Err(error) => {
@@ -1620,8 +1642,13 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            window::show_settings_window(app);
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let urls = deeplink::veyro_urls_from_cli_args(argv);
+            if urls.is_empty() {
+                window::show_settings_window(app);
+            } else {
+                deeplink::handle_skill_import_urls(app, urls);
+            }
         }));
     }
 
@@ -1678,6 +1705,10 @@ pub fn run() {
             list_ai_skills,
             open_ai_skills_folder,
             import_ai_skill,
+            get_skill_import_flow_snapshot,
+            confirm_deeplink_skill_import,
+            cancel_deeplink_skill_import,
+            skill_import_ui_ready,
             pick_and_import_ai_skill,
             get_dictionary_path,
             get_data_storage_dir,
@@ -1732,11 +1763,16 @@ pub fn run() {
                     deeplink::handle_skill_import_urls(&deep_link_app, urls);
                 });
 
+                let mut startup_urls: Vec<String> = deeplink::veyro_urls_from_cli_args(
+                    std::env::args().skip(1),
+                );
                 if let Ok(Some(urls)) = app.deep_link().get_current() {
-                    deeplink::handle_skill_import_urls(
-                        &handle,
-                        urls.iter().map(|url| url.to_string()).collect(),
-                    );
+                    startup_urls.extend(urls.iter().map(|url| url.to_string()));
+                }
+                startup_urls.sort();
+                startup_urls.dedup();
+                if !startup_urls.is_empty() {
+                    deeplink::handle_skill_import_urls(&handle, startup_urls);
                 }
             }
 
@@ -1814,6 +1850,10 @@ pub fn run() {
                         || window.label() == window::ABOUT_WINDOW_LABEL
                     {
                         window::hide_settings_window(window);
+                    } else if window.label() == window::SKILL_IMPORT_WINDOW_LABEL {
+                        api.prevent_close();
+                        let app = window.app_handle();
+                        deeplink::cancel_deeplink_skill_import(&app);
                     } else if window.label() == window::INIT_WINDOW_LABEL {
                         let _ = window.hide();
                     }
