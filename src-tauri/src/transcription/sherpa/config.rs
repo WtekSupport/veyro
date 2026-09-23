@@ -8,9 +8,26 @@ use crate::settings::{AppSettings, SherpaOnnxLayout};
 use crate::transcription::local_stt_model_store::{effective_sherpa_bundle_dir, required_sherpa_files};
 
 pub fn execution_provider(settings: &AppSettings) -> &'static str {
+    if let Ok(raw) = std::env::var("VEYRO_SHERPA_PROVIDER") {
+        return match raw.to_ascii_lowercase().as_str() {
+            "cuda" => "cuda",
+            "directml" => "directml",
+            "coreml" => "coreml",
+            _ => "cpu",
+        };
+    }
+
     if !settings.local_whisper_use_gpu {
         return "cpu";
     }
+
+    let layout = crate::settings::variant_spec(settings.local_stt_variant()).sherpa_layout;
+    // Qwen3 ASR + DirectML has caused full-process crashes during decode on Windows.
+    #[cfg(windows)]
+    if layout == Some(SherpaOnnxLayout::Qwen3Int8) {
+        return "cpu";
+    }
+
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         return "coreml";
