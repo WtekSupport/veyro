@@ -19,8 +19,6 @@
                                      "binaries/fbjni-x86_64-pc-windows-msvc.dll":  "fbjni.dll",
                                      "binaries/libiomp5md-x86_64-pc-windows-msvc.dll":  "libiomp5md.dll",
                                      "binaries/libiompstubs5md-x86_64-pc-windows-msvc.dll":  "libiompstubs5md.dll",
-                                     "binaries/mkl_core.1-x86_64-pc-windows-msvc.dll":  "mkl_core.1.dll",
-                                     "binaries/mkl_intel_thread.1-x86_64-pc-windows-msvc.dll":  "mkl_intel_thread.1.dll",
                                      "binaries/pytorch_jni-x86_64-pc-windows-msvc.dll":  "pytorch_jni.dll",
                                      "binaries/torch-x86_64-pc-windows-msvc.dll":  "torch.dll",
                                      "binaries/torch_cpu-x86_64-pc-windows-msvc.dll":  "torch_cpu.dll",

@@ -79,6 +79,64 @@ pub const VERSION_BUILD: u32 = {build};
 
     #[cfg(not(windows))]
     tauri_build::build();
+
+    #[cfg(all(windows, feature = "silero-te"))]
+    stage_windows_libtorch_dlls(&manifest_dir);
+}
+
+#[cfg(all(windows, feature = "silero-te"))]
+fn stage_windows_libtorch_dlls(manifest_dir: &PathBuf) {
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    let Some(profile_dir) = out_dir.ancestors().nth(3).map(PathBuf::from) else {
+        return;
+    };
+    let deps_dir = profile_dir.join("deps");
+    let binaries_dir = manifest_dir.join("binaries");
+    let triple = "x86_64-pc-windows-msvc";
+    let suffix = format!("-{triple}.dll");
+
+    let Ok(entries) = fs::read_dir(&binaries_dir) else {
+        return;
+    };
+
+    let libtorch_prefixes = [
+        "c10-",
+        "torch-",
+        "torch_cpu-",
+        "torch_global_deps-",
+        "fbgemm-",
+        "asmjit-",
+        "fbjni-",
+        "uv-",
+        "libiomp5md-",
+        "libiompstubs5md-",
+        "pytorch_jni-",
+        "mkl_",
+    ];
+
+    let _ = fs::create_dir_all(&deps_dir);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !name.ends_with(&suffix) {
+            continue;
+        }
+        if !libtorch_prefixes
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            continue;
+        }
+        let dest_name = name.trim_end_matches(&suffix).to_string() + ".dll";
+        for dest_dir in [&profile_dir, &deps_dir] {
+            let dest = dest_dir.join(&dest_name);
+            if fs::copy(&path, &dest).is_ok() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
 }
 
 fn copy_md_files(source_dir: &PathBuf, dest_dir: &PathBuf) {
