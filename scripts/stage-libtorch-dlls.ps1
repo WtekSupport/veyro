@@ -37,6 +37,10 @@ function Get-LibtorchLibDir {
     return $null
 }
 
+if ($IsWindows -or $env:OS -like "*Windows*") {
+    & (Join-Path $PSScriptRoot "ensure-intel-mkl-redist.ps1") -RepoRoot $RepoRoot
+}
+
 $libDir = Get-LibtorchLibDir
 if (-not $libDir) {
     if ($Required) {
@@ -48,20 +52,39 @@ if (-not $libDir) {
 New-Item -ItemType Directory -Force -Path $binariesDir | Out-Null
 New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
 
-$stagedLibtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|mkl_core\.1|mkl_intel_thread\.1|pytorch_jni)-'
+$stagedLibtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|pytorch_jni|mkl)'
 Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match $stagedLibtorchPattern } |
     Remove-Item -Force
 
+$mklDispatchDir = Join-Path $RepoRoot ".tools\mkl-dispatch"
+
+$depsDir = Join-Path $profileDir "deps"
+New-Item -ItemType Directory -Force -Path $depsDir | Out-Null
+
+function Stage-LibtorchDll {
+    param([string]$SrcPath)
+    $name = [IO.Path]::GetFileName($SrcPath)
+    $exeDest = Join-Path $profileDir $name
+    Copy-Item $SrcPath $exeDest -Force
+    Copy-Item $SrcPath (Join-Path $depsDir $name) -Force
+    $base = [IO.Path]::GetFileNameWithoutExtension($name)
+    $bundleDest = Join-Path $binariesDir "$base-$triple.dll"
+    Copy-Item $SrcPath $bundleDest -Force
+    Write-Host "Staged libtorch $name -> $Profile (+ deps/) + binaries/"
+}
+
 $copied = 0
 foreach ($dll in Get-ChildItem $libDir -Filter "*.dll") {
-    $exeDest = Join-Path $profileDir $dll.Name
-    Copy-Item $dll.FullName $exeDest -Force
-
-    $bundleDest = Join-Path $binariesDir "$($dll.BaseName)-$triple.dll"
-    Copy-Item $dll.FullName $bundleDest -Force
-    Write-Host "Staged libtorch $($dll.Name) -> $Profile + binaries/"
+    Stage-LibtorchDll $dll.FullName
     $copied++
+}
+
+if (Test-Path $mklDispatchDir) {
+    foreach ($dll in Get-ChildItem $mklDispatchDir -Filter "mkl*.dll" -File -ErrorAction SilentlyContinue) {
+        Stage-LibtorchDll $dll.FullName
+        $copied++
+    }
 }
 
 if ($Required -and $copied -eq 0) {

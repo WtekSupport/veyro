@@ -1,9 +1,11 @@
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use sherpa_onnx::OfflineRecognizer;
 use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 use crate::audio::resampler::TARGET_SAMPLE_RATE;
 use crate::audio::segment::AudioSegment;
@@ -16,6 +18,12 @@ use crate::transcription::models::{TranscriptionOptions, TranscriptionResult};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
 use crate::transcription::sherpa::build_offline_config;
 
+/// Serialize all sherpa-onnx native calls (prewarm + transcribe share one recognizer).
+fn sherpa_inference_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 struct SharedSherpa {
     bundle_dir: PathBuf,
     settings_snapshot: SherpaSettingsSnapshot,
@@ -27,6 +35,7 @@ struct SherpaSettingsSnapshot {
     variant: LocalSttVariant,
     use_gpu: bool,
     num_threads: u32,
+    provider: String,
 }
 
 impl SharedSherpa {
@@ -37,6 +46,7 @@ impl SharedSherpa {
                 variant: settings.local_stt_variant(),
                 use_gpu: settings.local_whisper_use_gpu,
                 num_threads: settings.local_sherpa_num_threads,
+                provider: crate::transcription::sherpa::execution_provider(settings).to_string(),
             },
             recognizer: Mutex::new(None),
         }
@@ -46,6 +56,8 @@ impl SharedSherpa {
         self.settings_snapshot.variant == settings.local_stt_variant()
             && self.settings_snapshot.use_gpu == settings.local_whisper_use_gpu
             && self.settings_snapshot.num_threads == settings.local_sherpa_num_threads
+            && self.settings_snapshot.provider
+                == crate::transcription::sherpa::execution_provider(settings)
     }
 
     fn unload(&self) {
@@ -80,6 +92,13 @@ impl SharedSherpa {
         let config = build_offline_config(settings, &self.bundle_dir)
             .map_err(TranscriptionError::InferenceFailed)?;
 
+        let provider = config.model_config.provider.clone().unwrap_or_default();
+        info!(
+            provider = %provider,
+            variant = ?settings.local_stt_variant(),
+            "loading sherpa STT recognizer"
+        );
+
         let recognizer = OfflineRecognizer::create(&config).ok_or_else(|| {
             TranscriptionError::InferenceFailed("failed to create sherpa recognizer".to_string())
         })?;
@@ -88,6 +107,31 @@ impl SharedSherpa {
     }
 
     fn decode_segment(
+        &self,
+        settings: &AppSettings,
+        audio: &AudioSegment,
+        options: &TranscriptionOptions,
+    ) -> Result<String, TranscriptionError> {
+        let _infer = sherpa_inference_lock()
+            .lock()
+            .map_err(|_| TranscriptionError::InferenceFailed("sherpa inference lock poisoned".into()))?;
+
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            self.decode_segment_inner(settings, audio, options)
+        }));
+        match outcome {
+            Ok(result) => result,
+            Err(_) => {
+                warn!("sherpa decode panicked; unloading recognizer");
+                self.unload();
+                Err(TranscriptionError::InferenceFailed(
+                    "sherpa decode panicked".to_string(),
+                ))
+            }
+        }
+    }
+
+    fn decode_segment_inner(
         &self,
         settings: &AppSettings,
         audio: &AudioSegment,
@@ -103,6 +147,19 @@ impl SharedSherpa {
             TranscriptionError::InferenceFailed("sherpa recognizer not loaded".to_string())
         })?;
 
+        if audio.sample_rate != TARGET_SAMPLE_RATE {
+            return Err(TranscriptionError::InferenceFailed(format!(
+                "sherpa expected {} Hz audio, got {} Hz",
+                TARGET_SAMPLE_RATE, audio.sample_rate
+            )));
+        }
+
+        info!(
+            ms = audio.duration_ms,
+            samples = audio.samples.len(),
+            "sherpa decode start"
+        );
+
         let stream = recognizer.create_stream();
         if let Some(lang) = options.language.as_deref().filter(|v| !v.is_empty()) {
             stream.set_option("language", lang);
@@ -112,7 +169,9 @@ impl SharedSherpa {
         let result = stream.get_result().ok_or_else(|| {
             TranscriptionError::InferenceFailed("sherpa decode returned no result".to_string())
         })?;
-        Ok(result.text.trim().to_string())
+        let text = result.text.trim().to_string();
+        info!(chars = text.chars().count(), "sherpa decode done");
+        Ok(text)
     }
 }
 
@@ -155,6 +214,23 @@ impl LocalSherpaProvider {
     }
 }
 
+async fn run_sherpa_on_std_thread<F, T>(work: F) -> Result<T, TranscriptionError>
+where
+    F: FnOnce() -> Result<T, TranscriptionError> + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("sherpa-stt".into())
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .map_err(|error| TranscriptionError::InferenceFailed(error.to_string()))?;
+
+    rx.await
+        .map_err(|_| TranscriptionError::InferenceFailed("sherpa worker dropped".to_string()))?
+}
+
 #[async_trait]
 impl TranscriptionProvider for LocalSherpaProvider {
     async fn transcribe(
@@ -162,34 +238,62 @@ impl TranscriptionProvider for LocalSherpaProvider {
         audio: AudioSegment,
         options: TranscriptionOptions,
     ) -> Result<TranscriptionResult, TranscriptionError> {
+        if self._cancel.is_cancelled() {
+            return Err(TranscriptionError::Cancelled);
+        }
+
         let settings = self.current_settings()?;
-        let text = self.model.decode_segment(&settings, &audio, &options)?;
-        Ok(TranscriptionResult {
-            text,
-            confidence: None,
-            whisper_segments: None,
-            timed_segments: None,
-            audio_peak: None,
-            audio_rms: None,
-            detected_language: options.language.clone(),
+        let model = Arc::clone(&self.model);
+        let cancel = self._cancel.clone();
+        let language = options.language.clone();
+
+        run_sherpa_on_std_thread(move || {
+            if cancel.is_cancelled() {
+                return Err(TranscriptionError::Cancelled);
+            }
+            let text = model.decode_segment(&settings, &audio, &options)?;
+            Ok(TranscriptionResult {
+                text,
+                confidence: None,
+                whisper_segments: None,
+                timed_segments: None,
+                audio_peak: None,
+                audio_rms: None,
+                detected_language: language,
+            })
         })
+        .await
     }
 
     async fn prewarm(&self) -> Result<(), TranscriptionError> {
+        if self._cancel.is_cancelled() {
+            return Err(TranscriptionError::Cancelled);
+        }
+
         let settings = self.current_settings()?;
+        let model = Arc::clone(&self.model);
+        let cancel = self._cancel.clone();
         let sample_count = (TARGET_SAMPLE_RATE as usize * 300) / 1000;
         let segment = AudioSegment::new(vec![0.0; sample_count], TARGET_SAMPLE_RATE, 1);
-        let _ = self.model.decode_segment(
-            &settings,
-            &segment,
-            &TranscriptionOptions::default(),
-        )?;
-        Ok(())
+        let options = TranscriptionOptions::default();
+
+        run_sherpa_on_std_thread(move || {
+            if cancel.is_cancelled() {
+                return Err(TranscriptionError::Cancelled);
+            }
+            let _ = model.decode_segment(&settings, &segment, &options)?;
+            Ok(())
+        })
+        .await
     }
 
     async fn unload(&self) -> Result<(), TranscriptionError> {
-        self.model.unload();
-        Ok(())
+        let model = Arc::clone(&self.model);
+        run_sherpa_on_std_thread(move || {
+            model.unload();
+            Ok(())
+        })
+        .await
     }
 
     fn is_model_loaded(&self) -> bool {

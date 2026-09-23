@@ -30,7 +30,7 @@ pub fn unitoken_into_token(unitoken: &str) -> String {
     split_into_chars(unitoken)
         .into_iter()
         .map(|part| {
-            if is_transformed_char(&part) {
+            if is_transformed_char(&part) && part.len() >= 2 {
                 char::from_u32(part[1..part.len() - 1].parse().unwrap_or(0)).unwrap_or('?')
             } else {
                 part.chars().next().unwrap_or(' ')

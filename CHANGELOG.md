@@ -12,6 +12,56 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.65] — 2026-09-23
+
+### Added
+
+- **Skill import (veyro://):** Install text skills from aiStructEdit catalog links (`veyro://translate-en.md`, `veyro://import?path=…`, remote URL query). Permission preview, progress UI, copy into skills folder, auto-select skill in text settings.
+- **Skill import window:** Dedicated `skill-import` webview with EN/RU strings; deeplink forwarded from single-instance and startup argv.
+
+### Fixed
+
+- **Skill deeplinks:** Catalog slug resolution before local path checks; CSP allows `aistructedit.com`; capabilities include `skill-import` webview (fixes spinner / invoke errors).
+- **Windows REC overlay:** Frameless transparent surface — strip caption/sysmenu, disable DWM NC rendering and Win11 backdrop, re-apply after monitor move and show (no black plate or close button).
+
+## [1.8.59] — 2026-09-23
+
+### Fixed
+
+- **Windows / Silero TE:** Ship full Intel MKL 2021.4 runtime (`mkl_def`, `mkl_avx2`, `mkl_avx512`, VML, etc.) with the app — fixes process exit with *Intel MKL FATAL ERROR* after Whisper STT when dispatch DLLs were missing next to the executable.
+- **Windows / Silero TE:** `build.rs` and libtorch staging copy native DLLs beside `veyro.exe` and into `deps/` during dev builds; NSIS bundles all `mkl_*` libraries.
+- **Sherpa Qwen3 (Windows):** CPU execution provider instead of DirectML; Sherpa runs on a dedicated thread with a global inference lock; native panics are caught and the recognizer can reload.
+- **Silero TE:** Tokenizer `IntList` / 1D outputs normalized to `[1, seq]` before padding (fixes post-STT “index out of bounds” panic).
+- **Text pipeline:** Post-STT cleanup runs on a blocking thread with panic isolation.
+- **Local STT:** Sherpa/Whisper decode and post-STT work on blocking threads; skip background STT prewarm while a segment is queued.
+- **Windows 10:** REC overlay no longer applies Win11-only DWM backdrop; overlay shows on the UI thread after the WebView loads.
+
+### Added
+
+- **Focus defer buffer:** With focus control off (default), dictation continues when the injection field loses focus; text buffers until focus returns.
+
+## [1.8.56] — 2026-09-23
+
+- **Windows / Silero TE:** Bundle full Intel MKL 2021.4 redist (`mkl_def`, `mkl_avx2`, VML, etc.) via `ensure-intel-mkl-redist.ps1` during libtorch staging — fixes fatal MKL errors after Whisper when dispatch DLLs were missing next to the exe.
+- **Windows / Silero TE:** Set `MKL_DEBUG_CPU_TYPE` before libtorch loads as an extra safeguard on CPUs without AVX512 dispatch DLLs.
+
+## [1.8.54] — 2026-09-23
+
+- **Sherpa Qwen3 (Windows):** Use CPU execution provider instead of DirectML (avoids hard crash during decode); run sherpa on a dedicated thread with a global inference lock; catch native panics and reload the recognizer.
+- **Text pipeline:** Catch panics during post-STT cleanup; harden Silero TE unicode token parsing.
+
+## [1.8.52] — 2026-09-23
+
+- **Silero TE:** Normalize tokenizer `IntList` / 1D token tensors to `[1, seq]` before padding (fixes “index out of bounds” panic during text processing after STT).
+
+## [1.8.50] — 2026-09-22
+
+- **Sherpa local STT crash:** Run sherpa-onnx decode/prewarm/unload on the blocking thread pool (same as Whisper). Skip background STT prewarm while a segment is queued; run post-STT cleanup (incl. Silero TE) on blocking threads. Fixes process exit when the tray turns red at transcription start on Windows.
+
+## [1.8.49] — 2026-09-22
+
+- **Windows 10 REC overlay crash:** Do not apply Win11-only DWM backdrop on Windows 10; show the recording overlay on the UI thread after the WebView loads (fixes exit when the red REC indicator appears).
+
 ## [1.8.48] — 2026-09-22
 
 - **Focus defer buffer:** With **Focus control** off (new default), dictation keeps running when the injection field loses focus; text is buffered in memory and inserted when focus returns (already inserted text is kept).

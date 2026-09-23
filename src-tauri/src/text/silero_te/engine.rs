@@ -148,9 +148,37 @@ impl SileroTeEngine {
 fn tensor_from_ivalue(value: tch::IValue) -> Result<tch::Tensor, String> {
     use tch::{Kind, Tensor};
     match value {
-        tch::IValue::Tensor(tensor) => Ok(tensor),
-        tch::IValue::IntList(ids) => Ok(Tensor::from_slice(&ids).to_kind(Kind::Int64)),
+        tch::IValue::Tensor(tensor) => Ok(batch_token_ids(tensor)),
+        tch::IValue::IntList(ids) => {
+            let tensor = Tensor::from_slice(&ids).to_kind(Kind::Int64);
+            Ok(batch_token_ids(tensor))
+        }
         other => Err(format!("expected tensor output, got {other:?}")),
+    }
+}
+
+/// TorchScript tokenizer may return `[seq]` or `[1, seq]`; model expects batch form.
+#[cfg(feature = "silero-te")]
+fn batch_token_ids(ids: tch::Tensor) -> tch::Tensor {
+    let dims = ids.size();
+    match dims.len() {
+        0 => ids.reshape([1, 0]),
+        1 => ids.reshape([1, dims[0]]),
+        2 if dims[0] == 1 => ids,
+        2 => ids.reshape([1, -1]),
+        _ => ids.reshape([1, -1]),
+    }
+}
+
+#[cfg(feature = "silero-te")]
+fn token_seq_len(ids: &tch::Tensor) -> i64 {
+    let dims = ids.size();
+    if dims.len() >= 2 {
+        dims[1]
+    } else if dims.len() == 1 {
+        dims[0]
+    } else {
+        0
     }
 }
 
@@ -334,13 +362,15 @@ fn pad_ids(
 ) -> Result<(tch::Tensor, bool, tch::Tensor), String> {
     use tch::{Kind, Tensor};
 
+    let ids = batch_token_ids(ids.shallow_clone());
+
     if !loaded.pad {
-        let att = Tensor::ones_like(ids);
-        return Ok((ids.shallow_clone(), false, att));
+        let att = Tensor::ones_like(&ids);
+        return Ok((ids, false, att));
     }
 
     const LIMIT: i64 = 18;
-    let seq_len = ids.size()[1];
+    let seq_len = token_seq_len(&ids);
     let out_len = if seq_len < LIMIT {
         LIMIT
     } else {
@@ -390,5 +420,18 @@ fn trim_padded_tokens(
         ))
     } else {
         Ok((tokens, punct, capital))
+    }
+}
+
+#[cfg(all(test, feature = "silero-te"))]
+mod mkl_smoke {
+    use tch::{Device, Kind, Tensor};
+
+    /// Loads libtorch/MKL the same way Silero TE does during post-STT processing.
+    #[test]
+    fn libtorch_cpu_matmul_does_not_fatal_mkl() {
+        let a = Tensor::ones(&[4, 4], (Kind::Float, Device::Cpu));
+        let b = a.matmul(&a);
+        assert_eq!(b.int64_value(&[0, 0]), 4);
     }
 }

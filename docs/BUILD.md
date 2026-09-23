@@ -81,7 +81,7 @@ npm run tauri:dev
 
 Скрипт dev по умолчанию ставит `CARGO_INCREMENTAL=0` на Windows; для более быстрых пересборок можно `VEYRO_CARGO_INCREMENTAL=1`.
 
-**Silero TE (libtorch):** при ошибке «`c10.dll` was not found» скопируйте runtime DLL рядом с `veyro.exe` — `npm run tauri:dev` / `tauri:build` делают это через `scripts/stage-libtorch-dlls.ps1`. Вручную: `powershell -File scripts/stage-libtorch-dlls.ps1 -RepoRoot . -Profile release` (или `debug`).
+**Silero TE (libtorch):** `npm run tauri:dev` / `tauri:build` вызывают `scripts/stage-libtorch-dlls.ps1` (скачивает Intel MKL redist при первом запуске, кладёт DLL рядом с `veyro.exe` и в `debug/deps/`). Вручную: `powershell -File scripts/stage-libtorch-dlls.ps1 -RepoRoot . -Profile debug`. Сборка с `silero-te` также копирует DLL из `src-tauri/binaries/` через `build.rs`. Если видите **Intel MKL FATAL ERROR** (`mkl_avx512.1.dll` / `mkl_def.1.dll`), убедитесь что `CARGO_TARGET_DIR=C:\veyro-target` (не другой каталог) и перезапустите dev после staging.
 
 ### Release + NSIS-инсталлятор
 
