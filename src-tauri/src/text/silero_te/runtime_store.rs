@@ -262,7 +262,8 @@ where
 
     Err(format!(
         "{last_error}. GitHub release `{RELEASE_TAG}` is missing `{file_name}` — run \
-         `scripts/package-silero-te-runtime.ps1 -RepoRoot .` (requires staged libtorch DLLs)."
+         `scripts/package-silero-te-runtime.ps1 -RepoRoot .` (requires staged libtorch DLLs). \
+         Installers still bundle libtorch beside veyro.exe; this zip is for repair/refresh under the models folder."
     ))
 }
 
