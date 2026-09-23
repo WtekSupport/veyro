@@ -422,3 +422,16 @@ fn trim_padded_tokens(
         Ok((tokens, punct, capital))
     }
 }
+
+#[cfg(all(test, feature = "silero-te"))]
+mod mkl_smoke {
+    use tch::{Device, Kind, Tensor};
+
+    /// Loads libtorch/MKL the same way Silero TE does during post-STT processing.
+    #[test]
+    fn libtorch_cpu_matmul_does_not_fatal_mkl() {
+        let a = Tensor::ones(&[4, 4], (Kind::Float, Device::Cpu));
+        let b = a.matmul(&a);
+        assert_eq!(b.int64_value(&[0, 0]), 4);
+    }
+}
