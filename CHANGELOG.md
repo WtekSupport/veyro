@@ -12,7 +12,7 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
-## [1.8.51] — 2026-09-23
+## [1.8.52] — 2026-09-23
 
 - **Silero TE:** Normalize tokenizer `IntList` / 1D token tensors to `[1, seq]` before padding (fixes “index out of bounds” panic during text processing after STT).
 
