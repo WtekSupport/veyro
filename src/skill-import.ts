@@ -44,9 +44,9 @@ function showPhase(phase: SkillImportPhase): void {
   const sections = document.querySelectorAll<HTMLElement>(
     "[data-skill-import-preparing], [data-skill-import-preview], [data-skill-import-installing], [data-skill-import-error]",
   );
-  for (const section of sections) {
+  sections.forEach((section) => {
     section.hidden = true;
-  }
+  });
 
   const selector =
     phase === "preparing"
