@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { EVENTS, type AiSkillInfo } from "./api";
 import { setLocale, t } from "./i18n";
 
-type SkillImportPhase = "preparing" | "preview" | "installing" | "done" | "error";
+type SkillImportPhase = "preparing" | "preview" | "already_installed" | "installing" | "done" | "error";
 
 interface SkillImportFlowPayload {
   phase: SkillImportPhase;
@@ -40,6 +40,33 @@ function applyStaticLabels(): void {
   query<HTMLButtonElement>("[data-skill-import-preparing-cancel]").textContent = t("common.cancel");
 }
 
+function resetPreviewActions(enabled: boolean): void {
+  const installBtn = document.querySelector<HTMLButtonElement>("[data-skill-import-install]");
+  const cancelBtn = document.querySelector<HTMLButtonElement>("[data-skill-import-cancel]");
+  if (installBtn) {
+    installBtn.disabled = !enabled;
+  }
+  if (cancelBtn) {
+    cancelBtn.disabled = !enabled;
+  }
+}
+
+function setPreviewInstallMode(allowInstall: boolean, skillName?: string): void {
+  const installBtn = query<HTMLButtonElement>("[data-skill-import-install]");
+  const cancelBtn = query<HTMLButtonElement>("[data-skill-import-cancel]");
+  const question = query<HTMLElement>("[data-skill-import-question]");
+  installBtn.hidden = !allowInstall;
+  if (allowInstall) {
+    question.textContent = t("skillImport.question");
+    cancelBtn.textContent = t("common.cancel");
+  } else {
+    question.textContent = t("skillImport.alreadyInstalled", {
+      name: skillName?.trim() || t("skillImport.nameFallback"),
+    });
+    cancelBtn.textContent = t("common.close");
+  }
+}
+
 function showPhase(phase: SkillImportPhase): void {
   const sections = document.querySelectorAll<HTMLElement>(
     "[data-skill-import-preparing], [data-skill-import-preview], [data-skill-import-installing], [data-skill-import-error]",
@@ -51,7 +78,7 @@ function showPhase(phase: SkillImportPhase): void {
   const selector =
     phase === "preparing"
       ? "[data-skill-import-preparing]"
-      : phase === "preview"
+      : phase === "preview" || phase === "already_installed"
         ? "[data-skill-import-preview]"
         : phase === "error"
           ? "[data-skill-import-error]"
@@ -97,16 +124,29 @@ async function hideWindow(): Promise<void> {
 
 function handleFlow(payload: SkillImportFlowPayload): void {
   if (payload.phase === "preparing") {
+    setPreviewInstallMode(true);
+    resetPreviewActions(true);
     showPhase("preparing");
     return;
   }
   if (payload.phase === "preview" && payload.skill) {
+    setPreviewInstallMode(true);
+    resetPreviewActions(true);
     applyPreview(payload);
     showPhase("preview");
     query<HTMLButtonElement>("[data-skill-import-install]").focus();
     return;
   }
+  if (payload.phase === "already_installed" && payload.skill) {
+    setPreviewInstallMode(false, payload.skill.name);
+    resetPreviewActions(true);
+    applyPreview(payload);
+    showPhase("already_installed");
+    query<HTMLButtonElement>("[data-skill-import-cancel]").focus();
+    return;
+  }
   if (payload.phase === "installing") {
+    resetPreviewActions(true);
     showPhase("installing");
     setInstallProgress(35);
     return;
@@ -117,6 +157,7 @@ function handleFlow(payload: SkillImportFlowPayload): void {
     return;
   }
   if (payload.phase === "error") {
+    resetPreviewActions(true);
     query<HTMLElement>("[data-skill-import-error-text]").textContent = payload.error ?? t("skillImport.errorGeneric");
     showPhase("error");
   }
@@ -165,11 +206,16 @@ async function bootstrap(): Promise<void> {
   });
 
   query<HTMLButtonElement>("[data-skill-import-install]").addEventListener("click", () => {
-    const installBtn = query<HTMLButtonElement>("[data-skill-import-install]");
-    const cancelBtn = query<HTMLButtonElement>("[data-skill-import-cancel]");
-    installBtn.disabled = true;
-    cancelBtn.disabled = true;
-    void invoke("confirm_deeplink_skill_import");
+    resetPreviewActions(false);
+    void invoke<boolean>("confirm_deeplink_skill_import")
+      .then((accepted) => {
+        if (!accepted) {
+          resetPreviewActions(true);
+        }
+      })
+      .catch(() => {
+        resetPreviewActions(true);
+      });
   });
 
   query<HTMLButtonElement>("[data-skill-import-error-close]").addEventListener("click", cancelImport);

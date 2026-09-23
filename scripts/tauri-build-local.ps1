@@ -185,9 +185,17 @@ function Publish-ReleaseArtifacts {
         $portableStage = Join-Path $versionOut "_portable_stage"
         New-Item -ItemType Directory -Force -Path $portableStage | Out-Null
         Copy-Item $veyroExe $portableStage -Force
+        $skipLibtorch = $env:VEYRO_SKIP_LIBTORCH_BUNDLE -eq "1"
         Get-ChildItem $ReleaseDir -Filter "*.dll" |
             Where-Object {
-                $_.Name -match '^(llama|ggml|sherpa-onnx|onnxruntime|c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp|mkl_|pytorch_jni)'
+                $name = $_.Name
+                if ($name -match '^(llama|ggml|sherpa-onnx|onnxruntime)') {
+                    return $true
+                }
+                if (-not $skipLibtorch -and $name -match '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp|mkl_|pytorch_jni)') {
+                    return $true
+                }
+                return $false
             } |
             Copy-Item -Destination $portableStage -Force
         $zipPath = Join-Path $versionOut "Veyro_${Semver}_x64-portable.zip"

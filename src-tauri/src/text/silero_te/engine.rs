@@ -116,6 +116,7 @@ impl SileroTeEngine {
             return Ok(());
         }
 
+        super::runtime_store::configure_dll_search(settings)?;
         let assets = store::resolve_assets(settings)?;
         let meta: TeMeta = serde_json::from_str(
             &std::fs::read_to_string(&assets.meta).map_err(|error| error.to_string())?,

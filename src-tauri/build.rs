@@ -1,5 +1,22 @@
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
+
+/// Avoid touching bundled resources when unchanged (Tauri dev watches `resources/`).
+fn copy_if_changed(source: &Path, dest: &Path) -> io::Result<()> {
+    let source_bytes = fs::read(source)?;
+    if dest.is_file() {
+        if let Ok(dest_bytes) = fs::read(dest) {
+            if dest_bytes == source_bytes {
+                return Ok(());
+            }
+        }
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(dest, source_bytes)
+}
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -34,8 +51,7 @@ pub const VERSION_BUILD: u32 = {build};
     let dest = dest_dir.join("dictionary.toml");
 
     if source.is_file() {
-        std::fs::create_dir_all(&dest_dir).expect("create resources/dictionary");
-        std::fs::copy(&source, &dest).expect("copy dictionary.default.toml to resources");
+        copy_if_changed(&source, &dest).expect("copy dictionary.default.toml to resources");
         println!("cargo:rerun-if-changed={}", source.display());
     } else if !dest.is_file() {
         panic!(
@@ -45,19 +61,11 @@ pub const VERSION_BUILD: u32 = {build};
         );
     }
 
-    let skills_source = manifest_dir.join("../docs/skills");
-    let skills_dest = manifest_dir.join("resources/skills");
-    if skills_source.is_dir() {
-        copy_md_files(&skills_source, &skills_dest);
-        println!("cargo:rerun-if-changed={}", skills_source.display());
-    }
-
     let legal_source = manifest_dir.join("../docs/legal/third-party-licenses.json");
     let legal_dest_dir = manifest_dir.join("resources/legal");
     let legal_dest = legal_dest_dir.join("third-party-licenses.json");
     if legal_source.is_file() {
-        fs::create_dir_all(&legal_dest_dir).expect("create resources/legal");
-        fs::copy(&legal_source, &legal_dest).expect("copy third-party-licenses.json");
+        copy_if_changed(&legal_source, &legal_dest).expect("copy third-party-licenses.json");
         println!("cargo:rerun-if-changed={}", legal_source.display());
     } else if !legal_dest.is_file() {
         panic!(
@@ -139,15 +147,3 @@ fn stage_windows_libtorch_dlls(manifest_dir: &PathBuf) {
     }
 }
 
-fn copy_md_files(source_dir: &PathBuf, dest_dir: &PathBuf) {
-    std::fs::create_dir_all(dest_dir).expect("create resources/skills");
-    let entries = std::fs::read_dir(source_dir).expect("read docs/skills");
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("md") {
-            continue;
-        }
-        let dest = dest_dir.join(entry.file_name());
-        std::fs::copy(&path, &dest).expect("copy skill markdown to resources");
-    }
-}

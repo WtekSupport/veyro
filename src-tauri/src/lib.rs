@@ -44,7 +44,7 @@ use setup::HomemakerLocalSetup;
 use text::dictionary::{
     ensure_dictionary_file,
 };
-use text::skill::{import_skill, list_skills, open_skills_folder, AiSkillInfo};
+use text::skill::{delete_skill, import_skill, list_skills, open_skills_folder, AiSkillInfo};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio_util::sync::CancellationToken;
@@ -1268,6 +1268,9 @@ struct SileroTeModelStatus {
     path: String,
     exists: bool,
     size_mb: u32,
+    runtime_ready: bool,
+    assets_ready: bool,
+    runtime_path: String,
 }
 
 #[tauri::command]
@@ -1281,6 +1284,9 @@ fn get_silero_te_model_status(
             path: String::new(),
             exists: false,
             size_mb: 0,
+            runtime_ready: false,
+            assets_ready: false,
+            runtime_path: String::new(),
         });
     }
     #[cfg(feature = "silero-te")]
@@ -1292,6 +1298,9 @@ fn get_silero_te_model_status(
             path: status.path,
             exists: status.exists,
             size_mb: status.size_mb,
+            runtime_ready: status.runtime_ready,
+            assets_ready: status.assets_ready,
+            runtime_path: status.runtime_path,
         })
     }
 }
@@ -1314,6 +1323,39 @@ async fn download_silero_te_model(
 
         let http = crate::text::silero_te::model_store::download_http_client()
             .map_err(|error| error.to_string())?;
+        let app_for_progress = app.clone();
+        let _ = app_for_progress.emit(
+            SILERO_TE_DOWNLOAD_PROGRESS,
+            transcription::model_store::DownloadProgress::new(0, None),
+        );
+
+        if !crate::text::silero_te::runtime_store::runtime_ready(&settings) {
+            ctx.inner().record_activity(
+                Some(&app),
+                ActivityLevel::Info,
+                "activity.silero_te.runtime_download_started",
+                json!({}),
+            );
+            let _ = crate::text::silero_te::runtime_store::download_runtime(&http, &settings, |progress| {
+                let _ = app_for_progress.emit(SILERO_TE_DOWNLOAD_PROGRESS, progress);
+            })
+            .await
+            .inspect_err(|error| {
+                ctx.inner().record_activity(
+                    Some(&app),
+                    ActivityLevel::Error,
+                    "activity.silero_te.runtime_download_failed",
+                    json!({ "error": error.clone() }),
+                );
+            })?;
+            ctx.inner().record_activity(
+                Some(&app),
+                ActivityLevel::Info,
+                "activity.silero_te.runtime_download_done",
+                json!({}),
+            );
+        }
+
         ctx.inner().record_activity(
             Some(&app),
             ActivityLevel::Info,
@@ -1321,11 +1363,6 @@ async fn download_silero_te_model(
             json!({}),
         );
 
-        let app_for_progress = app.clone();
-        let _ = app_for_progress.emit(
-            SILERO_TE_DOWNLOAD_PROGRESS,
-            transcription::model_store::DownloadProgress::new(0, None),
-        );
         let path = crate::text::silero_te::model_store::download_assets(&http, &settings, |progress| {
             let _ = app_for_progress.emit(SILERO_TE_DOWNLOAD_PROGRESS, progress);
         })
@@ -1458,13 +1495,20 @@ fn import_ai_skill(from_path: String) -> Result<AiSkillInfo, String> {
 }
 
 #[tauri::command]
+fn delete_ai_skill(app: AppHandle, filename: String) -> Result<(), String> {
+    delete_skill(&filename).map_err(|error| error.to_string())?;
+    app::events::emit_skills_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn get_skill_import_flow_snapshot() -> Option<app::events::SkillImportFlowPayload> {
     deeplink::get_skill_import_flow_snapshot()
 }
 
 #[tauri::command]
-fn confirm_deeplink_skill_import() {
-    deeplink::confirm_deeplink_skill_import();
+fn confirm_deeplink_skill_import() -> bool {
+    deeplink::confirm_deeplink_skill_import()
 }
 
 #[tauri::command]
@@ -1705,6 +1749,7 @@ pub fn run() {
             list_ai_skills,
             open_ai_skills_folder,
             import_ai_skill,
+            delete_ai_skill,
             get_skill_import_flow_snapshot,
             confirm_deeplink_skill_import,
             cancel_deeplink_skill_import,

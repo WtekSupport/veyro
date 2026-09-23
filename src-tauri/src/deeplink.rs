@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex, OnceLock,
+    atomic::{AtomicU64, Ordering},
+    Mutex, OnceLock,
 };
 
 use serde::Deserialize;
@@ -21,7 +21,9 @@ use crate::error::ConfigError;
 use crate::i18n;
 use crate::notify;
 use crate::settings::{save_settings, SettingsPatch, TextProcessingMode};
-use crate::text::skill::{import_skill, inspect_skill_file, AiSkillInfo};
+use crate::text::skill::{
+    import_skill_as, inspect_skill_file_as, is_skill_filename_installed, AiSkillInfo,
+};
 use crate::window;
 
 const MAX_REMOTE_SKILL_BYTES: u64 = 1024 * 1024;
@@ -65,6 +67,7 @@ pub enum SkillSource {
 
 struct StagedSkill {
     path: PathBuf,
+    install_filename: String,
     remove_after_flow: bool,
     source_label: String,
 }
@@ -72,26 +75,59 @@ struct StagedSkill {
 struct SkillImportGate {
     snapshot: Option<SkillImportFlowPayload>,
     decision_tx: Option<oneshot::Sender<bool>>,
-    aborted: Option<Arc<AtomicBool>>,
 }
 
 static SKILL_IMPORT_GATE: OnceLock<Mutex<SkillImportGate>> = OnceLock::new();
+static SKILL_IMPORT_TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+static SKILL_IMPORT_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 fn skill_import_gate() -> &'static Mutex<SkillImportGate> {
     SKILL_IMPORT_GATE.get_or_init(|| {
         Mutex::new(SkillImportGate {
             snapshot: None,
             decision_tx: None,
-            aborted: None,
         })
     })
 }
 
+fn skill_import_session_stale(session: u64) -> bool {
+    session != SKILL_IMPORT_GENERATION.load(Ordering::SeqCst)
+}
+
+/// Ends any in-flight import wait and starts a new deeplink session.
+fn kick_skill_import_for_new_deeplink() -> u64 {
+    if let Ok(mut gate) = skill_import_gate().lock() {
+        if let Some(tx) = gate.decision_tx.take() {
+            let _ = tx.send(false);
+        }
+    }
+    SKILL_IMPORT_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn invalidate_skill_import_sessions() {
+    if let Ok(mut gate) = skill_import_gate().lock() {
+        if let Some(tx) = gate.decision_tx.take() {
+            let _ = tx.send(false);
+        }
+    }
+    SKILL_IMPORT_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
 pub fn handle_skill_import_urls(app: &AppHandle, urls: Vec<String>) {
+    if urls.is_empty() {
+        return;
+    }
+
+    let app_show = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        window::show_skill_import_window(&app_show);
+    });
+
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         for raw_url in urls {
-            if let Err(error) = run_interactive_skill_import(&app, &raw_url).await {
+            let session = kick_skill_import_for_new_deeplink();
+            if let Err(error) = run_interactive_skill_import(&app, &raw_url, session).await {
                 warn!("deep link skill import failed for {raw_url}: {error}");
                 let locale = app_settings_locale(&app);
                 notify::notify(
@@ -121,23 +157,17 @@ pub fn get_skill_import_flow_snapshot() -> Option<SkillImportFlowPayload> {
         .and_then(|gate| gate.snapshot.clone())
 }
 
-pub fn confirm_deeplink_skill_import() {
+pub fn confirm_deeplink_skill_import() -> bool {
     if let Ok(mut gate) = skill_import_gate().lock() {
         if let Some(tx) = gate.decision_tx.take() {
-            let _ = tx.send(true);
+            return tx.send(true).is_ok();
         }
     }
+    false
 }
 
 pub fn cancel_deeplink_skill_import(app: &AppHandle) {
-    if let Ok(mut gate) = skill_import_gate().lock() {
-        if let Some(aborted) = gate.aborted.as_ref() {
-            aborted.store(true, Ordering::SeqCst);
-        }
-        if let Some(tx) = gate.decision_tx.take() {
-            let _ = tx.send(false);
-        }
-    }
+    invalidate_skill_import_sessions();
     clear_flow_snapshot();
     let _ = window::hide_skill_import_window(app);
 }
@@ -145,7 +175,9 @@ pub fn cancel_deeplink_skill_import(app: &AppHandle) {
 fn clear_flow_snapshot() {
     if let Ok(mut gate) = skill_import_gate().lock() {
         gate.snapshot = None;
-        gate.aborted = None;
+        if let Some(tx) = gate.decision_tx.take() {
+            let _ = tx.send(false);
+        }
     }
 }
 
@@ -166,16 +198,10 @@ fn resize_skill_import_window(app: &AppHandle, preview: bool) {
 async fn run_interactive_skill_import(
     app: &AppHandle,
     raw_url: &str,
+    session: u64,
 ) -> Result<(), ConfigError> {
-    let aborted = Arc::new(AtomicBool::new(false));
-    if let Ok(mut gate) = skill_import_gate().lock() {
-        if let Some(previous) = gate.aborted.as_ref() {
-            previous.store(true, Ordering::SeqCst);
-        }
-        if let Some(tx) = gate.decision_tx.take() {
-            let _ = tx.send(false);
-        }
-        gate.aborted = Some(Arc::clone(&aborted));
+    if skill_import_session_stale(session) {
+        return Ok(());
     }
 
     let app_show = app.clone();
@@ -183,6 +209,10 @@ async fn run_interactive_skill_import(
         window::show_skill_import_window(&app_show);
     })
     .await;
+
+    if skill_import_session_stale(session) {
+        return Ok(());
+    }
 
     emit_flow(
         app,
@@ -194,11 +224,12 @@ async fn run_interactive_skill_import(
             error: None,
         },
     );
+    replay_skill_import_flow(app);
 
     let staged = match prepare_staged_skill(app, raw_url).await {
         Ok(staged) => staged,
         Err(error) => {
-            if aborted.load(Ordering::SeqCst) {
+            if skill_import_session_stale(session) {
                 clear_flow_snapshot();
                 return Ok(());
             }
@@ -217,16 +248,22 @@ async fn run_interactive_skill_import(
         }
     };
 
-    if aborted.load(Ordering::SeqCst) {
+    if skill_import_session_stale(session) {
         cleanup_staged(&staged);
         clear_flow_snapshot();
         return Ok(());
     }
 
-    let (skill, size_bytes) = match inspect_skill_file(staged.path.to_string_lossy().as_ref()) {
+    let (skill, size_bytes) = match inspect_skill_file_as(
+        staged.path.to_string_lossy().as_ref(),
+        &staged.install_filename,
+    ) {
         Ok(values) => values,
         Err(error) => {
             cleanup_staged(&staged);
+            if skill_import_session_stale(session) {
+                return Ok(());
+            }
             emit_flow(
                 app,
                 SkillImportFlowPayload {
@@ -242,6 +279,41 @@ async fn run_interactive_skill_import(
         }
     };
 
+    if skill_import_session_stale(session) {
+        cleanup_staged(&staged);
+        clear_flow_snapshot();
+        return Ok(());
+    }
+
+    if is_skill_filename_installed(&skill.filename)? {
+        let dismiss_rx = register_skill_import_decision_waiter();
+        emit_flow(
+            app,
+            SkillImportFlowPayload {
+                phase: SkillImportPhase::AlreadyInstalled,
+                skill: Some(skill.clone()),
+                source: Some(staged.source_label.clone()),
+                size_bytes: Some(size_bytes),
+                error: None,
+            },
+        );
+        resize_skill_import_window(app, true);
+        replay_skill_import_flow(app);
+        let _ = dismiss_rx.await.unwrap_or(false);
+        cleanup_staged(&staged);
+        clear_flow_snapshot();
+        if !skill_import_session_stale(session) {
+            let app_hide = app.clone();
+            let _ = window::await_on_main_thread(app, move || {
+                let _ = window::hide_skill_import_window(&app_hide);
+            })
+            .await;
+        }
+        return Ok(());
+    }
+
+    let decision_rx = register_skill_import_decision_waiter();
+
     emit_flow(
         app,
         SkillImportFlowPayload {
@@ -253,9 +325,10 @@ async fn run_interactive_skill_import(
         },
     );
     resize_skill_import_window(app, true);
+    replay_skill_import_flow(app);
 
-    let confirmed = wait_for_user_decision().await;
-    if aborted.load(Ordering::SeqCst) || !confirmed {
+    let confirmed = decision_rx.await.unwrap_or(false);
+    if skill_import_session_stale(session) || !confirmed {
         cleanup_staged(&staged);
         clear_flow_snapshot();
         let app_hide = app.clone();
@@ -279,7 +352,24 @@ async fn run_interactive_skill_import(
 
     tokio::task::yield_now().await;
 
-    let installed = match import_skill(staged.path.to_string_lossy().as_ref()) {
+    if skill_import_session_stale(session) {
+        cleanup_staged(&staged);
+        clear_flow_snapshot();
+        return Ok(());
+    }
+
+    if staged.remove_after_flow && !staged.path.is_file() {
+        cleanup_staged(&staged);
+        return Err(ConfigError::Read(format!(
+            "skill_file_not_found:{}",
+            staged.path.display()
+        )));
+    }
+
+    let installed = match import_skill_as(
+        staged.path.to_string_lossy().as_ref(),
+        &staged.install_filename,
+    ) {
         Ok(skill) => skill,
         Err(error) => {
             cleanup_staged(&staged);
@@ -298,6 +388,10 @@ async fn run_interactive_skill_import(
     };
     cleanup_staged(&staged);
     apply_skill_import(app, installed)?;
+
+    if skill_import_session_stale(session) {
+        return Ok(());
+    }
 
     emit_flow(
         app,
@@ -320,12 +414,15 @@ async fn run_interactive_skill_import(
     Ok(())
 }
 
-async fn wait_for_user_decision() -> bool {
+fn register_skill_import_decision_waiter() -> oneshot::Receiver<bool> {
     let (tx, rx) = oneshot::channel();
     if let Ok(mut gate) = skill_import_gate().lock() {
+        if let Some(stale) = gate.decision_tx.take() {
+            let _ = stale.send(false);
+        }
         gate.decision_tx = Some(tx);
     }
-    rx.await.unwrap_or(false)
+    rx
 }
 
 async fn prepare_staged_skill(app: &AppHandle, raw_url: &str) -> Result<StagedSkill, ConfigError> {
@@ -357,9 +454,11 @@ async fn prepare_staged_skill(app: &AppHandle, raw_url: &str) -> Result<StagedSk
         SkillSource::Local(path) => {
             if path.is_file() {
                 let validated = validate_md_path(&path)?;
+                let install_filename = install_filename_from_path(&validated)?;
                 let source_label = validated.display().to_string();
                 return Ok(StagedSkill {
                     path: validated,
+                    install_filename,
                     remove_after_flow: false,
                     source_label,
                 });
@@ -370,17 +469,21 @@ async fn prepare_staged_skill(app: &AppHandle, raw_url: &str) -> Result<StagedSk
                 return stage_catalog_skill(&client, &slug).await;
             }
             let validated = validate_md_path(&path)?;
+            let install_filename = install_filename_from_path(&validated)?;
             let source_label = validated.display().to_string();
             Ok(StagedSkill {
                 path: validated,
+                install_filename,
                 remove_after_flow: false,
                 source_label,
             })
         }
         SkillSource::Remote(url) => {
+            let install_filename = filename_from_remote_url(&url)?;
             let temp_path = download_remote_skill(&client, &url).await?;
             Ok(StagedSkill {
                 path: temp_path,
+                install_filename,
                 remove_after_flow: true,
                 source_label: url.to_string(),
             })
@@ -393,10 +496,12 @@ async fn stage_catalog_skill(
     client: &reqwest::Client,
     install_path: &str,
 ) -> Result<StagedSkill, ConfigError> {
+    let install_filename = catalog_install_filename(install_path)?;
     let temp_path = download_catalog_skill(client, install_path).await?;
     let source_label = format!("aistructedit.com/catalog/{install_path}");
     Ok(StagedSkill {
         path: temp_path,
+        install_filename,
         remove_after_flow: true,
         source_label,
     })
@@ -605,6 +710,25 @@ fn validate_md_path(path: &Path) -> Result<PathBuf, ConfigError> {
     Ok(path.to_path_buf())
 }
 
+fn install_filename_from_path(path: &Path) -> Result<String, ConfigError> {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| ConfigError::Invalid("skill_file_invalid_name".to_string()))?;
+    crate::text::skill::validate_skill_basename(name)?;
+    Ok(name.to_string())
+}
+
+fn catalog_install_filename(install_path: &str) -> Result<String, ConfigError> {
+    let slug = normalize_catalog_slug(install_path);
+    if slug.is_empty() {
+        return Err(ConfigError::Invalid("deeplink_invalid_path".to_string()));
+    }
+    let filename = format!("{slug}.md");
+    crate::text::skill::validate_skill_basename(&filename)?;
+    Ok(filename)
+}
+
 fn decode_deeplink_token(token: &str) -> String {
     let trimmed = token.trim();
     if !trimmed.contains('%') {
@@ -786,12 +910,7 @@ async fn download_catalog_skill(
         return Err(ConfigError::Invalid("deeplink_file_too_large".to_string()));
     }
 
-    let filename = format!("{slug}.md");
-    let temp_dir = std::env::temp_dir().join("veyro-skill-import");
-    fs::create_dir_all(&temp_dir).map_err(|error| {
-        ConfigError::Write(format!("{}: {error}", temp_dir.display()))
-    })?;
-    let temp_path = temp_dir.join(&filename);
+    let temp_path = allocate_skill_import_temp_path(&format!("{slug}.md"))?;
     fs::write(&temp_path, markdown).map_err(|error| {
         ConfigError::Write(format!("{}: {error}", temp_path.display()))
     })?;
@@ -888,16 +1007,33 @@ async fn download_remote_skill(
         return Err(ConfigError::Invalid("skill_file_not_markdown".to_string()));
     }
 
-    let temp_dir = std::env::temp_dir().join("veyro-skill-import");
-    fs::create_dir_all(&temp_dir).map_err(|error| {
-        ConfigError::Write(format!("{}: {error}", temp_dir.display()))
-    })?;
-    let temp_path = temp_dir.join(&filename);
+    let temp_path = allocate_skill_import_temp_path(&filename)?;
     fs::write(&temp_path, &bytes).map_err(|error| {
         ConfigError::Write(format!("{}: {error}", temp_path.display()))
     })?;
 
     Ok(temp_path)
+}
+
+fn skill_import_temp_dir() -> PathBuf {
+    std::env::temp_dir().join("veyro-skill-import")
+}
+
+/// Each import gets its own temp file so cleanup or a retry never races on `{slug}.md`.
+fn allocate_skill_import_temp_path(basename: &str) -> Result<PathBuf, ConfigError> {
+    let temp_dir = skill_import_temp_dir();
+    fs::create_dir_all(&temp_dir).map_err(|error| {
+        ConfigError::Write(format!("{}: {error}", temp_dir.display()))
+    })?;
+    let seq = SKILL_IMPORT_TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    let safe = sanitize_filename(basename);
+    let name = if safe.is_empty() {
+        format!("{pid}-{seq}.md")
+    } else {
+        format!("{pid}-{seq}-{safe}")
+    };
+    Ok(temp_dir.join(name))
 }
 
 fn filename_from_remote_url(url: &Url) -> Result<String, ConfigError> {
@@ -1028,6 +1164,14 @@ mod tests {
     fn remote_filename_uses_last_path_segment() {
         let url = Url::parse("https://example.com/skills/business-ru.md").unwrap();
         assert_eq!(filename_from_remote_url(&url).unwrap(), "business-ru.md");
+    }
+
+    #[test]
+    fn skill_import_temp_paths_are_unique_per_allocation() {
+        let a = allocate_skill_import_temp_path("translate-pl.md").unwrap();
+        let b = allocate_skill_import_temp_path("translate-pl.md").unwrap();
+        assert_ne!(a, b);
+        assert!(a.file_name().unwrap().to_string_lossy().contains("translate-pl.md"));
     }
 
     #[test]

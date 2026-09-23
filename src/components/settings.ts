@@ -28,7 +28,7 @@ import { readLocalSttQuantFromForm, renderSttModelPicker } from "./stt-model-pic
 import { getState, type SettingsTab } from "../state";
 import { t } from "../i18n";
 import type { MessageKey } from "../i18n/locales/en";
-import { iconFolder, iconImport, iconPlus, iconTrash } from "./icons";
+import { iconImport, iconPlus, iconTrash } from "./icons";
 import { renderMicMeter } from "./mic-meter";
 import { renderStatusDashboard } from "./status-dashboard";
 import { renderVadThresholdPanel } from "./vad-threshold-panel";
@@ -1067,8 +1067,8 @@ export function renderSettingsForm(
             <div class="ai-skill-row">
               <select name="ai_rewrite_skill" data-ai-skill-select ${aiSkillEnabled(values, diagnostics, llmModels) ? "" : "disabled"}>${renderAiSkillOptions(values, aiSkills)}</select>
               <div class="field-actions">
-                <button type="button" class="icon-btn" data-open-skills-folder title="${escapeHtml(t("settings.aiSkillOpenFolder"))}" aria-label="${escapeHtml(t("settings.aiSkillOpenFolder"))}" ${aiSkillEnabled(values, diagnostics, llmModels) ? "" : "disabled"}>${iconFolder()}</button>
                 <button type="button" class="icon-btn" data-import-skill title="${escapeHtml(t("settings.aiSkillImport"))}" aria-label="${escapeHtml(t("settings.aiSkillImport"))}" ${aiSkillEnabled(values, diagnostics, llmModels) ? "" : "disabled"}>${iconImport()}</button>
+                <button type="button" class="icon-btn" data-delete-skill title="${escapeHtml(t("settings.aiSkillDelete"))}" aria-label="${escapeHtml(t("settings.aiSkillDelete"))}" ${aiSkillEnabled(values, diagnostics, llmModels) && values.ai_rewrite_skill ? "" : "disabled"}>${iconTrash()}</button>
                 <button type="button" class="icon-btn" data-open-skill-catalog title="${escapeHtml(t("settings.aiSkillBrowseCatalog"))}" aria-label="${escapeHtml(t("settings.aiSkillBrowseCatalog"))}" ${aiSkillEnabled(values, diagnostics, llmModels) ? "" : "disabled"}>${iconPlus()}</button>
               </div>
             </div>

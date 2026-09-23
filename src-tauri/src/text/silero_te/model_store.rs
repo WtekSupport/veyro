@@ -30,6 +30,9 @@ pub struct SileroTeModelStatus {
     pub path: String,
     pub exists: bool,
     pub size_mb: u32,
+    pub runtime_ready: bool,
+    pub assets_ready: bool,
+    pub runtime_path: String,
 }
 
 pub fn silero_te_dir(settings: &AppSettings) -> Result<PathBuf, ConfigError> {
@@ -41,11 +44,28 @@ pub fn assets_ready(settings: &AppSettings) -> bool {
 }
 
 pub fn status(settings: &AppSettings) -> Result<SileroTeModelStatus, ConfigError> {
+    use super::runtime_store;
+
     let dir = silero_te_dir(settings)?;
+    let assets_ready = assets_ready(settings);
+    let runtime_ready = runtime_store::runtime_ready(settings);
+    let runtime_path = runtime_store::runtime_dir(settings)
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    let size_mb = if !runtime_ready {
+        runtime_store::APPROX_RUNTIME_MB + APPROX_DOWNLOAD_MB
+    } else if !assets_ready {
+        APPROX_DOWNLOAD_MB
+    } else {
+        0
+    };
     Ok(SileroTeModelStatus {
         path: dir.display().to_string(),
-        exists: assets_ready(settings),
-        size_mb: APPROX_DOWNLOAD_MB,
+        exists: assets_ready && runtime_ready,
+        size_mb,
+        runtime_ready,
+        assets_ready,
+        runtime_path,
     })
 }
 
