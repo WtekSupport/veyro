@@ -12,9 +12,13 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.51] — 2026-09-23
+
+- **Silero TE:** Normalize tokenizer `IntList` / 1D token tensors to `[1, seq]` before padding (fixes “index out of bounds” panic during text processing after STT).
+
 ## [1.8.50] — 2026-09-22
 
-- **Sherpa local STT crash:** Run sherpa-onnx decode/prewarm/unload on the blocking thread pool (same as Whisper). Fixes process exit when the tray turns red at transcription start on Windows.
+- **Sherpa local STT crash:** Run sherpa-onnx decode/prewarm/unload on the blocking thread pool (same as Whisper). Skip background STT prewarm while a segment is queued; run post-STT cleanup (incl. Silero TE) on blocking threads. Fixes process exit when the tray turns red at transcription start on Windows.
 
 ## [1.8.49] — 2026-09-22
 
