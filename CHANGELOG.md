@@ -12,6 +12,19 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.74] — 2026-09-24
+
+### Added
+
+- **Skills:** Block reinstall when the same `.md` is already in the skills folder; compact delete in text settings with in-app confirm dialog.
+- **Skill import (veyro://):** Session-based deeplink flow so repeat installs open the window reliably; stable install filenames (catalog slug, not temp names).
+
+### Fixed
+
+- **Windows installer:** Bundle libtorch/MKL (`c10.dll`, `torch_cpu.dll`, …) next to `veyro.exe` again so the app starts after NSIS install.
+- **Skill import UI:** Confirm install returns success/failure; re-enable buttons when confirmation is not pending.
+- **Settings:** Remove open-skills-folder icon (import, delete, catalog remain).
+
 ## [1.8.65] — 2026-09-23
 
 ### Added

@@ -2,6 +2,8 @@ mod engine;
 #[cfg(feature = "silero-te")]
 pub mod model_store;
 #[cfg(feature = "silero-te")]
+pub mod runtime_store;
+#[cfg(feature = "silero-te")]
 mod process;
 pub mod store;
 
@@ -40,6 +42,10 @@ pub fn should_apply_silero_te(settings: &AppSettings) -> bool {
         return false;
     }
     if !store::assets_on_disk(settings) {
+        return false;
+    }
+    #[cfg(feature = "silero-te")]
+    if !runtime_store::runtime_ready(settings) {
         return false;
     }
     matches!(

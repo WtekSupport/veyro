@@ -7183,7 +7183,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "veyro"
-version = "1.8.65"
+version = "1.8.74"
 dependencies = [
  "aes-gcm",
  "arboard",
@@ -7248,6 +7248,7 @@ dependencies = [
  "winreg 0.55.0",
  "wmi",
  "x11rb",
+ "zip 2.4.2",
 ]
 
 [[package]]

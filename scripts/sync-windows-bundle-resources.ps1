@@ -33,14 +33,29 @@ foreach ($entry in $destMap.GetEnumerator()) {
     }
 }
 
-# mkl*.dll use dots in the base name (mkl_core.1-…), not mkl_-…
+# libtorch/MKL must ship next to veyro.exe: the loader resolves c10.dll at process start
+# (before Rust can download silero-te-runtime). Opt out only for dev experiments:
+#   $env:VEYRO_SKIP_LIBTORCH_BUNDLE = "1"
+$skipLibtorch = $env:VEYRO_SKIP_LIBTORCH_BUNDLE -eq "1"
+# mkl*.dll use dots in the base name (mkl_core.1-...), not mkl_-...
 $libtorchPattern = '^(c10|torch|torch_cpu|torch_global_deps|fbgemm|asmjit|fbjni|uv|libiomp5md|libiompstubs5md|pytorch_jni|mkl)'
-foreach ($staged in Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue) {
-    if ($staged.Name -notmatch $libtorchPattern) {
-        continue
+if (-not $skipLibtorch) {
+    foreach ($staged in Get-ChildItem $binariesDir -Filter "*-$triple.dll" -ErrorAction SilentlyContinue) {
+        if ($staged.Name -notmatch $libtorchPattern) {
+            continue
+        }
+        $destName = $staged.Name -replace "-$([regex]::Escape($triple))\.dll$", ".dll"
+        $resources["binaries/$($staged.Name)"] = $destName
     }
-    $destName = $staged.Name -replace "-$([regex]::Escape($triple))\.dll$", ".dll"
-    $resources["binaries/$($staged.Name)"] = $destName
+} else {
+    Write-Warning "Skipping libtorch/MKL in installer (VEYRO_SKIP_LIBTORCH_BUNDLE=1). Installed app will not start until DLLs are beside veyro.exe."
+}
+
+if (-not $skipLibtorch) {
+    $c10Resource = "binaries/c10-$triple.dll"
+    if (-not $resources.Contains($c10Resource)) {
+        Write-Error "Missing staged $c10Resource - run scripts/stage-libtorch-dlls.ps1 before bundling (Silero TE / libtorch)."
+    }
 }
 
 if ($resources.Count -le 1) {
@@ -58,4 +73,5 @@ $json = ($config | ConvertTo-Json -Depth 6 -Compress:$false)
 $outPath = Join-Path (Join-Path $RepoRoot "src-tauri") "tauri.windows.conf.json"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($outPath, $json, $utf8NoBom)
-Write-Host "Updated $outPath with $($resources.Count - 1) DLL resource(s)."
+$dllCount = $resources.Count - 1
+Write-Host "Updated $outPath with $dllCount bundled DLL resource entries."
