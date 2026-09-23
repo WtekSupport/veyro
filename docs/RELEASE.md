@@ -45,17 +45,11 @@ Override URLs for testing with `VEYRO_SILERO_TE_BASE_URL`. Debug builds can seed
 
 ## Silero TE runtime (libtorch + MKL, Windows)
 
-Release installers **do not** bundle libtorch/MKL DLLs. The app downloads them into `{models}/silero-te-runtime/` before Silero TE model weights.
+**Installers include** libtorch/MKL DLLs next to `veyro.exe` (Windows loads `c10.dll` at process start, before the app can download anything).
 
-**One-time publish** (after a `silero-te` release build has staged DLLs):
+The optional GitHub release **`silero-te-runtime-v1`** (`scripts/package-silero-te-runtime.ps1`) is used when the app **refreshes or repairs** runtime files under `{models}/silero-te-runtime/` (see in-app Silero TE download flow). It does not replace shipping DLLs in the NSIS bundle.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/package-silero-te-runtime.ps1 -RepoRoot .
-```
-
-This creates or updates GitHub release **`silero-te-runtime-v1`** with `silero-te-runtime-win-x64.zip` and `runtime-manifest.json` (prerelease). Override with `VEYRO_SILERO_TE_RUNTIME_BASE_URL` for testing.
-
-To bundle libtorch in the installer again (legacy): set `VEYRO_BUNDLE_LIBTORCH=1` before `npm run tauri:build`.
+To experiment with a smaller installer (app will not start for end users): set `VEYRO_SKIP_LIBTORCH_BUNDLE=1` before `npm run tauri:build`.
 
 ## Tag and upload
 
