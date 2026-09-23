@@ -65,7 +65,22 @@ function Publish-ViaGitHubApi {
         $encodedName = [System.Uri]::EscapeDataString($assetName)
         $uri = "https://uploads.github.com/repos/$repo/releases/$($release.id)/assets?name=$encodedName"
         Write-Host "Uploading $assetName ..."
-        Invoke-RestMethod -Method Post -Uri $uri -Headers (Get-GitHubHeaders) -InFile $f -ContentType "application/octet-stream" | Out-Null
+        $headers = Get-GitHubHeaders
+        $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+        if ($curl -and (Get-Item $f).Length -gt 50MB) {
+            $authHeader = $headers.Authorization
+            & $curl.Source -fSL -X POST `
+                -H "Authorization: $authHeader" `
+                -H "Accept: application/vnd.github+json" `
+                -H "Content-Type: application/octet-stream" `
+                --data-binary "@$f" `
+                $uri
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl upload failed for $assetName (exit $LASTEXITCODE)"
+            }
+        } else {
+            Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -InFile $f -ContentType "application/octet-stream" | Out-Null
+        }
     }
     Write-Host "Published: https://github.com/$repo/releases/tag/$tag"
 }
@@ -79,8 +94,14 @@ if ($ghCmd) {
 }
 
 if ($gh) {
-    & $gh auth status 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $ghAuthed = $false
+    try {
+        & $gh auth status 2>&1 | Out-Null
+        $ghAuthed = ($LASTEXITCODE -eq 0)
+    } catch {
+        $ghAuthed = $false
+    }
+    if ($ghAuthed) {
         $releaseView = $null
         try {
             $releaseView = & $gh release view $tag --repo WtekSupport/veyro 2>&1 | Out-String

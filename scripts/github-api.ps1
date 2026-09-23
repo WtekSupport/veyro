@@ -37,8 +37,9 @@ function Invoke-GitHubApi {
         Headers = $headers
     }
     if ($null -ne $Body) {
-        $params.Body = ($Body | ConvertTo-Json -Depth 10)
-        $params.ContentType = "application/json"
+        $jsonBody = ($Body | ConvertTo-Json -Depth 10 -Compress)
+        $params.Body = [System.Text.Encoding]::UTF8.GetBytes($jsonBody)
+        $params.ContentType = "application/json; charset=utf-8"
     }
     return Invoke-RestMethod @params
 }
