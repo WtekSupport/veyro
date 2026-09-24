@@ -227,9 +227,20 @@ where
     Ok(dir)
 }
 
+fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes)
+}
+
 async fn download_manifest(http: &Client) -> Result<RuntimeManifest, String> {
     let bytes = download_bytes(http, MANIFEST_FILE, &mut |_| {}).await?;
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+    let bytes = strip_utf8_bom(&bytes);
+    if bytes.first().is_some_and(|b| !b.is_ascii() || !matches!(*b, b'{' | b'[')) {
+        let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(80)]);
+        return Err(format!(
+            "runtime manifest is not JSON (starts with {preview:?})"
+        ));
+    }
+    serde_json::from_slice(bytes).map_err(|error| error.to_string())
 }
 
 async fn download_bytes<F>(
