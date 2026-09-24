@@ -33,13 +33,11 @@ pub fn normalize_homemaker_settings(settings: &mut AppSettings) -> bool {
     let mut changed = false;
 
     match settings.text_processing_mode {
-        TextProcessingMode::Original | TextProcessingMode::Optimization => {}
+        TextProcessingMode::Original
+        | TextProcessingMode::Optimization
+        | TextProcessingMode::CustomSkill => {}
         TextProcessingMode::Basic => {
             settings.text_processing_mode = TextProcessingMode::Original;
-            changed = true;
-        }
-        _ => {
-            settings.text_processing_mode = TextProcessingMode::Optimization;
             changed = true;
         }
     }
@@ -234,6 +232,23 @@ mod tests {
         };
         assert!(normalize_homemaker_settings(&mut settings));
         assert!(!settings.ptt_hold);
+    }
+
+    #[test]
+    fn homemaker_keeps_custom_skill_mode() {
+        let mut settings = AppSettings {
+            ui_mode: UiMode::Homemaker,
+            text_processing_mode: TextProcessingMode::CustomSkill,
+            ai_rewrite_skill: Some("my-skill.md".to_string()),
+            transcription_provider: "local".to_string(),
+            text_rewrite_provider: TextRewriteProvider::Local,
+            ..Default::default()
+        };
+        assert!(!normalize_homemaker_settings(&mut settings));
+        assert_eq!(
+            settings.text_processing_mode,
+            TextProcessingMode::CustomSkill
+        );
     }
 
     #[test]

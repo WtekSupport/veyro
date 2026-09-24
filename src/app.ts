@@ -140,13 +140,74 @@ import {
 
 function captureActivePanelScroll(): number {
   return (
-    document.querySelector<HTMLElement>(".tab-panel.active")?.scrollTop ?? 0
+    document.querySelector<HTMLElement>(".tab-panel.active")?.scrollTop ??
+    document.querySelector<HTMLElement>(".homemaker-panel")?.scrollTop ??
+    0
   );
 }
 
 function afterNextPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+function bindSileroModelDownloadButtons(scope: ParentNode): void {
+  scope.querySelector<HTMLButtonElement>("[data-download-silero-te-model]")?.addEventListener("click", () => {
+    if (getState().sileroTeModelDownload) {
+      return;
+    }
+
+    const initial = { downloaded: 0, total: null, percent: null as number | null };
+    patchState({ sileroTeModelDownload: initial, lastError: null });
+
+    void (async () => {
+      const started = performance.now();
+      try {
+        await afterNextPaint();
+        document
+          .querySelector("[data-silero-te-download]")
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        await downloadSileroTeModel();
+        await waitMinDownloadVisible(started);
+        patchState({
+          sileroTeModel: await getSileroTeModelStatus(),
+          sileroTeModelDownload: null,
+        });
+      } catch (error) {
+        patchState({ sileroTeModelDownload: null });
+        const message = error instanceof Error ? error.message : String(error);
+        setError({ code: "silero_te_download", message });
+      }
+    })();
+  });
+
+  scope.querySelector<HTMLButtonElement>("[data-download-silero-vad-model]")?.addEventListener("click", () => {
+    if (getState().sileroVadModelDownload) {
+      return;
+    }
+
+    const vadInitial = { downloaded: 0, total: null, percent: null as number | null };
+    patchState({ sileroVadModelDownload: vadInitial, lastError: null });
+
+    void (async () => {
+      const started = performance.now();
+      try {
+        await afterNextPaint();
+        await downloadSileroVadModel();
+        await waitMinDownloadVisible(started);
+        patchState({
+          sileroVadModel: await getSileroVadModelStatus(),
+          sileroVadModelDownload: null,
+        });
+        await recoverEngine();
+        patchState({ diagnostics: await getDiagnostics() });
+      } catch (error) {
+        patchState({ sileroVadModelDownload: null });
+        const message = error instanceof Error ? error.message : String(error);
+        setError({ code: "silero_vad_download", message });
+      }
+    })();
   });
 }
 
@@ -161,6 +222,11 @@ function restoreActivePanelScroll(scrollTop: number): void {
   const panel = document.querySelector<HTMLElement>(".tab-panel.active");
   if (panel) {
     panel.scrollTop = scrollTop;
+    return;
+  }
+  const homemakerPanel = document.querySelector<HTMLElement>(".homemaker-panel");
+  if (homemakerPanel) {
+    homemakerPanel.scrollTop = scrollTop;
   }
 }
 
@@ -275,7 +341,13 @@ function render(): void {
               homemakerHotkeyPresets.length > 0
                 ? homemakerHotkeyPresets
                 : FALLBACK_HOMEMAKER_HOTKEY_PRESETS,
+              getState().aiSkills,
               homemakerConfigLoading,
+              diagnostics,
+              sileroTeModel,
+              sileroVadModel,
+              sileroTeModelDownload,
+              sileroVadModelDownload,
             )
           : formValues
             ? `<section class="panel">
@@ -543,6 +615,14 @@ async function persistHomemakerSettings(form: HTMLFormElement): Promise<void> {
     push_to_talk: true,
   };
 
+  if (values.text_processing_mode === "custom_skill") {
+    let skillFilename = currentSettings?.ai_rewrite_skill ?? null;
+    if (!skillFilename || !getState().aiSkills.some((skill) => skill.filename === skillFilename)) {
+      skillFilename = getState().aiSkills[0]?.filename ?? null;
+    }
+    patch.ai_rewrite_skill = skillFilename;
+  }
+
   if (values.global_hotkey === "CapsLock" && capslockSupported) {
     patch.capslock_ptt = true;
   } else {
@@ -610,7 +690,9 @@ function bindHomemakerEvents(form: HTMLFormElement): void {
 
   form.querySelector<HTMLInputElement>('input[name="weak_pc_mode"]')?.addEventListener("change", onChange);
 
-  form.querySelector<HTMLButtonElement>("[data-open-skill-catalog]")?.addEventListener("click", () => {
+  form.querySelector<HTMLButtonElement>("[data-open-skill-catalog]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     void openUrl(skillCatalogUrl(getLocale()));
   });
 
@@ -711,6 +793,8 @@ function bindHomemakerEvents(form: HTMLFormElement): void {
       setError({ code: "llm_model_download", message });
     });
   });
+
+  bindSileroModelDownloadButtons(form);
 }
 
 let expertTabListenersBound = false;
@@ -917,62 +1001,7 @@ function bindEvents(): void {
       });
   });
 
-  form.querySelector<HTMLButtonElement>("[data-download-silero-te-model]")?.addEventListener("click", () => {
-    if (getState().sileroTeModelDownload) {
-      return;
-    }
-
-    const initial = { downloaded: 0, total: null, percent: null as number | null };
-    patchState({ sileroTeModelDownload: initial, lastError: null });
-
-    void (async () => {
-      const started = performance.now();
-      try {
-        await afterNextPaint();
-        document
-          .querySelector("[data-silero-te-download]")
-          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        await downloadSileroTeModel();
-        await waitMinDownloadVisible(started);
-        patchState({
-          sileroTeModel: await getSileroTeModelStatus(),
-          sileroTeModelDownload: null,
-        });
-      } catch (error) {
-        patchState({ sileroTeModelDownload: null });
-        const message = error instanceof Error ? error.message : String(error);
-        setError({ code: "silero_te_download", message });
-      }
-    })();
-  });
-
-  form.querySelector<HTMLButtonElement>("[data-download-silero-vad-model]")?.addEventListener("click", () => {
-    if (getState().sileroVadModelDownload) {
-      return;
-    }
-
-    const vadInitial = { downloaded: 0, total: null, percent: null as number | null };
-    patchState({ sileroVadModelDownload: vadInitial, lastError: null });
-
-    void (async () => {
-      const started = performance.now();
-      try {
-        await afterNextPaint();
-        await downloadSileroVadModel();
-        await waitMinDownloadVisible(started);
-        patchState({
-          sileroVadModel: await getSileroVadModelStatus(),
-          sileroVadModelDownload: null,
-        });
-        await recoverEngine();
-        patchState({ diagnostics: await getDiagnostics() });
-      } catch (error) {
-        patchState({ sileroVadModelDownload: null });
-        const message = error instanceof Error ? error.message : String(error);
-        setError({ code: "silero_vad_download", message });
-      }
-    })();
-  });
+  bindSileroModelDownloadButtons(form);
 
   form.querySelector<HTMLButtonElement>("[data-pick-data-storage-dir]")?.addEventListener("click", () => {
     void pickDataStorageDir()
@@ -1572,6 +1601,30 @@ async function bootstrap(): Promise<void> {
     const currentSkill = getState().settings?.ai_rewrite_skill ?? "";
     patchState({ aiSkills });
 
+    const homemakerForm = document.querySelector<HTMLFormElement>("#homemaker-form");
+    if (homemakerForm) {
+      const settings = getState().settings;
+      if (settings?.text_processing_mode === "custom_skill") {
+        if (aiSkills.length === 0) {
+          const nextSettings = await updateSettings({
+            text_processing_mode: "original",
+            ai_rewrite_skill: null,
+          });
+          setSettings(nextSettings);
+        } else {
+          const stillExists = aiSkills.some((skill) => skill.filename === currentSkill);
+          if (!stillExists) {
+            const nextSettings = await updateSettings({
+              ai_rewrite_skill: aiSkills[0]?.filename ?? null,
+            });
+            setSettings(nextSettings);
+          }
+        }
+      }
+      render();
+      return;
+    }
+
     const form = document.querySelector<HTMLFormElement>("#settings-form");
     const select = form?.querySelector<HTMLSelectElement>('select[name="ai_rewrite_skill"]');
     if (!select) {
@@ -1589,11 +1642,20 @@ async function bootstrap(): Promise<void> {
   });
 
   await subscribe<import("./api").AiSkillInfo>(EVENTS.skillImported, async (skill) => {
-    const nextSettings = await getSettings();
+    const aiSkills = await listAiSkills();
+    const nextSettings = await updateSettings({
+      text_processing_mode: "custom_skill",
+      ai_rewrite_skill: skill.filename,
+    });
+    setSettings(nextSettings);
     patchState({
       settings: nextSettings,
-      aiSkills: await listAiSkills(),
+      aiSkills,
     });
+    if (isHomemakerMode(nextSettings)) {
+      render();
+      return;
+    }
     const form = document.querySelector<HTMLFormElement>("#settings-form");
     if (form) {
       const select = form.querySelector<HTMLSelectElement>('select[name="ai_rewrite_skill"]');

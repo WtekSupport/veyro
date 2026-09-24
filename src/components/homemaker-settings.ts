@@ -1,10 +1,20 @@
 import type {
 
+  AiSkillInfo,
+
   AppSettings,
+
+  Diagnostics,
 
   HomemakerLocalSetup,
 
   LlmModelDownloadProgress,
+
+  SileroModelDownloadProgress,
+
+  SileroTeModelStatus,
+
+  SileroVadModelStatus,
 
   TextProcessingMode,
 
@@ -13,6 +23,8 @@ import type {
 } from "../api";
 
 import { resolveHomemakerHotkeySelection } from "./homemaker-hotkeys";
+import { renderHomemakerSileroDownloads } from "./homemaker-silero-ui";
+import { iconPlus } from "./icons";
 import { renderWeakPcHomemakerSwitch } from "./settings";
 import { t } from "../i18n";
 
@@ -62,6 +74,27 @@ function escapeHtml(value: string): string {
 
     .replaceAll('"', "&quot;");
 
+}
+
+function resolveHomemakerSkillDisplay(
+  settings: AppSettings,
+  aiSkills: AiSkillInfo[],
+): { primary: string; secondary: string | null } {
+  const active =
+    aiSkills.find((skill) => skill.filename === settings.ai_rewrite_skill) ?? aiSkills[0] ?? null;
+  if (settings.text_processing_mode === "custom_skill" && active) {
+    return { primary: active.name, secondary: null };
+  }
+  if (active) {
+    return {
+      primary: t("homemaker.textModeCustomSkill"),
+      secondary: active.name,
+    };
+  }
+  return {
+    primary: t("homemaker.textModeMore"),
+    secondary: t("homemaker.textModeCustomSkillEmpty"),
+  };
 }
 
 
@@ -135,7 +168,19 @@ export function renderHomemakerSettings(
 
   hotkeyPresets: readonly string[],
 
+  aiSkills: AiSkillInfo[],
+
   configLoading = false,
+
+  diagnostics: Diagnostics | null = null,
+
+  sileroTeModel: SileroTeModelStatus | null = null,
+
+  sileroVadModel: SileroVadModelStatus | null = null,
+
+  sileroTeModelDownload: SileroModelDownloadProgress | null = null,
+
+  sileroVadModelDownload: SileroModelDownloadProgress | null = null,
 
 ): string {
 
@@ -149,6 +194,10 @@ export function renderHomemakerSettings(
   const optimizationAvailable =
 
     storage === "cloud" ? hasApiKey : Boolean(localSetup && !localSetup.llm_download_needed);
+
+  const customSkillAvailable = optimizationAvailable && aiSkills.length > 0;
+
+  const skillDisplay = resolveHomemakerSkillDisplay(settings, aiSkills);
 
   const whisperReady = Boolean(localSetup && !localSetup.whisper_download_needed);
 
@@ -384,15 +433,65 @@ export function renderHomemakerSettings(
 
             </label>
 
-            <button type="button" class="homemaker-choice-card homemaker-choice-card--text homemaker-more-btn" data-open-skill-catalog>
+            <label class="homemaker-choice-card homemaker-choice-card--text homemaker-choice-card--skill">
 
-              <span>${escapeHtml(t("homemaker.textModeMore"))}</span>
+              <input
 
-            </button>
+                type="radio"
+
+                name="text_processing_mode"
+
+                value="custom_skill"
+
+                ${textMode === "custom_skill" ? "checked" : ""}
+
+                ${customSkillAvailable ? "" : "disabled"}
+
+              />
+
+              <span class="homemaker-skill-choice">
+
+                <span class="homemaker-skill-choice-primary">${escapeHtml(skillDisplay.primary)}</span>
+
+                ${
+
+                  skillDisplay.secondary
+
+                    ? `<span class="homemaker-skill-choice-secondary">${escapeHtml(skillDisplay.secondary)}</span>`
+
+                    : ""
+
+                }
+
+              </span>
+
+              <button
+
+                type="button"
+
+                class="homemaker-skill-catalog-badge"
+
+                data-open-skill-catalog
+
+                title="${escapeHtml(t("settings.aiSkillBrowseCatalog"))}"
+
+                aria-label="${escapeHtml(t("settings.aiSkillBrowseCatalog"))}"
+
+              >${iconPlus()}</button>
+
+            </label>
 
           </div>
 
         </div>
+
+        ${renderHomemakerSileroDownloads(
+          diagnostics,
+          sileroTeModel,
+          sileroVadModel,
+          sileroTeModelDownload,
+          sileroVadModelDownload,
+        )}
 
         ${renderWeakPcHomemakerSwitch(settings.weak_pc_mode ?? false)}
 
