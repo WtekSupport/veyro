@@ -12,6 +12,18 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.78] — 2026-09-24
+
+### Added
+
+- **Standard mode:** Silero VAD/TE download actions in any data-processing and text mode («Improve recognition» / «Improve punctuation»), two-column layout.
+- **Standard mode:** Custom skill as a third text option synced with Expert; catalog «+» badge on the skill card.
+
+### Fixed
+
+- **Standard mode:** Persist `custom_skill` text mode (homemaker normalize no longer resets it to optimization).
+- **Standard mode:** Vertical scroll for settings; skill card shows title only (no filename).
+
 ## [1.8.74] — 2026-09-24
 
 ### Added

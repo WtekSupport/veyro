@@ -550,12 +550,16 @@ export const en = {
   "homemaker.localSetupHint": "We picked the best settings for your device. Download the models below if needed.",
   "homemaker.downloadWhisper": "Download speech model",
   "homemaker.downloadLlm": "Download AI model",
+  "homemaker.downloadImproveRecognition": "Improve recognition",
+  "homemaker.downloadImprovePunctuation": "Improve punctuation",
   "homemaker.downloading": "Downloading…",
   "homemaker.downloadConfirm":
     "Download {model} (~{size} MB)?",
 
   "homemaker.detectingConfig": "Detecting configuration…",
   "homemaker.textModeMore": "More…",
+  "homemaker.textModeCustomSkill": "My skill",
+  "homemaker.textModeCustomSkillEmpty": "No skill installed",
   "homemaker.hotkeyTitle": "Dictation hotkey",
   "homemaker.hotkeyPresetShiftF1": "Shift+F1 — rarely used in other programs",
   "homemaker.hotkeyPresetCtrlShiftF1": "Ctrl+Shift+F1 — extra safe",
