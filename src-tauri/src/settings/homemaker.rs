@@ -242,6 +242,8 @@ mod tests {
             ai_rewrite_skill: Some("my-skill.md".to_string()),
             transcription_provider: "local".to_string(),
             text_rewrite_provider: TextRewriteProvider::Local,
+            global_hotkey: "CapsLock".to_string(),
+            ptt_hold: false,
             ..Default::default()
         };
         assert!(!normalize_homemaker_settings(&mut settings));
