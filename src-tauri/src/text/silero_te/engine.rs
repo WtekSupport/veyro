@@ -278,31 +278,7 @@ fn enhance_block(loaded: &mut LoadedEngine, text: &str, lang: &str) -> Result<St
     let punct_idx = punct.argmax(-1, false);
     let capital_idx = capital.argmax(-1, false);
 
-    let ids_vec: Vec<i64> = ids
-        .reshape(-1)
-        .try_into()
-        .map_err(|_| "failed to flatten token ids".to_string())?;
-    let tokens_value = loaded
-        .tokenizer
-        .method_is("convert_ids_to_tokens", &[IValue::IntList(ids_vec)])
-        .map_err(|error| error.to_string())?;
-
-    let tokens: Vec<String> = match tokens_value {
-        IValue::GenericList(list) => list
-            .into_iter()
-            .filter_map(|value| match value {
-                IValue::String(token) => Some(unitoken_into_token(&token)),
-                _ => None,
-            })
-            .collect(),
-        IValue::StringList(list) => list
-            .into_iter()
-            .map(|token| unitoken_into_token(&token))
-            .collect(),
-        other => {
-            return Err(format!("unexpected tokenizer token list: {other:?}"))
-        }
-    };
+    let tokens = convert_ids_to_tokens(loaded, &ids)?;
 
     let punct_vec: Vec<i64> = punct_idx
         .reshape(-1)
@@ -354,6 +330,56 @@ fn enhance_block(loaded: &mut LoadedEngine, text: &str, lang: &str) -> Result<St
         )
         .map_err(|error| error.to_string())?;
     string_from_ivalue(joined)
+}
+
+#[cfg(feature = "silero-te")]
+fn convert_ids_to_tokens(loaded: &LoadedEngine, ids: &tch::Tensor) -> Result<Vec<String>, String> {
+    use tch::IValue;
+
+    let batched = batch_token_ids(ids.shallow_clone());
+    let flat: Vec<i64> = batched
+        .reshape(-1)
+        .try_into()
+        .map_err(|_| "failed to flatten token ids".to_string())?;
+
+    let mut last_error = String::new();
+    let candidates: [Result<IValue, tch::TchError>; 3] = [
+        loaded.tokenizer.method_is(
+            "convert_ids_to_tokens",
+            &[IValue::GenericList(vec![IValue::Tensor(batched.shallow_clone())])],
+        ),
+        loaded.tokenizer.method_is("convert_ids_to_tokens", &[IValue::Tensor(batched)]),
+        loaded.tokenizer.method_is("convert_ids_to_tokens", &[IValue::IntList(flat)]),
+    ];
+
+    for attempt in candidates {
+        match attempt {
+            Ok(value) => return tokens_from_ivalue(value),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+
+    Err(format!(
+        "convert_ids_to_tokens failed for all argument forms: {last_error}"
+    ))
+}
+
+#[cfg(feature = "silero-te")]
+fn tokens_from_ivalue(value: tch::IValue) -> Result<Vec<String>, String> {
+    match value {
+        tch::IValue::GenericList(list) => Ok(list
+            .into_iter()
+            .filter_map(|value| match value {
+                tch::IValue::String(token) => Some(unitoken_into_token(&token)),
+                _ => None,
+            })
+            .collect()),
+        tch::IValue::StringList(list) => Ok(list
+            .into_iter()
+            .map(|token| unitoken_into_token(&token))
+            .collect()),
+        other => Err(format!("unexpected tokenizer token list: {other:?}")),
+    }
 }
 
 #[cfg(feature = "silero-te")]

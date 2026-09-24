@@ -11,6 +11,8 @@ import type {
 } from "../api";
 
 import { t, translateActivity, translateState, translateError } from "../i18n";
+import { renderToolsBadgeButton } from "./tools-list";
+import { getState } from "../state";
 import { renderStatusBarGearButton } from "./status-quick-settings";
 
 
@@ -177,6 +179,7 @@ export function renderStatusBar(status: StatusSnapshot | null): string {
 
 
   const label = translateState(status.state);
+  const toolsOpen = getState().toolsPanelOpen;
 
   return `
 
@@ -186,7 +189,10 @@ export function renderStatusBar(status: StatusSnapshot | null): string {
 
       <span class="status-text">${escapeHtml(label)}</span>
 
-      ${renderStatusBarGearButton()}
+      <div class="status-bar-trailing">
+        ${renderToolsBadgeButton(toolsOpen)}
+        ${renderStatusBarGearButton()}
+      </div>
 
     </div>
 

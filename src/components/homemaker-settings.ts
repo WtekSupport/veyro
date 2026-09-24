@@ -289,6 +289,12 @@ export function renderHomemakerSettings(
 
           </div>
 
+          <div class="homemaker-card-extra homemaker-tools-entry">
+            <button type="button" class="homemaker-tools-link" data-open-tools-panel>
+              ${escapeHtml(t("tools.homemakerEntry"))}
+            </button>
+          </div>
+
           ${
 
             storage === "cloud"

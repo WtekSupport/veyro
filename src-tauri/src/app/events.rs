@@ -23,6 +23,28 @@ pub const SILERO_VAD_DOWNLOAD_PROGRESS: &str = "app://silero-vad-download-progre
 pub const SKILL_IMPORTED: &str = "app://skill-imported";
 pub const SKILL_IMPORT_FLOW: &str = "app://skill-import-flow";
 pub const SKILLS_CHANGED: &str = "app://skills-changed";
+pub const VOICE_FILE_PROGRESS: &str = "app://voice-file-progress";
+pub const VOICE_FILES_WINDOW_READY: &str = "app://voice-files-window-ready";
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceFileProgressPhase {
+    Decoding,
+    Transcribing,
+    TextCleanup,
+    AiRewrite,
+    Done,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceFileProgressPayload {
+    pub path: String,
+    pub phase: VoiceFileProgressPhase,
+    /// Progress within the current phase (0–100), when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u8>,
+}
 
 #[derive(Clone, Serialize)]
 pub struct SkillImportFlowPayload {
@@ -114,4 +136,12 @@ pub fn emit_microphone_changed(app: &AppHandle, device_id: Option<String>) {
 
 pub fn emit_activity_log(app: &AppHandle, entries: &[ActivityLogEntry]) {
     let _ = app.emit(ACTIVITY_LOG, entries.to_vec());
+}
+
+pub fn emit_voice_file_progress(app: &AppHandle, payload: VoiceFileProgressPayload) {
+    let _ = app.emit(VOICE_FILE_PROGRESS, payload);
+}
+
+pub fn emit_voice_files_window_ready(app: &AppHandle) {
+    let _ = app.emit(VOICE_FILES_WINDOW_READY, ());
 }

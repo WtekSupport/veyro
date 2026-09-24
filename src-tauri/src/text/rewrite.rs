@@ -16,7 +16,8 @@ use crate::text::normalize::{
     ensure_spaces_after_punctuation,
 };
 use crate::text::optimization_prompt::{
-    format_optimization_user_message, format_protected_terms_section, optimization_system_prompt,
+    format_optimization_user_message, format_protected_terms_section,
+    local_profanity_cleanup_system_prompt, optimization_system_prompt_for_local_model,
     STRONGER_OPTIMIZATION_SUFFIX,
 };
 use crate::text::skill::load_skill_body;
@@ -169,12 +170,12 @@ async fn rewrite_with_local_llm(
         settings.emulate_enter,
         protected_terms,
     )?;
-    let user_message = format_local_rewrite_user_message(raw, mode);
+    let user_message = format_local_rewrite_user_message(raw, mode, settings.local_llm_model);
     let system_prompt = local_llm_system_prompt(&config.system_prompt, settings.local_llm_model);
     let mut completion_params = if config.use_gec_params {
         LlmCompletionParams::for_gec()
     } else if mode == TextProcessingMode::Optimization {
-        LlmCompletionParams::for_optimization_rewrite(config.temperature)
+        local_optimization_completion_params(config.temperature, raw)
     } else {
         LlmCompletionParams::for_rewrite(config.temperature)
     };
@@ -189,10 +190,17 @@ async fn rewrite_with_local_llm(
     let first = sanitize_rewrite_output(&first);
     let mut result = first.clone();
 
-    if !config.use_gec_params
+    let mut needs_retry = !config.use_gec_params
         && is_ai_rewrite_mode(mode)
-        && needs_mode_retry(mode, raw, &first)
+        && needs_mode_retry(mode, raw, &first);
+    if mode == TextProcessingMode::Optimization
+        && !config.use_gec_params
+        && token_jaccard_similarity(raw, &first) > 0.88
     {
+        needs_retry = true;
+    }
+
+    if needs_retry {
         if mode == TextProcessingMode::Optimization {
             warn!("local LLM optimization rewrite off-contract, retrying with stronger prompt");
         } else {
@@ -207,7 +215,7 @@ async fn rewrite_with_local_llm(
         let retry_system_prompt =
             local_llm_system_prompt(&retry_config.system_prompt, settings.local_llm_model);
         let mut retry_params = if mode == TextProcessingMode::Optimization {
-            LlmCompletionParams::for_optimization_rewrite(retry_config.temperature)
+            local_optimization_completion_params(retry_config.temperature, raw)
         } else {
             LlmCompletionParams::for_rewrite(retry_config.temperature)
         };
@@ -231,7 +239,33 @@ async fn rewrite_with_local_llm(
         }
     }
 
-    let finalized = finalize_mode_output(mode, raw, &result);
+    let mut finalized = finalize_mode_output(mode, raw, &result);
+    if mode == TextProcessingMode::Optimization
+        && (contains_profanity(&finalized) || output_needs_local_tone_cleanup(raw, &finalized))
+    {
+        match local_profanity_cleanup_pass(
+            &finalized,
+            settings,
+            llm_engine,
+            protected_terms,
+        )
+        .await
+        {
+            Ok(cleaned) => {
+                if !cleaned.trim().is_empty() {
+                let cleaned = finalize_mode_output(mode, raw, &cleaned);
+                if !contains_profanity(&cleaned)
+                    || token_jaccard_similarity(&finalized, &cleaned) < 0.98
+                {
+                    info!("local LLM profanity/tone cleanup pass applied");
+                    finalized = cleaned;
+                }
+                }
+            }
+            Err(error) => warn!("local LLM profanity cleanup pass failed: {error}"),
+        }
+    }
+
     info!(
         "local text rewrite completed (raw {} chars -> {} chars)",
         raw.chars().count(),
@@ -406,12 +440,55 @@ fn format_rewrite_user_message(raw: &str) -> String {
     raw.trim().to_string()
 }
 
-fn format_local_rewrite_user_message(raw: &str, mode: TextProcessingMode) -> String {
-    if mode == TextProcessingMode::Optimization {
+fn local_optimization_completion_params(temperature: f32, input: &str) -> LlmCompletionParams {
+    let mut params = LlmCompletionParams::for_optimization_rewrite(temperature);
+    let estimated = input
+        .chars()
+        .count()
+        .saturating_mul(2)
+        .saturating_add(768);
+    params.max_tokens = (estimated as u32).clamp(768, 2048);
+    params
+}
+
+fn format_local_rewrite_user_message(
+    raw: &str,
+    mode: TextProcessingMode,
+    model: LlmModelKind,
+) -> String {
+    if mode == TextProcessingMode::Optimization && model.prefer_compact_optimization_prompt() {
+        raw.trim().to_string()
+    } else if mode == TextProcessingMode::Optimization {
         format_optimization_user_message(raw)
     } else {
         format_rewrite_user_message(raw)
     }
+}
+
+fn output_needs_local_tone_cleanup(input: &str, output: &str) -> bool {
+    looks_like_raw_dictation(output) && token_jaccard_similarity(input, output) > 0.82
+}
+
+async fn local_profanity_cleanup_pass(
+    text: &str,
+    settings: &AppSettings,
+    llm_engine: &LlmEngine,
+    protected_terms: &[String],
+) -> Result<String, RewriteError> {
+    let system_prompt = local_llm_system_prompt(
+        &local_profanity_cleanup_system_prompt(protected_terms),
+        settings.local_llm_model,
+    );
+    let mut params = LlmCompletionParams::for_rewrite(OPTIMIZATION_RETRY_TEMPERATURE);
+    params.max_tokens = (text.chars().count() as u32).saturating_mul(2).clamp(256, 1536);
+    if settings.local_llm_model.supports_hybrid_thinking() {
+        params.disable_thinking = true;
+    }
+    llm_engine
+        .complete(&system_prompt, text.trim(), params)
+        .await
+        .map_err(RewriteError::Local)
+        .map(|value| sanitize_rewrite_output(&value))
 }
 
 fn local_llm_system_prompt(base: &str, model: LlmModelKind) -> String {
@@ -969,7 +1046,11 @@ fn rewrite_request_config(
             let mut system_prompt = if use_gec {
                 gec_system_prompt()
             } else {
-                optimization_system_prompt(emulate_enter, protected_terms)
+                optimization_system_prompt_for_local_model(
+                    local_model,
+                    emulate_enter,
+                    protected_terms,
+                )
             };
             if use_gec {
                 system_prompt.push_str(&format_protected_terms_section(protected_terms));
@@ -1023,8 +1104,17 @@ mod tests {
         assert_eq!(config.model, AI_REWRITE_MODEL);
         assert_eq!(config.temperature, OPTIMIZATION_TEMPERATURE);
         assert!(config.system_prompt.contains("литературный редактор"));
-        assert!(config.system_prompt.contains("ИЕРАРХИЯ ПРАВИЛ"));
-        assert!(config.system_prompt.contains("Развёртывание без выдумки"));
+        assert!(config.system_prompt.contains("ПРИОРИТЕТ 1"));
+
+        let full = rewrite_request_config(
+            TextProcessingMode::Optimization,
+            None,
+            LlmModelKind::Qwen25_7B,
+            false,
+            &[],
+        )
+        .unwrap();
+        assert!(full.system_prompt.contains("ИЕРАРХИЯ ПРАВИЛ"));
     }
 
     #[test]
@@ -1037,9 +1127,7 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(config
-            .system_prompt
-            .contains("Команды перевода строки"));
+        assert!(config.system_prompt.contains("новая строка"));
         assert!(!config
             .system_prompt
             .contains("«новая строка» / «абзац» → перевод строки"));

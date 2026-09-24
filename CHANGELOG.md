@@ -12,6 +12,20 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.90] — 2026-09-24
+
+### Added
+
+- **Tools:** Embedded tools panel and **voice file transcription** window — queue audio files, same local/cloud STT and text pipeline as dictation (including AI optimization and custom skills); copy results to clipboard.
+- **Voice files:** Decode common formats (WAV, MP3, OGG/Opus, FLAC, M4A, …); progress percent during decode and local Whisper inference; EN/RU stage labels.
+- **UI:** Tools entry in the status bar (wrench icon); link from Standard (homemaker) settings.
+
+### Fixed
+
+- **PTT / capture:** Do not block dictation while a voice file job holds the tools lock only on the tool side; restore audio callbacks after PTT errors; hotkey capture button uses mousedown so assignment works in WebView2.
+- **Voice tool:** OGG Opus via symphonia adapter; respect optimization / custom skill modes; local LLM load before rewrite; Silero TE tokenizer tensor shapes; strip common Whisper hallucination phrases.
+- **README:** Document tools, Sherpa/Whisper STT families, and voice file workflow.
+
 ## [1.8.79] — 2026-09-24
 
 ### Fixed

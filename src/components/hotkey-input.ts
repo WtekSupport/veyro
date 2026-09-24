@@ -277,18 +277,33 @@ function startCapture(button: HTMLButtonElement, onChange?: () => void): void {
 }
 
 function bindHotkeyButton(button: HTMLButtonElement, onChange?: () => void): void {
-  button.addEventListener("click", () => {
-    button.focus();
+  button.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    if (!button.classList.contains("capturing")) {
+      button.focus({ preventScroll: true });
+      startCapture(button, onChange);
+    }
   });
 
-  button.addEventListener("focus", () => {
-    startCapture(button, onChange);
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    if (!button.classList.contains("capturing")) {
+      startCapture(button, onChange);
+    }
   });
 
   button.addEventListener("blur", () => {
-    if (button.classList.contains("capturing")) {
-      cancelCapture(button);
-    }
+    window.setTimeout(() => {
+      if (
+        button.classList.contains("capturing") &&
+        document.activeElement !== button
+      ) {
+        cancelCapture(button);
+      }
+    }, 0);
   });
 }
 
