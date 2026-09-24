@@ -1,5 +1,7 @@
 mod engine;
 #[cfg(feature = "silero-te")]
+pub mod combined_progress;
+#[cfg(feature = "silero-te")]
 pub mod model_store;
 #[cfg(feature = "silero-te")]
 pub mod runtime_store;

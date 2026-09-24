@@ -92,6 +92,9 @@ const ASSETS: [AssetSpec; 3] = [
 const GITHUB_RELEASE_BASE: &str =
     "https://github.com/WtekSupport/veyro/releases/download";
 
+/// Stable total for multi-file asset progress (model + tokenizer + meta).
+const ASSETS_ESTIMATE_BYTES: u64 = 95_000_000;
+
 fn download_urls(file_name: &str) -> Vec<String> {
     let mut urls = Vec::new();
     if let Ok(base) = std::env::var("VEYRO_SILERO_TE_BASE_URL") {
@@ -174,14 +177,14 @@ where
         info!("downloading Silero TE asset {} to {}", spec.file_name, dest.display());
         let file_bytes = download_one(http, spec.file_name, &dest, spec.min_bytes, |file_progress| {
             let combined = completed_bytes + file_progress.downloaded;
-            let total = file_progress
-                .total
-                .map(|file_total| completed_bytes + file_total);
-            on_progress(DownloadProgress::new(combined, total));
+            on_progress(DownloadProgress::new(combined, Some(ASSETS_ESTIMATE_BYTES)));
         })
         .await?;
         completed_bytes += file_bytes;
-        on_progress(DownloadProgress::new(completed_bytes, Some(completed_bytes)));
+        on_progress(DownloadProgress::new(
+            completed_bytes.min(ASSETS_ESTIMATE_BYTES),
+            Some(ASSETS_ESTIMATE_BYTES),
+        ));
     }
 
     let assets = SileroTeAssets {

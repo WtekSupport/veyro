@@ -1317,17 +1317,15 @@ async fn download_silero_te_model(
     }
     #[cfg(feature = "silero-te")]
     {
-        use crate::app::events::SILERO_TE_DOWNLOAD_PROGRESS;
-
         let settings = settings_for_models_dir(ctx.inner())?;
 
         let http = crate::text::silero_te::model_store::download_http_client()
             .map_err(|error| error.to_string())?;
         let app_for_progress = app.clone();
-        let _ = app_for_progress.emit(
-            SILERO_TE_DOWNLOAD_PROGRESS,
-            transcription::model_store::DownloadProgress::new(0, None),
-        );
+        let mut combined =
+            crate::text::silero_te::combined_progress::CombinedSileroTeProgress::new(
+                app_for_progress.clone(),
+            );
 
         if !crate::text::silero_te::runtime_store::runtime_ready(&settings) {
             ctx.inner().record_activity(
@@ -1337,7 +1335,14 @@ async fn download_silero_te_model(
                 json!({}),
             );
             let _ = crate::text::silero_te::runtime_store::download_runtime(&http, &settings, |progress| {
-                let _ = app_for_progress.emit(SILERO_TE_DOWNLOAD_PROGRESS, progress);
+                if progress.total.is_none()
+                    && progress.downloaded > 0
+                    && progress.percent.is_none()
+                {
+                    combined.runtime_installing();
+                } else {
+                    combined.runtime_zip(progress);
+                }
             })
             .await
             .inspect_err(|error| {
@@ -1356,6 +1361,8 @@ async fn download_silero_te_model(
             );
         }
 
+        combined.runtime_complete();
+
         ctx.inner().record_activity(
             Some(&app),
             ActivityLevel::Info,
@@ -1364,7 +1371,7 @@ async fn download_silero_te_model(
         );
 
         let path = crate::text::silero_te::model_store::download_assets(&http, &settings, |progress| {
-            let _ = app_for_progress.emit(SILERO_TE_DOWNLOAD_PROGRESS, progress);
+            combined.assets(progress);
         })
         .await
         .inspect_err(|error| {
@@ -1386,6 +1393,8 @@ async fn download_silero_te_model(
         if let Ok(engine) = crate::text::silero_te::SileroTeEngine::global().lock() {
             engine.unload();
         }
+
+        combined.complete();
 
         Ok(path.display().to_string())
     }
