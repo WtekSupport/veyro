@@ -20,5 +20,5 @@ pub use normalize::normalize_transcription;
 pub use pipeline::{
     process_transcription, process_transcription_immediate,
     process_transcription_immediate_sync, rewrite_processed_text, ProcessedText,
-    TextProcessingError,
+    ProcessTranscriptionFlags, TextProcessingError,
 };

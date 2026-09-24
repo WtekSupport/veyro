@@ -18,6 +18,8 @@ pub const SETTINGS_WINDOW_LABEL: &str = "main";
 pub const ABOUT_WINDOW_LABEL: &str = "about";
 pub const INIT_WINDOW_LABEL: &str = "init";
 pub const SKILL_IMPORT_WINDOW_LABEL: &str = "skill-import";
+pub const TOOLS_WINDOW_LABEL: &str = "tools";
+pub const TOOL_VOICE_FILES_WINDOW_LABEL: &str = "tool-voice-files";
 pub const OVERLAY_WINDOW_LABEL: &str = "overlay";
 
 const WINDOW_WIDTH: f64 = 400.0;
@@ -30,6 +32,10 @@ const INIT_WINDOW_HEIGHT: f64 = 132.0;
 const SKILL_IMPORT_WINDOW_WIDTH: f64 = 400.0;
 const SKILL_IMPORT_WINDOW_HEIGHT: f64 = 300.0;
 const SKILL_IMPORT_WINDOW_HEIGHT_PREVIEW: f64 = 420.0;
+const TOOLS_WINDOW_WIDTH: f64 = 400.0;
+const TOOLS_WINDOW_HEIGHT: f64 = 360.0;
+const TOOL_VOICE_FILES_WINDOW_WIDTH: f64 = 440.0;
+const TOOL_VOICE_FILES_WINDOW_HEIGHT: f64 = 520.0;
 const OVERLAY_WINDOW_WIDTH: f64 = 140.0;
 const OVERLAY_WINDOW_HEIGHT: f64 = 40.0;
 const OVERLAY_CORNER_MARGIN: f64 = 16.0;
@@ -165,6 +171,25 @@ pub fn configure_about_window(window: &WebviewWindow) {
     let _ = window.set_maximizable(false);
     let _ = window.set_always_on_top(true);
     enforce_window_size(window, ABOUT_WINDOW_WIDTH, ABOUT_WINDOW_HEIGHT);
+}
+
+pub fn configure_tools_window(window: &WebviewWindow) {
+    let _ = window.set_resizable(true);
+    let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
+    enforce_window_size(window, TOOLS_WINDOW_WIDTH, TOOLS_WINDOW_HEIGHT);
+}
+
+pub fn configure_voice_files_tool_window(window: &WebviewWindow) {
+    configure_settings_window_chrome(window);
+    let _ = window.set_resizable(true);
+    let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
+    enforce_window_size(
+        window,
+        TOOL_VOICE_FILES_WINDOW_WIDTH,
+        TOOL_VOICE_FILES_WINDOW_HEIGHT,
+    );
 }
 
 fn enforce_window_size(window: &WebviewWindow, width: f64, height: f64) {
@@ -537,6 +562,123 @@ where
     .map_err(|error| format!("failed to schedule main-thread task: {error}"))?;
     rx.await
         .map_err(|_| "main-thread task interrupted".to_string())
+}
+
+fn ensure_tools_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(TOOLS_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        TOOLS_WINDOW_LABEL,
+        WebviewUrl::App("tools.html".into()),
+    )
+    .title("Veyro")
+    .inner_size(TOOLS_WINDOW_WIDTH, TOOLS_WINDOW_HEIGHT)
+    .resizable(true)
+    .maximizable(false)
+    .center()
+    .visible(false);
+
+    if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        builder = builder
+            .parent(&parent)
+            .map_err(|error| format!("failed to attach tools window parent: {error}"))?;
+    }
+
+    let window = builder
+        .build()
+        .map_err(|error| format!("failed to create tools window: {error}"))?;
+
+    configure_tools_window(&window);
+    Ok(window)
+}
+
+fn ensure_voice_files_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool), String> {
+    if let Some(window) = app.get_webview_window(TOOL_VOICE_FILES_WINDOW_LABEL) {
+        return Ok((window, false));
+    }
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        TOOL_VOICE_FILES_WINDOW_LABEL,
+        WebviewUrl::App("tool-voice-files.html".into()),
+    )
+    .title("Veyro")
+    .inner_size(TOOL_VOICE_FILES_WINDOW_WIDTH, TOOL_VOICE_FILES_WINDOW_HEIGHT)
+    .decorations(true)
+    .resizable(true)
+    .maximizable(false)
+    .closable(true)
+    .center()
+    .visible(false)
+    .background_color(SETTINGS_WINDOW_BG)
+    .drag_and_drop(true);
+
+    if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        builder = builder
+            .parent(&parent)
+            .map_err(|error| format!("failed to attach voice files tool window parent: {error}"))?;
+    }
+
+    let window = builder
+        .build()
+        .map_err(|error| format!("failed to create voice files tool window: {error}"))?;
+
+    configure_voice_files_tool_window(&window);
+    Ok((window, true))
+}
+
+pub fn show_tools_window(app: &AppHandle) -> Result<(), String> {
+    let window = ensure_tools_window(app).inspect_err(|error| {
+        warn!("tools window creation failed: {error}");
+    })?;
+
+    let _ = window.set_title(&crate::i18n::translate(
+        settings_ui_locale(app),
+        "tools.window_title",
+        &[],
+    ));
+    configure_tools_window(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_skip_taskbar(false);
+
+    #[cfg(windows)]
+    activate_window(&window);
+
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+    Ok(())
+}
+
+pub fn show_voice_files_tool_window(app: &AppHandle) -> Result<(), String> {
+    let (window, created) = ensure_voice_files_tool_window(app).inspect_err(|error| {
+        warn!("voice files tool window creation failed: {error}");
+    })?;
+
+    let _ = window.set_title(&crate::i18n::translate(
+        settings_ui_locale(app),
+        "tools.voice_files.window_title",
+        &[],
+    ));
+    configure_voice_files_tool_window(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_skip_taskbar(false);
+
+    #[cfg(windows)]
+    activate_window(&window);
+
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+
+    if !created {
+        crate::app::events::emit_voice_files_window_ready(app);
+    }
+
+    Ok(())
 }
 
 pub fn show_about_window(app: &AppHandle) -> Result<(), String> {

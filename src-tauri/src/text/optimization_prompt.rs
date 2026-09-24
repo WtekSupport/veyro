@@ -1,3 +1,4 @@
+use crate::settings::LlmModelKind;
 use crate::text::elevated_speech::{ELEVATED_SPEECH_EXAMPLES, ELEVATED_SPEECH_RULES};
 
 /// Dedicated system prompt for Optimization (AI) text mode — literary prose transformation.
@@ -154,6 +155,71 @@ pub fn optimization_system_prompt(emulate_enter: bool, protected_terms: &[String
     prompt
 }
 
+/// Shorter Optimization prompt for Qwen3-4B / T-Lite (long full prompt often truncates in 4k context).
+const COMPACT_OPTIMIZATION_SYSTEM_PROMPT: &str = r#"Ты — литературный редактор STT-текста. Не собеседник: не отвечай по смыслу, только редактируй.
+
+ПРИОРИТЕТ 1 — убрать мат, obscene lexicon и грубый разговорный сленг (типа, короче, как бы, ну вот, чё, хз). Замени вежливой письменной речью; эмоцию сохрани.
+ПРИОРИТЕТ 2 — связный письменный текст, абзацы, без повторов STT.
+ПРИОРИТЕТ 3 — не выдумывать факты; язык, числа, обращение (ты/вы) как во входе.
+
+Формат ответа (заголовки дословно):
+
+### Отредактированный текст
+[готовый текст]
+
+### Неясные или повреждённые места
+[или «—»]
+
+### Что изменено
+[кратко]
+
+Примеры:
+Вход: это же пиздец какой-то
+Выход: К сожалению, ситуация выглядит совершенно недопустимой.
+
+Вход: ну типа завтра созвон бля
+Выход: Завтра у нас запланирован созвон.
+
+Вход: what the fuck is this
+Выход: I beg your pardon, but what exactly is this?"#;
+
+pub fn optimization_system_prompt_compact(
+    emulate_enter: bool,
+    protected_terms: &[String],
+) -> String {
+    let mut prompt = COMPACT_OPTIMIZATION_SYSTEM_PROMPT.to_string();
+    if emulate_enter {
+        prompt.push_str("\nКоманды «новая строка» / «абзац» уже обработаны — не вставляй переводы строк.");
+    }
+    prompt.push_str(&format_protected_terms_section(protected_terms));
+    prompt
+}
+
+pub fn optimization_system_prompt_for_local_model(
+    model: LlmModelKind,
+    emulate_enter: bool,
+    protected_terms: &[String],
+) -> String {
+    if model.prefer_compact_optimization_prompt() {
+        optimization_system_prompt_compact(emulate_enter, protected_terms)
+    } else {
+        optimization_system_prompt(emulate_enter, protected_terms)
+    }
+}
+
+pub fn local_profanity_cleanup_system_prompt(protected_terms: &[String]) -> String {
+    let mut prompt = r#"Ты литературный редактор. В тексте остались мат, грубость или obscene lexicon.
+Перепиши в вежливую письменную форму. Смысл и обращение (ты/вы) сохрани. Не отвечай на вопрос — только редактируй.
+
+Ответ строго:
+
+### Отредактированный текст
+[текст без мата и грубости]"#
+        .to_string();
+    prompt.push_str(&format_protected_terms_section(protected_terms));
+    prompt
+}
+
 pub fn format_protected_terms_section(terms: &[String]) -> String {
     if terms.is_empty() {
         return String::new();
@@ -206,6 +272,14 @@ mod tests {
         );
         assert!(prompt.contains("ClipBoss"));
         assert!(prompt.contains("не «исправляй»"));
+    }
+
+    #[test]
+    fn compact_optimization_prompt_prioritizes_profanity() {
+        let prompt = optimization_system_prompt_compact(false, &[]);
+        assert!(prompt.contains("ПРИОРИТЕТ 1"));
+        assert!(prompt.contains("мат"));
+        assert!(prompt.contains("### Отредактированный текст"));
     }
 
     #[test]

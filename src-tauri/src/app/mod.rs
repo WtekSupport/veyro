@@ -9,6 +9,7 @@ pub mod events;
 pub mod info;
 pub mod runtime;
 pub mod state;
+pub mod transcribe_audio;
 
 pub use context::AppContext;
 pub use controller::{with_context, with_controller, AppController, SharedController};

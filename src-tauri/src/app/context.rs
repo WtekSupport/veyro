@@ -470,6 +470,12 @@ impl AppContext {
             .store(enabled, Ordering::SeqCst);
     }
 
+    /// Temporarily disables VAD/segment callbacks; re-enables on drop (including on panic/`?`).
+    pub fn pause_audio_callbacks(&self) -> AudioCallbacksRestore<'_> {
+        self.set_audio_callbacks_enabled(false);
+        AudioCallbacksRestore { ctx: self }
+    }
+
     pub fn record_activity(
         &self,
         app: Option<&AppHandle>,
@@ -685,5 +691,15 @@ impl AppContext {
         if let Ok(audio) = self.audio.lock() {
             audio.set_ptt_vad_segments_on_silence(false);
         }
+    }
+}
+
+pub(crate) struct AudioCallbacksRestore<'a> {
+    ctx: &'a AppContext,
+}
+
+impl Drop for AudioCallbacksRestore<'_> {
+    fn drop(&mut self) {
+        self.ctx.set_audio_callbacks_enabled(true);
     }
 }
