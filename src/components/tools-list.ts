@@ -89,8 +89,15 @@ function bindVoiceFilesOpen(root: ParentNode): void {
     });
 }
 
+function toolsPanelFromRoot(root: ParentNode): HTMLElement {
+  if (root instanceof Element) {
+    return root.closest<HTMLElement>("[data-tools-panel-root]") ?? (root as HTMLElement);
+  }
+  return document.querySelector<HTMLElement>("[data-tools-panel-root]") ?? document.body;
+}
+
 async function openVoiceFilesFromCard(root: ParentNode): Promise<void> {
-  const panel = root.closest<HTMLElement>("[data-tools-panel-root]") ?? root;
+  const panel = toolsPanelFromRoot(root);
   const host = panel.querySelector<HTMLElement>("[data-tools-cards-host]");
   if (!host) {
     return;

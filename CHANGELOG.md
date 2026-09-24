@@ -12,7 +12,7 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
-## [1.8.90] — 2026-09-24
+## [1.8.91] — 2026-09-24
 
 ### Added
 

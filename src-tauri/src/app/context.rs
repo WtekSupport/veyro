@@ -471,7 +471,7 @@ impl AppContext {
     }
 
     /// Temporarily disables VAD/segment callbacks; re-enables on drop (including on panic/`?`).
-    pub fn pause_audio_callbacks(&self) -> AudioCallbacksRestore<'_> {
+    pub(crate) fn pause_audio_callbacks(&self) -> AudioCallbacksRestore<'_> {
         self.set_audio_callbacks_enabled(false);
         AudioCallbacksRestore { ctx: self }
     }
