@@ -487,36 +487,52 @@ export function ensureSileroTeDownloadUi(
   updateSileroTeDownloadUi(progress);
 }
 
+function sileroTeDownloadHint(progress: SileroModelDownloadProgress): string {
+  if (
+    progress.percent == null &&
+    progress.total == null &&
+    progress.downloaded > 50_000_000
+  ) {
+    return t("settings.sileroTeInstalling");
+  }
+  return formatDownloadProgress(progress);
+}
+
 export function updateSileroTeDownloadUi(
   progress: SileroModelDownloadProgress | null,
 ): void {
-  const panel = document.querySelector<HTMLElement>("[data-silero-te-download]");
-  if (!panel || !progress) {
+  const panels = document.querySelectorAll<HTMLElement>("[data-silero-te-download]");
+  if (panels.length === 0) {
+    return;
+  }
+  if (!progress) {
     return;
   }
 
   const percent = whisperDownloadPercent(progress);
-  const hint = panel.querySelector<HTMLElement>("[data-silero-te-download-hint]");
-  if (hint) {
-    hint.textContent = formatDownloadProgress(progress);
-  }
+  panels.forEach((panel) => {
+    const hint = panel.querySelector<HTMLElement>("[data-silero-te-download-hint]");
+    if (hint) {
+      hint.textContent = sileroTeDownloadHint(progress);
+    }
 
-  const bar = panel.querySelector<HTMLElement>("[data-silero-te-download-bar]");
-  const progressRoot = panel.querySelector<HTMLElement>("[data-silero-te-download-progress]");
-  if (!bar || !progressRoot) {
-    return;
-  }
+    const bar = panel.querySelector<HTMLElement>("[data-silero-te-download-bar]");
+    const progressRoot = panel.querySelector<HTMLElement>("[data-silero-te-download-progress]");
+    if (!bar || !progressRoot) {
+      return;
+    }
 
-  if (percent === null) {
-    bar.style.width = "";
-    bar.classList.add("is-indeterminate");
-    progressRoot.setAttribute("aria-valuenow", "0");
-    return;
-  }
+    if (percent === null) {
+      bar.style.width = "";
+      bar.classList.add("is-indeterminate");
+      progressRoot.setAttribute("aria-valuenow", "0");
+      return;
+    }
 
-  bar.classList.remove("is-indeterminate");
-  bar.style.width = `${percent}%`;
-  progressRoot.setAttribute("aria-valuenow", String(percent));
+    bar.classList.remove("is-indeterminate");
+    bar.style.width = `${percent}%`;
+    progressRoot.setAttribute("aria-valuenow", String(percent));
+  });
 }
 
 function selectedLlmModelExists(

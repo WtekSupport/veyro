@@ -178,6 +178,11 @@ where
     let manifest = download_manifest(http).await?;
     let zip_bytes = download_bytes(http, RUNTIME_ZIP, &mut on_progress).await?;
 
+    on_progress(DownloadProgress::new(
+        zip_bytes.len() as u64,
+        None,
+    ));
+
     let staging = dir.with_extension("staging");
     if staging.exists() {
         fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;

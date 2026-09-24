@@ -12,6 +12,13 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.8.79] — 2026-09-24
+
+### Fixed
+
+- **Silero TE download:** Single combined progress bar for runtime + model weights; «installing runtime» phase during unpack; Standard/Expert UI stay in sync and clear when done.
+- **Silero TE runtime:** UTF-8 BOM stripped when parsing `runtime-manifest.json`; packaging script writes manifest without BOM.
+
 ## [1.8.78] — 2026-09-24
 
 ### Added
