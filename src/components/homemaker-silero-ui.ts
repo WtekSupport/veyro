@@ -1,5 +1,5 @@
 import type {
-  Diagnostics,
+  DiagnosticsSnapshot,
   SileroModelDownloadProgress,
   SileroTeModelStatus,
   SileroVadModelStatus,
@@ -76,7 +76,7 @@ function renderSileroDownloadBlock(
 
 /** Standard mode: Silero VAD / TE downloads (any storage & text processing mode). */
 export function renderHomemakerSileroDownloads(
-  diagnostics: Diagnostics | null,
+  diagnostics: DiagnosticsSnapshot | null,
   sileroTeModel: SileroTeModelStatus | null,
   sileroVadModel: SileroVadModelStatus | null,
   sileroTeModelDownload: SileroModelDownloadProgress | null,
