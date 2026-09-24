@@ -363,6 +363,7 @@ export const ru: Record<MessageKey, string> = {
   "settings.downloadSileroTeModel": "Скачать модель Silero TE",
   "settings.sileroTeDownloadHint":
     "Модель пунктуации (~88 МБ). Скачивается один раз в каталог моделей речи.",
+  "settings.sileroTeInstalling": "Установка runtime (распаковка)…",
   "settings.downloadSileroVadModel": "Скачать модель Silero VAD",
   "settings.sileroVadDownloadHint":
     "Модель детекции речи (~3 МБ). Нужна для Silero VAD; WebRTC работает без неё.",

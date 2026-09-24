@@ -63,7 +63,9 @@ $manifest = [ordered]@{
     files   = $manifestFiles
 }
 $manifestPath = Join-Path $staging "runtime-manifest.json"
-($manifest | ConvertTo-Json -Depth 4) | Set-Content -Path $manifestPath -Encoding UTF8
+$manifestJson = ($manifest | ConvertTo-Json -Depth 4)
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($manifestPath, $manifestJson, $utf8NoBom)
 
 $zipPath = Join-Path $staging "silero-te-runtime-win-x64.zip"
 if (Test-Path $zipPath) {
@@ -95,8 +97,9 @@ if (-not $gh) {
 }
 
 $viewArgs = @("release", "view", $Tag, "--repo", $Repo)
-$viewOut = & $gh @viewArgs 2>&1
-if ($LASTEXITCODE -ne 0 -or ($viewOut -match "release not found")) {
+$viewOut = & $gh @viewArgs 2>&1 | Out-String
+$releaseMissing = $LASTEXITCODE -ne 0 -or ($viewOut -match "release not found")
+if ($releaseMissing) {
     Write-Host "Creating prerelease $Tag on $Repo ..."
     & $gh release create $Tag @uploadPaths --repo $Repo --prerelease --title "Silero TE runtime (Windows x64)" --notes "On-demand libtorch + MKL DLLs for Silero TE in Veyro."
 } else {

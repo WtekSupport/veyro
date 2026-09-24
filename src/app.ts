@@ -174,8 +174,10 @@ function bindSileroModelDownloadButtons(scope: ParentNode): void {
           sileroTeModel: await getSileroTeModelStatus(),
           sileroTeModelDownload: null,
         });
+        updateSileroTeDownloadUi(null);
       } catch (error) {
         patchState({ sileroTeModelDownload: null });
+        updateSileroTeDownloadUi(null);
         const message = error instanceof Error ? error.message : String(error);
         setError({ code: "silero_te_download", message });
       }
@@ -1570,9 +1572,12 @@ async function bootstrap(): Promise<void> {
   await subscribe<import("./api").SileroModelDownloadProgress>(
     EVENTS.sileroTeDownloadProgress,
     (progress) => {
-      patchState({ sileroTeModelDownload: progress }, { render: false });
-      ensureSileroTeDownloadUi(progress);
-      updateSileroTeDownloadUi(progress);
+      const homemaker = isHomemakerMode(getState().settings);
+      patchState({ sileroTeModelDownload: progress }, { render: homemaker });
+      if (!homemaker) {
+        ensureSileroTeDownloadUi(progress);
+        updateSileroTeDownloadUi(progress);
+      }
     },
   );
 
