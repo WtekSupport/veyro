@@ -222,6 +222,7 @@ function nextJobId(): string {
 
 export function createVoiceFilesController(root: HTMLElement): {
   enqueuePaths: (paths: string[]) => void;
+  dispose: () => void;
 } {
   let jobs: VoiceFileJob[] = [];
   let selectedId: string | null = null;
