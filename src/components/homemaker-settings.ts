@@ -4,7 +4,7 @@ import type {
 
   AppSettings,
 
-  Diagnostics,
+  DiagnosticsSnapshot,
 
   HomemakerLocalSetup,
 
@@ -172,7 +172,7 @@ export function renderHomemakerSettings(
 
   configLoading = false,
 
-  diagnostics: Diagnostics | null = null,
+  diagnostics: DiagnosticsSnapshot | null = null,
 
   sileroTeModel: SileroTeModelStatus | null = null,
 
