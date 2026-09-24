@@ -18,7 +18,7 @@ pub struct CombinedSileroTeProgress {
 
 impl CombinedSileroTeProgress {
     pub fn new(app: AppHandle) -> Self {
-        let mut reporter = Self {
+        let reporter = Self {
             app,
             runtime_done: 0,
             assets_done: 0,
