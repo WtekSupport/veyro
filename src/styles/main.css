@@ -132,6 +132,26 @@ body {
 
 .window--standard {
   gap: var(--space-sm);
+  overflow: hidden;
+}
+
+.window--standard > .header,
+.window--standard > .homemaker-config-banner,
+.window--standard > .onboarding-banner,
+.window--standard > .status-bar--compact,
+.window--standard > .error-banner {
+  flex-shrink: 0;
+}
+
+.window--standard .homemaker-panel {
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.window--standard .homemaker-form {
+  height: auto;
+  overflow: visible;
 }
 
 .window--standard .subtitle-rotator {
@@ -2738,14 +2758,126 @@ input[type="range"]::-moz-range-thumb {
 
 .homemaker-choice-row--triple {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 6px 6px 0 0;
+  margin: -6px -6px 0 0;
 }
 
-.homemaker-more-btn {
-  appearance: none;
-  margin: 0;
+.homemaker-choice-card--skill {
+  position: relative;
+  overflow: visible;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+
+.homemaker-skill-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.homemaker-skill-choice-primary {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--parchment);
+  text-align: center;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.homemaker-skill-choice-secondary {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.2;
+  word-break: break-all;
+}
+
+.homemaker-skill-catalog-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(255, 193, 69, 0.45);
+  border-radius: var(--radius-pill);
+  background: rgba(12, 10, 8, 0.92);
+  color: var(--brass-bright);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+.homemaker-skill-catalog-badge svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.5;
+}
+
+.homemaker-skill-catalog-badge:hover {
+  border-color: rgba(255, 193, 69, 0.75);
+  background: rgba(255, 193, 69, 0.18);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 193, 69, 0.22);
+  transform: scale(1.06);
+}
+
+.homemaker-choice-card--skill:has(input:checked) .homemaker-skill-catalog-badge {
+  border-color: rgba(255, 220, 120, 0.85);
+  background: rgba(40, 32, 18, 0.95);
+  color: #ffe8a8;
+}
+
+.homemaker-skill-catalog-badge:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+.homemaker-choice-card--skill:has(input:checked) .homemaker-skill-choice-primary {
+  color: #fff;
+}
+
+.homemaker-choice-card--skill:has(input:checked) .homemaker-skill-choice-secondary {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.homemaker-silero-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 2px 2px;
+}
+
+.homemaker-silero-actions > :only-child {
+  grid-column: 1 / -1;
+}
+
+.homemaker-silero-action,
+.homemaker-silero-download {
+  min-width: 0;
+}
+
+.homemaker-silero-action .btn-compact {
   width: 100%;
-  font: inherit;
-  color: inherit;
+  height: 100%;
+  min-height: 46px;
+  white-space: normal;
+  line-height: 1.25;
+  padding: 8px 6px;
+}
+
+.homemaker-silero-download {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .homemaker-choice-card {
