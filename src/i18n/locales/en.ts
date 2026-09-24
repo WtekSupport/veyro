@@ -360,6 +360,7 @@ export const en = {
   "settings.downloadSileroTeModel": "Download Silero TE model",
   "settings.sileroTeDownloadHint":
     "Punctuation model (~88 MB). Download once; stored with your speech models.",
+  "settings.sileroTeInstalling": "Installing runtime (unpacking)…",
   "settings.downloadSileroVadModel": "Download Silero VAD model",
   "settings.sileroVadDownloadHint":
     "Voice activity model (~3 MB). Required for Silero VAD; WebRTC works without it.",
