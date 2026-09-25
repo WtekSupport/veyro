@@ -613,8 +613,12 @@ fn ensure_voice_files_tool_window(app: &AppHandle) -> Result<(WebviewWindow, boo
     .closable(true)
     .center()
     .visible(false)
-    .background_color(SETTINGS_WINDOW_BG)
-    .drag_and_drop(true);
+    .background_color(SETTINGS_WINDOW_BG);
+
+    #[cfg(windows)]
+    {
+        builder = builder.drag_and_drop(true);
+    }
 
     if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
         builder = builder
