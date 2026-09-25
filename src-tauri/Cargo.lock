@@ -7399,7 +7399,7 @@ dependencies = [
  "bzip2 0.5.2",
  "chislo",
  "core-foundation 0.10.1",
- "core-graphics 0.24.0",
+ "core-graphics 0.25.0",
  "cpal",
  "crossbeam-channel",
  "dirs 6.0.0",
