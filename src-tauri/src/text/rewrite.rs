@@ -17,7 +17,8 @@ use crate::text::normalize::{
 };
 use crate::text::optimization_prompt::{
     format_optimization_user_message, format_protected_terms_section,
-    local_profanity_cleanup_system_prompt, optimization_system_prompt_for_local_model,
+    local_profanity_cleanup_system_prompt, optimization_system_prompt,
+    optimization_system_prompt_for_local_model,
     STRONGER_OPTIMIZATION_SUFFIX,
 };
 use crate::text::skill::load_skill_body;
