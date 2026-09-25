@@ -1,7 +1,7 @@
 use reqwest::Client;
 
 use crate::llm::LlmEngine;
-use crate::settings::{AppSettings, TextProcessingMode};
+use crate::settings::{AppSettings, TextProcessingMode, TextRewriteProvider};
 use crate::text::corrections::apply_corrections;
 use crate::text::dictionary::{protected_terms, Dictionary};
 use crate::text::enter_trigger::apply_enter_trigger;
@@ -20,6 +20,8 @@ use crate::timed_text::TimedTextSegment;
 #[derive(Debug, Clone)]
 pub struct ProcessedText {
     pub text: String,
+    /// STT text after dictionary / triggers, before Basic capitalization cleanup.
+    pub stt_cleanup_text: String,
     pub press_enter: bool,
     pub rewrite_fallback: bool,
     pub rewrite_fallback_reason: Option<String>,
@@ -31,6 +33,12 @@ pub enum TextProcessingError {
     Failed(String),
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProcessTranscriptionFlags {
+    /// Voice-file tool: run the selected text mode in one pass (do not stop at PTT phase-1 Basic).
+    pub force_ai_rewrite: bool,
+}
+
 pub async fn process_transcription(
     raw: &str,
     timed_segments: Option<&[TimedTextSegment]>,
@@ -38,8 +46,12 @@ pub async fn process_transcription(
     http: &Client,
     llm_engine: &LlmEngine,
     whisper_detected_language: Option<&str>,
+    flags: ProcessTranscriptionFlags,
 ) -> Result<ProcessedText, TextProcessingError> {
-    if settings.ai_postprocess_mode().is_some() {
+    let defer_ai_to_ptt_finish =
+        settings.ai_postprocess_mode().is_some() && !flags.force_ai_rewrite;
+
+    if defer_ai_to_ptt_finish {
         return process_transcription_immediate(
             raw,
             timed_segments,
@@ -58,7 +70,7 @@ pub async fn process_transcription(
     .await?;
 
     let processing_mode = settings.effective_text_processing_mode();
-    if !processing_mode.uses_ai() || !settings.push_to_talk {
+    if !processing_mode.uses_ai() {
         return Ok(immediate);
     }
 
@@ -68,6 +80,7 @@ pub async fn process_transcription(
 
     rewrite_processed_text(
         &immediate.text,
+        Some(&immediate.stt_cleanup_text),
         processing_mode,
         settings,
         settings.ai_rewrite_skill.as_deref(),
@@ -105,6 +118,7 @@ pub fn process_transcription_immediate_sync(
         &dictionary,
         &postprocess_lang,
     );
+    let stt_cleanup_text = raw.clone();
 
     let processing_mode = settings.immediate_transcription_mode();
     let mut text = apply_mode_cleanup(&raw, processing_mode);
@@ -124,10 +138,28 @@ pub fn process_transcription_immediate_sync(
 
     Ok(ProcessedText {
         text,
+        stt_cleanup_text,
         press_enter,
         rewrite_fallback: false,
         rewrite_fallback_reason: None,
     })
+}
+
+fn ai_rewrite_source<'a>(
+    light_text: &'a str,
+    stt_cleanup_text: Option<&'a str>,
+    settings: &AppSettings,
+    mode: TextProcessingMode,
+) -> &'a str {
+    let stt = stt_cleanup_text.unwrap_or(light_text);
+    if matches!(settings.text_rewrite_provider, TextRewriteProvider::Local)
+        && mode == TextProcessingMode::Optimization
+        && !settings.local_llm_model.is_gec()
+    {
+        stt
+    } else {
+        light_text
+    }
 }
 
 /// Phase 1: transcription cleanup without AI rewrite.
@@ -166,6 +198,7 @@ pub async fn process_transcription_immediate(
 #[allow(clippy::too_many_arguments)]
 pub async fn rewrite_processed_text(
     light_text: &str,
+    stt_cleanup_text: Option<&str>,
     mode: TextProcessingMode,
     settings: &AppSettings,
     ai_rewrite_skill: Option<&str>,
@@ -175,8 +208,9 @@ pub async fn rewrite_processed_text(
     dictionary: &Dictionary,
     press_enter: bool,
 ) -> Result<ProcessedText, TextProcessingError> {
+    let rewrite_source = ai_rewrite_source(light_text, stt_cleanup_text, settings, mode);
     let outcome = rewrite_transcription(
-        light_text,
+        rewrite_source,
         mode,
         settings,
         ai_rewrite_skill,
@@ -197,6 +231,7 @@ pub async fn rewrite_processed_text(
 
     Ok(ProcessedText {
         text,
+        stt_cleanup_text: stt_cleanup_text.unwrap_or(light_text).to_string(),
         press_enter,
         rewrite_fallback: outcome.used_fallback,
         rewrite_fallback_reason: outcome.fallback_reason,
@@ -255,9 +290,17 @@ mod tests {
     ) -> ProcessedText {
         let client = Client::new();
         let llm = crate::llm::LlmEngine::unloaded(None);
-        process_transcription(raw, None, settings, &client, &llm, lang)
-            .await
-            .unwrap()
+        process_transcription(
+            raw,
+            None,
+            settings,
+            &client,
+            &llm,
+            lang,
+            ProcessTranscriptionFlags::default(),
+        )
+        .await
+        .unwrap()
     }
 
     async fn process_with_segments(
@@ -267,9 +310,17 @@ mod tests {
     ) -> ProcessedText {
         let client = Client::new();
         let llm = crate::llm::LlmEngine::unloaded(None);
-        process_transcription(raw, Some(segments), settings, &client, &llm, Some("ru"))
-            .await
-            .unwrap()
+        process_transcription(
+            raw,
+            Some(segments),
+            settings,
+            &client,
+            &llm,
+            Some("ru"),
+            ProcessTranscriptionFlags::default(),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -394,6 +445,59 @@ mod tests {
         assert!(processed.press_enter);
     }
 
+    #[test]
+    fn local_optimization_uses_stt_cleanup_for_rewrite_input() {
+        use crate::settings::{LlmModelKind, TextRewriteProvider};
+
+        let settings = AppSettings {
+            text_processing_mode: TextProcessingMode::Optimization,
+            text_rewrite_provider: TextRewriteProvider::Local,
+            local_llm_model: LlmModelKind::Qwen3_4B,
+            ..Default::default()
+        };
+        let source = ai_rewrite_source(
+            "Basic clean.",
+            Some("raw stt text"),
+            &settings,
+            TextProcessingMode::Optimization,
+        );
+        assert_eq!(source, "raw stt text");
+
+        let openai = AppSettings {
+            text_rewrite_provider: TextRewriteProvider::Openai,
+            ..settings.clone()
+        };
+        assert_eq!(
+            ai_rewrite_source(
+                "Basic clean.",
+                Some("raw stt text"),
+                &openai,
+                TextProcessingMode::Optimization,
+            ),
+            "Basic clean."
+        );
+    }
+
+    #[test]
+    fn voice_file_flag_skips_ptt_deferred_ai_gate() {
+        let settings = AppSettings {
+            push_to_talk: true,
+            text_processing_mode: TextProcessingMode::Optimization,
+            ui_mode: crate::settings::UiMode::Expert,
+            ..Default::default()
+        };
+        assert!(settings.ai_postprocess_mode().is_some());
+        let defer = settings.ai_postprocess_mode().is_some()
+            && !ProcessTranscriptionFlags {
+                force_ai_rewrite: true,
+            }
+            .force_ai_rewrite;
+        assert!(!defer);
+        let defer_dictation = settings.ai_postprocess_mode().is_some()
+            && !ProcessTranscriptionFlags::default().force_ai_rewrite;
+        assert!(defer_dictation);
+    }
+
     #[tokio::test]
     async fn subtitle_hallucination_is_dropped_in_original_mode() {
         let settings = AppSettings {
@@ -410,6 +514,7 @@ mod tests {
             &client,
             &llm,
             None,
+            ProcessTranscriptionFlags::default(),
         )
         .await
         .unwrap();

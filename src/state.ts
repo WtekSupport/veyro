@@ -52,6 +52,7 @@ export interface UiState {
   sileroVadModelDownload: SileroModelDownloadProgress | null;
   loading: boolean;
   activeTab: SettingsTab;
+  toolsPanelOpen: boolean;
   homemakerLocalSetup: HomemakerLocalSetup | null;
   homemakerHotkeyPresets: string[];
   homemakerConfigLoading: boolean;
@@ -87,6 +88,7 @@ const initialState: UiState = {
   sileroVadModelDownload: null,
   loading: true,
   activeTab: "status",
+  toolsPanelOpen: false,
   homemakerLocalSetup: null,
   homemakerHotkeyPresets: [],
   homemakerConfigLoading: false,
@@ -142,4 +144,16 @@ export function setActiveTab(activeTab: SettingsTab): void {
   }
   patchState({ activeTab }, { render: false });
   syncSettingsTabUi(activeTab);
+}
+
+export function setToolsPanelOpen(open: boolean): void {
+  if (state.toolsPanelOpen === open) {
+    return;
+  }
+  if (open) {
+    void import("./components/status-quick-settings").then((module) => {
+      module.setStatusQuickSettingsOpen(false);
+    });
+  }
+  patchState({ toolsPanelOpen: open });
 }

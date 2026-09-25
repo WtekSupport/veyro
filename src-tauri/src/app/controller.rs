@@ -49,6 +49,7 @@ pub struct AppController {
     state: AppState,
     settings: AppSettings,
     push_to_talk_active: bool,
+    tools_transcription_busy: bool,
     last_error: Option<String>,
     injection_available: bool,
     injection_backend: String,
@@ -61,6 +62,7 @@ impl AppController {
             state: AppState::Initializing,
             settings,
             push_to_talk_active: false,
+            tools_transcription_busy: false,
             last_error: None,
             injection_available: backend.available,
             injection_backend: backend.backend,
@@ -289,6 +291,20 @@ impl AppController {
             self.state,
             AppState::Processing | AppState::Transcribing | AppState::Injecting
         )
+    }
+
+    pub fn is_tools_transcription_busy(&self) -> bool {
+        self.tools_transcription_busy
+    }
+
+    pub fn set_tools_transcription_busy(&mut self, busy: bool) {
+        self.tools_transcription_busy = busy;
+    }
+
+    pub fn blocks_tools_transcription(&self) -> bool {
+        self.is_ptt_pipeline_busy()
+            || self.push_to_talk_active
+            || self.state == AppState::Listening
     }
 
     /// New PTT capture may start only from a clean Ready state (not while listening or processing).

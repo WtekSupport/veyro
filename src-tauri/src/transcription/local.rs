@@ -12,10 +12,23 @@ use crate::audio::segment::AudioSegment;
 use crate::text::dictionary::Dictionary;
 use crate::text::normalize::{clean_raw_transcription_with_dictionary, strip_prompt_echo};
 use crate::timed_text::TimedTextSegment;
-use crate::transcription::models::{TranscriptionOptions, TranscriptionResult, WhisperDecodingOptions};
+use crate::transcription::models::{
+    TranscriptionOptions, TranscriptionResult, WhisperDecodingOptions, WhisperProgressCallback,
+};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
 
 const RETRY_MIN_DURATION_MS: u64 = 400;
+
+fn whisper_progress_callback(progress: WhisperProgressCallback) -> impl FnMut(i32) + 'static {
+    let mut last = 0u8;
+    move |pct: i32| {
+        let pct = pct.clamp(0, 100) as u8;
+        if pct >= last.saturating_add(2) || pct >= 100 {
+            last = pct;
+            progress(pct);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum DecodeProfile {
@@ -264,6 +277,10 @@ impl SharedModel {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+
+        if let Some(progress) = options.whisper_progress.clone() {
+            params.set_progress_callback_safe(whisper_progress_callback(progress));
+        }
         params.set_entropy_thold(decoding.entropy_thold);
         params.set_logprob_thold(decoding.logprob_thold);
         params.set_temperature_inc(decoding.temperature_inc);

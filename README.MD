@@ -39,12 +39,21 @@ PTT plays short start/stop cues.
 
 ## Speech recognition
 
-Two options:
+Two providers:
 
-- **Local Whisper** — runs on your machine, works offline. Models are downloaded from the app (~140 MB up to ~3 GB). GPU acceleration speeds up recognition when available.
-- **OpenAI Cloud** — transcription via OpenAI’s API. Requires an API key and internet.
+| Provider | Notes |
+|----------|--------|
+| **On device** | Works offline. Models are downloaded from the app. GPU acceleration (Vulkan, DirectML, CUDA, CoreML) speeds up inference when available. |
+| **OpenAI Cloud** | Transcription via OpenAI’s API. Requires an API key and internet. |
+
+**Local model families** (Voice settings):
+
+- **Whisper** (whisper.cpp) — Base through Large v3 / Turbo; broad language support; Q4/Q5/Q8 quantizations.
+- **Sherpa-onnx** — **Parakeet TDT 0.6B v3** and **Qwen3-ASR** bundles (INT8 / FP16 / FP32); English-focused or multilingual depending on model.
 
 Recognition language: automatic, Russian, or English.
+
+A **transcription dictionary** (`dictionary.toml`) helps with names, jargon, and custom vocabulary.
 
 ---
 
@@ -54,7 +63,7 @@ After transcription, text can be refined further:
 
 | Mode | What it does |
 |------|----------------|
-| **Original** | Raw Whisper output |
+| **Original** | Raw STT output |
 | **Basic cleanup** | Trims filler, fixes spacing and casing |
 | **AI optimization** | AI removes disfluencies and ASR mistakes while keeping meaning |
 | **Custom skill…** | Your own processing pipeline from a `.md` skill file (formal tone, brevity, etc.) |
@@ -64,11 +73,27 @@ For AI modes you choose a provider:
 - **OpenAI** — via API (key required)
 - **Local LLM** — on-device model (downloaded from the app)
 
+Skills can be imported from disk or installed from the in-app flow; they live in your user **skills** folder.
+
 ### Extra text options
 
 - **Spoken punctuation** — say “period”, “comma”, etc. to insert punctuation
 - **Numbers as words** — e.g. `123` → “one hundred twenty-three” (locale-dependent)
 - **Enter emulation** — phrases like “new line” send Enter
+
+---
+
+## Tools
+
+Open **Tools** from the main settings window for utilities that reuse the same speech engine and text pipeline as live dictation.
+
+### Voice file processing
+
+Transcribe audio files to text — queue multiple files, read the result, and copy to the clipboard. Processing uses your current STT provider and text mode (including **AI optimization** and **custom skills** when configured).
+
+- **Input:** drag-and-drop or file picker — common formats such as WAV, MP3, OGG/Opus, FLAC, M4A, AAC, WMA.
+- **Progress:** decoding and recognition show stage labels and a percentage for long files (local Whisper reports inference progress; decode progress follows file read).
+- **Safety:** file transcription is paused while PTT dictation is active; one file runs at a time.
 
 ---
 
@@ -90,6 +115,7 @@ On macOS, keyboard injection requires **Accessibility** permission.
 - **Launch at login**
 - **Notifications** for app events
 - **Advanced audio** — preprocessing before recognition, voice-activity (VAD) tuning
+- **Tools** — voice file transcription and future utilities
 
 The **Status** tab shows an activity log and diagnostics (mic, API, models, queue).
 

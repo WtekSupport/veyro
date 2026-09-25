@@ -362,7 +362,7 @@ pub(crate) fn spawn_ptt_release(
             .try_lock()
             .ok()
             .is_some_and(|c| c.settings().suppress_ptt_toasts());
-        ctx.set_audio_callbacks_enabled(false);
+        let _audio_callbacks = ctx.pause_audio_callbacks();
 
         let flush_rx = {
             let _ptt_guard = ctx.ptt_lock.lock().ok();
@@ -401,7 +401,7 @@ pub(crate) fn spawn_ptt_release(
         if ctx.runtime.pending_count() == 0 && ctx.ptt_postprocess.has_injected_text() {
             crate::app::runtime::schedule_ptt_postprocess_finish(app.clone(), Arc::clone(&ctx));
         }
-        ctx.set_audio_callbacks_enabled(true);
+        drop(_audio_callbacks);
         crate::tray::menu::refresh_tray_menu(&app);
         crate::game_input::reset_toggle_capture();
 
