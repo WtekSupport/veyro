@@ -20,6 +20,7 @@ pub mod settings;
 pub mod text;
 pub mod timed_text;
 pub mod transcription;
+mod tools;
 mod tray;
 mod window;
 pub mod vad;
@@ -332,7 +333,7 @@ pub(crate) fn apply_ptt_active(
     if active {
         ctx.runtime.reset_cancel();
         ctx.begin_dictation_session(app);
-        ctx.set_audio_callbacks_enabled(false);
+        let _audio_callbacks = ctx.pause_audio_callbacks();
         let vad_join = {
             let mut audio = ctx
                 .audio
@@ -343,7 +344,7 @@ pub(crate) fn apply_ptt_active(
                 .map_err(error::AppError::from)?
         };
         join_vad_worker(vad_join);
-        ctx.set_audio_callbacks_enabled(true);
+        drop(_audio_callbacks);
         if let Ok(controller) = ctx.controller.try_lock() {
             if controller.settings().ai_postprocess_mode().is_some() {
                 ctx.ptt_postprocess.begin_session();
@@ -1567,6 +1568,60 @@ async fn open_about_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn open_tools_window(app: AppHandle) -> Result<(), String> {
+    if window::is_initializing(&app) {
+        let handle = app.clone();
+        window::await_on_main_thread(&app, move || {
+            window::show_init_window(&handle);
+        })
+        .await?;
+        return Ok(());
+    }
+
+    let handle = app.clone();
+    window::await_on_main_thread(&app, move || window::show_tools_window(&handle)).await?
+}
+
+#[tauri::command]
+async fn open_voice_files_tool_window(app: AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    window::await_on_main_thread(&app, move || window::show_voice_files_tool_window(&handle))
+        .await?
+}
+
+#[tauri::command]
+fn pick_voice_files() -> Result<Vec<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .add_filter(
+            "Audio",
+            &["wav", "mp3", "ogg", "flac", "m4a", "aac", "wma", "opus"],
+        )
+        .pick_files()
+        .map(|paths| {
+            paths
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+async fn transcribe_voice_file(
+    app: tauri::AppHandle,
+    path: String,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::VoiceFileTranscriptionResult, String> {
+    tools::transcribe_voice_file(app, Arc::clone(ctx.inner()), path).await
+}
+
+#[tauri::command]
+fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    crate::injection::clipboard::ClipboardGuard::set_text(&text)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_dictionary_path(
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<String, String> {
@@ -1773,6 +1828,11 @@ pub fn run() {
             get_app_info,
             get_third_party_licenses,
             open_about_window,
+            open_tools_window,
+            open_voice_files_tool_window,
+            pick_voice_files,
+            transcribe_voice_file,
+            copy_text_to_clipboard,
             get_homemaker_local_setup,
             get_homemaker_hotkey_presets,
             diagnostics::resource_stats::set_resource_stats_enabled,
@@ -1899,13 +1959,19 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if window.label() == window::TOOL_VOICE_FILES_WINDOW_LABEL
+                        || window.label() == window::TOOLS_WINDOW_LABEL
+                    {
+                        // Tool windows are ephemeral — allow the native close button to dismiss them.
+                        return;
+                    }
+
                     api.prevent_close();
                     if window.label() == window::SETTINGS_WINDOW_LABEL
                         || window.label() == window::ABOUT_WINDOW_LABEL
                     {
                         window::hide_settings_window(window);
                     } else if window.label() == window::SKILL_IMPORT_WINDOW_LABEL {
-                        api.prevent_close();
                         let app = window.app_handle();
                         deeplink::cancel_deeplink_skill_import(&app);
                     } else if window.label() == window::INIT_WINDOW_LABEL {

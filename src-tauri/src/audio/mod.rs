@@ -3,6 +3,7 @@ pub mod debug;
 pub mod denoise;
 pub mod feedback;
 pub mod preprocess;
+pub mod decode_file;
 pub mod encode;
 pub mod device;
 pub mod level;

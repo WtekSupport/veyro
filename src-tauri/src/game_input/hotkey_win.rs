@@ -251,7 +251,10 @@ fn reconcile_ptt_held_with_physical_binding() {
 }
 
 fn emit_ptt_pressed() {
-    reconcile_ptt_held_with_physical_binding();
+    // Hold mode relies on hook key-up edges only; GetAsyncKeyState glitches while the chord is held.
+    if !runtime_ptt_hold() {
+        reconcile_ptt_held_with_physical_binding();
+    }
     if PTT_HELD.load(Ordering::Acquire) {
         // Toggle keys (ScrollLock/CapsLock) can miss key-up; still deliver the press edge.
         if !runtime_ptt_hold() {
@@ -557,8 +560,6 @@ fn handle_hook_key_event(event: KeyEvent) {
     let Some((binding, _block_system)) = current_runtime_config() else {
         return;
     };
-
-    reconcile_ptt_held_with_physical_binding();
 
     let Ok(mut state) = HOOK_COMBO_STATE.lock() else {
         return;

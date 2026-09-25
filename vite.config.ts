@@ -13,6 +13,8 @@ export default defineConfig(() => ({
         overlay: path.resolve(__dirname, "overlay.html"),
         init: path.resolve(__dirname, "init.html"),
         skillImport: path.resolve(__dirname, "skill-import.html"),
+        tools: path.resolve(__dirname, "tools.html"),
+        toolVoiceFiles: path.resolve(__dirname, "tool-voice-files.html"),
       },
     },
   },

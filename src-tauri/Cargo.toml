@@ -1,6 +1,6 @@
 [package]
 name = "veyro"
-version = "1.8.79"
+version = "1.8.94"
 description = "Veyro — desktop voice dictation by MKdee Tech"
 authors = ["MKdee Tech"]
 edition = "2021"
@@ -50,7 +50,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 dirs = "6"
 cpal = "0.15"
-rodio = { version = "0.19", default-features = false, features = ["vorbis"] }
+rodio = { version = "0.19", default-features = false, features = ["wav", "vorbis", "mp3", "flac"] }
+symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav"] }
+symphonia-adapter-libopus = "0.2"
 webrtc-vad = "0.4"
 wavekat-vad = { version = "0.1.16", optional = true, default-features = false, features = ["webrtc", "silero"] }
 rubato = "0.16"
