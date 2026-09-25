@@ -1,4 +1,6 @@
 import { en, type MessageKey } from "./locales/en";
+
+export type { MessageKey };
 import { ru } from "./locales/ru";
 
 export type UiLocale = "en" | "ru";

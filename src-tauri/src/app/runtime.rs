@@ -37,11 +37,10 @@ use crate::text::normalize::{
     dedupe_ptt_session_overlap, ensure_spaces_after_punctuation, ensure_trailing_block_separator,
 };
 use crate::text::dictionary::protected_terms;
-use crate::text::{process_transcription, rewrite_processed_text};
-use crate::transcription::prompt::{build_whisper_prompt, WhisperPromptInput};
-use crate::transcription::{
-    create_transcriber, TranscriptionOptions, TranscriptionProvider, WhisperDecodingOptions,
-};
+use crate::app::transcribe_audio::transcribe_segment_with_retries;
+use crate::text::{process_transcription, rewrite_processed_text, ProcessTranscriptionFlags};
+use crate::transcription::prompt::WhisperPromptInput;
+use crate::transcription::{create_transcriber, TranscriptionProvider};
 use crate::tray;
 
 enum SegmentPayload {
@@ -625,70 +624,27 @@ async fn process_one_segment(
         .ok()
         .map(|guard| guard.clone())
         .filter(|value| !value.is_empty());
-    let prompt = build_whisper_prompt(&WhisperPromptInput {
-        settings: &settings,
-        vocabulary: &dictionary.vocabulary,
-        previous_text: previous_text.as_deref(),
-    });
-    let options = TranscriptionOptions {
-        language: settings.language.clone(),
-        prompt: prompt.clone(),
-        model: settings.transcription_model.clone(),
-        whisper_decoding: Some(WhisperDecodingOptions::default()),
-        dictionary_path: crate::settings::resolve_dictionary_file_path(&settings)
-            .ok()
-            .map(|path| path.display().to_string()),
-    };
-
     let active_transcriber = transcriber
         .read()
         .map(|guard| Arc::clone(&*guard))
         .unwrap_or_else(|poisoned| Arc::clone(&*poisoned.into_inner()));
 
-    let mut transcription = active_transcriber
-        .transcribe(segment.clone(), options.clone())
-        .await;
+    let prompt_input = WhisperPromptInput {
+        settings: &settings,
+        vocabulary: &dictionary.vocabulary,
+        previous_text: previous_text.as_deref(),
+    };
 
-    if matches!(transcription.as_ref(), Ok(result) if result.text.is_empty())
-        && captured.duration_ms >= 400
+    let transcription = match transcribe_segment_with_retries(
+        active_transcriber,
+        segment.clone(),
+        captured.clone(),
+        &settings,
+        prompt_input,
+        None,
+    )
+    .await
     {
-        let normalize_only = preprocess_segment(
-            captured.clone(),
-            PreprocessOptions {
-                enabled: true,
-                noise_reduction_enabled: false,
-                normalize_only: true,
-            },
-        );
-        if !normalize_only.skipped_as_silence {
-            warn!(
-                duration_ms = captured.duration_ms,
-                "retrying transcription with normalize-only preprocess"
-            );
-            transcription = active_transcriber
-                .transcribe(normalize_only.segment, options.clone())
-                .await;
-        }
-    }
-
-    if matches!(transcription.as_ref(), Ok(result) if result.text.is_empty())
-        && captured.duration_ms >= 400
-    {
-        warn!(
-            duration_ms = captured.duration_ms,
-            "retrying transcription on raw capture audio"
-        );
-        let permissive = TranscriptionOptions {
-            whisper_decoding: Some(WhisperDecodingOptions::permissive()),
-            prompt: None,
-            ..options
-        };
-        transcription = active_transcriber
-            .transcribe(captured.clone(), permissive)
-            .await;
-    }
-
-    let transcription = match transcription {
         Ok(result) => result,
         Err(error) => {
             let error_message = error.user_message(settings.ui_locale);
@@ -807,6 +763,7 @@ async fn process_one_segment(
             &http,
             &llm_snapshot,
             transcription.detected_language.as_deref(),
+            ProcessTranscriptionFlags::default(),
         )
         .await
         {
@@ -1206,6 +1163,7 @@ async fn try_finish_ptt_postprocess(
     let rollback_for_delete = rollback_chars;
     let rewrite_fut = rewrite_processed_text(
         &rewrite_input,
+        None,
         ai_mode,
         &settings,
         settings.ai_rewrite_skill.as_deref(),

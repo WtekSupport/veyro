@@ -220,6 +220,11 @@ impl LlmModelKind {
         matches!(self, Self::Qwen3_4B)
     }
 
+    /// Smaller local models follow a shorter Optimization prompt (fits context, clearer priorities).
+    pub fn prefer_compact_optimization_prompt(self) -> bool {
+        matches!(self, Self::TLiteIt21 | Self::Qwen3_4B)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Qwen3_4B => "qwen3_4b",
@@ -1340,6 +1345,13 @@ mod tests {
     fn gec_model_is_detected() {
         assert!(LlmModelKind::Gec08B.is_gec());
         assert!(!LlmModelKind::Qwen3_4B.is_gec());
+    }
+
+    #[test]
+    fn compact_optimization_prompt_for_small_local_models() {
+        assert!(LlmModelKind::Qwen3_4B.prefer_compact_optimization_prompt());
+        assert!(LlmModelKind::TLiteIt21.prefer_compact_optimization_prompt());
+        assert!(!LlmModelKind::Qwen25_7B.prefer_compact_optimization_prompt());
     }
 
     #[test]

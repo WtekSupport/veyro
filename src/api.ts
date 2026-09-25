@@ -304,7 +304,23 @@ export const EVENTS = {
   skillsChanged: "app://skills-changed",
   settingsChanged: "app://settings-changed",
   appStats: "app-stats",
+  voiceFileProgress: "app://voice-file-progress",
+  voiceFilesWindowReady: "app://voice-files-window-ready",
 } as const;
+
+export type VoiceFileProgressPhase =
+  | "decoding"
+  | "transcribing"
+  | "text_cleanup"
+  | "ai_rewrite"
+  | "done";
+
+export interface VoiceFileProgressPayload {
+  path: string;
+  phase: VoiceFileProgressPhase;
+  /** 0–100 within the current phase, when the backend reports it */
+  percent?: number;
+}
 
 export interface AppStats {
   cpu_percent: number;
@@ -779,6 +795,65 @@ export async function getThirdPartyLicenses(): Promise<ThirdPartyLicense[]> {
 
 export async function openAboutWindow(): Promise<void> {
   return invoke<void>("open_about_window");
+}
+
+export async function openToolsWindow(): Promise<void> {
+  return invoke<void>("open_tools_window");
+}
+
+export async function openVoiceFilesToolWindow(): Promise<void> {
+  return invoke<void>("open_voice_files_tool_window");
+}
+
+/** Opens the voice-files window; waits until the webview signals ready (or times out). */
+export async function openVoiceFilesToolWindowAndWaitReady(): Promise<void> {
+  const timeoutMs = 20_000;
+  let settled = false;
+  let finishReady: () => void = () => {};
+  const readyPromise = new Promise<void>((resolve) => {
+    finishReady = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+  });
+  const timer = window.setTimeout(finishReady, timeoutMs);
+  const unlisten = await listen(EVENTS.voiceFilesWindowReady, () => {
+    window.clearTimeout(timer);
+    finishReady();
+  });
+
+  try {
+    await openVoiceFilesToolWindow();
+    await readyPromise;
+  } finally {
+    window.clearTimeout(timer);
+    void unlisten();
+  }
+}
+
+export async function pickVoiceFiles(): Promise<string[]> {
+  return invoke<string[]>("pick_voice_files");
+}
+
+export interface VoiceFileTranscriptionResult {
+  fileName: string;
+  text: string;
+  rewriteFallback: boolean;
+  rewriteFallbackReason?: string | null;
+  aiRewriteApplied: boolean;
+  gecGrammarOnly: boolean;
+}
+
+export async function transcribeVoiceFile(
+  path: string,
+): Promise<VoiceFileTranscriptionResult> {
+  return invoke<VoiceFileTranscriptionResult>("transcribe_voice_file", { path });
+}
+
+export async function copyTextToClipboard(text: string): Promise<void> {
+  return invoke<void>("copy_text_to_clipboard", { text });
 }
 
 export async function getDictionaryPath(): Promise<string> {

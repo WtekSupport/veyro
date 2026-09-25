@@ -120,6 +120,7 @@ import {
   syncStatusDashboardLifecycle,
 } from "./components/status-dashboard";
 import { APP_VERSION_DISPLAY } from "./generated/version";
+import { bindToolsList, renderToolsPanelEmbedded } from "./components/tools-list";
 import { bindUiModeSwitch, renderUiModeLink } from "./components/ui-mode-switch";
 import { getLocale, setLocale, subscribeLocale, t } from "./i18n";
 import { skillCatalogUrl } from "./lib/skill-catalog-url";
@@ -134,6 +135,7 @@ import {
   setError,
   setSettings,
   setStatus,
+  setToolsPanelOpen,
   subscribe as subscribeUi,
   type SettingsTab,
 } from "./state";
@@ -142,6 +144,7 @@ function captureActivePanelScroll(): number {
   return (
     document.querySelector<HTMLElement>(".tab-panel.active")?.scrollTop ??
     document.querySelector<HTMLElement>(".homemaker-panel")?.scrollTop ??
+    document.querySelector<HTMLElement>(".tools-in-main-body")?.scrollTop ??
     0
   );
 }
@@ -226,6 +229,11 @@ function restoreActivePanelScroll(scrollTop: number): void {
     panel.scrollTop = scrollTop;
     return;
   }
+  const toolsBody = document.querySelector<HTMLElement>(".tools-in-main-body");
+  if (toolsBody) {
+    toolsBody.scrollTop = scrollTop;
+    return;
+  }
   const homemakerPanel = document.querySelector<HTMLElement>(".homemaker-panel");
   if (homemakerPanel) {
     homemakerPanel.scrollTop = scrollTop;
@@ -265,6 +273,7 @@ function render(): void {
     homemakerLocalSetup,
     homemakerHotkeyPresets,
     homemakerConfigLoading,
+    toolsPanelOpen,
   } = getState();
   const homemaker = isHomemakerMode(settings);
   const uiMode = settings?.ui_mode ?? "homemaker";
@@ -333,34 +342,36 @@ function render(): void {
       ${renderErrorBanner(status, lastError)}
 
       ${
-        settings && homemaker
-          ? renderHomemakerSettings(
-              settings,
-              hasApiKey,
-              homemakerLocalSetup,
-              whisperModelDownload,
-              llmModelDownload,
-              homemakerHotkeyPresets.length > 0
-                ? homemakerHotkeyPresets
-                : FALLBACK_HOMEMAKER_HOTKEY_PRESETS,
-              getState().aiSkills,
-              homemakerConfigLoading,
-              diagnostics,
-              sileroTeModel,
-              sileroVadModel,
-              sileroTeModelDownload,
-              sileroVadModelDownload,
-            )
-          : formValues
-            ? `<section class="panel">
+        toolsPanelOpen
+          ? `<section class="panel panel--tools-shell">${renderToolsPanelEmbedded()}</section>`
+          : settings && homemaker
+            ? renderHomemakerSettings(
+                settings,
+                hasApiKey,
+                homemakerLocalSetup,
+                whisperModelDownload,
+                llmModelDownload,
+                homemakerHotkeyPresets.length > 0
+                  ? homemakerHotkeyPresets
+                  : FALLBACK_HOMEMAKER_HOTKEY_PRESETS,
+                getState().aiSkills,
+                homemakerConfigLoading,
+                diagnostics,
+                sileroTeModel,
+                sileroVadModel,
+                sileroTeModelDownload,
+                sileroVadModelDownload,
+              )
+            : formValues
+              ? `<section class="panel">
               ${renderTabBar(activeTab)}
               ${renderSettingsForm(formValues, devices, activeTab, activityLog, whisperModelDownload, localSttFamilies, sttVariantInfo, aiSkills, diagnostics, llmModelDownload, llmModels, getState().transcriptionLanguages, sileroTeModel, sileroVadModel, sileroTeModelDownload, sileroVadModelDownload)}
             </section>`
-            : settings
-              ? `<section class="panel"><p class="hint">${escapeHtml(t("status.loading"))}</p></section>`
-              : !getState().loading
-                ? `<section class="panel"><p class="hint">${escapeHtml(lastError?.message ?? t("errors.bootstrap"))}</p></section>`
-                : ""
+              : settings
+                ? `<section class="panel"><p class="hint">${escapeHtml(t("status.loading"))}</p></section>`
+                : !getState().loading
+                  ? `<section class="panel"><p class="hint">${escapeHtml(lastError?.message ?? t("errors.bootstrap"))}</p></section>`
+                  : ""
       }
     </main>
   `;
@@ -849,6 +860,25 @@ function bindExpertTabListeners(): void {
   });
 }
 
+function bindToolsPanelControls(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-open-tools-panel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setToolsPanelOpen(!getState().toolsPanelOpen);
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-close-tools-panel]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setToolsPanelOpen(false);
+    });
+  });
+
+  const toolsRoot = document.querySelector("[data-tools-panel-root]");
+  if (toolsRoot) {
+    bindToolsList(toolsRoot);
+  }
+}
+
 function bindEvents(): void {
   const uiMode = getState().settings?.ui_mode ?? "homemaker";
   mountRotatingTagline(document.querySelector<HTMLElement>(".subtitle-rotator"), uiMode);
@@ -879,6 +909,8 @@ function bindEvents(): void {
         setError({ code: "about_window", message });
       });
     });
+
+  bindToolsPanelControls();
 
   document
     .querySelector<HTMLButtonElement>("[data-recover-engine]")

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy)]
@@ -28,13 +30,33 @@ impl WhisperDecodingOptions {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+pub type WhisperProgressCallback = Arc<dyn Fn(u8) + Send + Sync + 'static>;
+
+#[derive(Clone, Default)]
 pub struct TranscriptionOptions {
     pub language: Option<String>,
     pub prompt: Option<String>,
     pub model: String,
     pub whisper_decoding: Option<WhisperDecodingOptions>,
     pub dictionary_path: Option<String>,
+    /// Local Whisper only: 0–100 during `whisper_full`.
+    pub whisper_progress: Option<WhisperProgressCallback>,
+}
+
+impl std::fmt::Debug for TranscriptionOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TranscriptionOptions")
+            .field("language", &self.language)
+            .field("prompt", &self.prompt)
+            .field("model", &self.model)
+            .field("whisper_decoding", &self.whisper_decoding)
+            .field("dictionary_path", &self.dictionary_path)
+            .field(
+                "whisper_progress",
+                &self.whisper_progress.as_ref().map(|_| "<callback>"),
+            )
+            .finish()
+    }
 }
 
 use crate::timed_text::TimedTextSegment;

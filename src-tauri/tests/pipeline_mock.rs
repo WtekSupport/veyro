@@ -53,7 +53,15 @@ async fn mock_pipeline_processes_and_injects() {
         ..Default::default()
     };
     let llm = veyro_lib::llm::LlmEngine::unloaded(None);
-    let processed = process_transcription(&result.text, None, &settings, &http, &llm, None)
+    let processed = process_transcription(
+        &result.text,
+        None,
+        &settings,
+        &http,
+        &llm,
+        None,
+        Default::default(),
+    )
         .await
         .unwrap();
 

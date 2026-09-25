@@ -3,6 +3,7 @@ import {
   AudioWaveform,
   Bell,
   Bot,
+  Copy,
   Download,
   FolderOpen,
   KeyRound,
@@ -15,6 +16,7 @@ import {
   TextCursorInput,
   Trash2,
   WandSparkles,
+  Wrench,
   Zap,
   type IconNode,
 } from "lucide";
@@ -32,6 +34,10 @@ export function iconImport(): string {
   return icon(Download);
 }
 
+export function iconCopy(): string {
+  return icon(Copy);
+}
+
 export function iconPlus(): string {
   return icon(Plus);
 }
@@ -42,6 +48,10 @@ export function iconTrash(): string {
 
 export function iconSettings(): string {
   return icon(Settings);
+}
+
+export function iconTools(): string {
+  return icon(Wrench);
 }
 
 /** Audio pipeline (capture / playback). */
