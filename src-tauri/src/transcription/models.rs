@@ -41,6 +41,10 @@ pub struct TranscriptionOptions {
     pub dictionary_path: Option<String>,
     /// Local Whisper only: 0–100 during `whisper_full`.
     pub whisper_progress: Option<WhisperProgressCallback>,
+    /// OpenAI only: request segment timestamps (`verbose_json`).
+    pub request_segment_timestamps: bool,
+    /// Auto mode: language already chosen for this file/session (do not re-detect per chunk).
+    pub auto_language_hint: Option<String>,
 }
 
 impl std::fmt::Debug for TranscriptionOptions {
@@ -55,6 +59,11 @@ impl std::fmt::Debug for TranscriptionOptions {
                 "whisper_progress",
                 &self.whisper_progress.as_ref().map(|_| "<callback>"),
             )
+            .field(
+                "request_segment_timestamps",
+                &self.request_segment_timestamps,
+            )
+            .field("auto_language_hint", &self.auto_language_hint)
             .finish()
     }
 }

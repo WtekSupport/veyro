@@ -1,4 +1,7 @@
-import { openVoiceFilesToolWindowAndWaitReady } from "../api";
+import {
+  openAudioSrtToolWindowAndWaitReady,
+  openVoiceFilesToolWindowAndWaitReady,
+} from "../api";
 import { iconTools } from "./icons";
 import { t } from "../i18n";
 
@@ -10,7 +13,7 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function renderToolsCards(voiceFilesOpening: boolean): string {
+function renderToolsCards(voiceFilesOpening: boolean, audioSrtOpening: boolean): string {
   return `
     <ul class="tools-list" role="list">
       <li>
@@ -30,12 +33,32 @@ function renderToolsCards(voiceFilesOpening: boolean): string {
           <span class="tools-card-desc">${escapeHtml(t("tools.voiceFiles.description"))}</span>
         </button>
       </li>
+      <li>
+        <button
+          type="button"
+          class="tools-card${audioSrtOpening ? " tools-card--loading" : ""}"
+          data-open-audio-srt-tool
+          ${audioSrtOpening ? "disabled" : ""}
+          aria-busy="${audioSrtOpening ? "true" : "false"}"
+        >
+          ${
+            audioSrtOpening
+              ? `<span class="tools-card-loading-badge">${escapeHtml(t("tools.audioSrt.windowLoading"))}</span>`
+              : ""
+          }
+          <span class="tools-card-title">${escapeHtml(t("tools.audioSrt.title"))}</span>
+          <span class="tools-card-desc">${escapeHtml(t("tools.audioSrt.description"))}</span>
+        </button>
+      </li>
     </ul>
   `;
 }
 
 /** Embedded tools panel — same chrome as status quick settings (НАСТРОЙКИ). */
-export function renderToolsPanelEmbedded(voiceFilesOpening = false): string {
+export function renderToolsPanelEmbedded(
+  voiceFilesOpening = false,
+  audioSrtOpening = false,
+): string {
   return `
     <div class="status-quick-settings-panel tools-in-main-panel" data-tools-panel-root>
       <header class="status-quick-settings-header">
@@ -51,7 +74,7 @@ export function renderToolsPanelEmbedded(voiceFilesOpening = false): string {
         >×</button>
       </header>
       <div class="status-quick-settings-body tools-in-main-body" data-tools-cards-host>
-        ${renderToolsCards(voiceFilesOpening)}
+        ${renderToolsCards(voiceFilesOpening, audioSrtOpening)}
       </div>
     </div>
   `;
@@ -72,13 +95,26 @@ export function renderToolsBadgeButton(active: boolean): string {
 }
 
 /** @deprecated Standalone tools window — use embedded panel in main UI. */
-export function renderToolsList(voiceFilesOpening = false): string {
-  return renderToolsPanelEmbedded(voiceFilesOpening);
+export function renderToolsList(voiceFilesOpening = false, audioSrtOpening = false): string {
+  return renderToolsPanelEmbedded(voiceFilesOpening, audioSrtOpening);
 }
 
-function refreshToolsCards(host: HTMLElement, opening: boolean): void {
-  host.innerHTML = renderToolsCards(opening);
-  bindVoiceFilesOpen(host.closest("[data-tools-panel-root]") ?? host);
+function refreshToolsCards(
+  host: HTMLElement,
+  voiceFilesOpening: boolean,
+  audioSrtOpening: boolean,
+): void {
+  host.innerHTML = renderToolsCards(voiceFilesOpening, audioSrtOpening);
+  const panel = host.closest("[data-tools-panel-root]") ?? host;
+  bindVoiceFilesOpen(panel);
+  bindAudioSrtOpen(panel);
+}
+
+function readOpeningFlags(host: HTMLElement): { voice: boolean; srt: boolean } {
+  return {
+    voice: host.dataset.voiceFilesOpening === "true",
+    srt: host.dataset.audioSrtOpening === "true",
+  };
 }
 
 function bindVoiceFilesOpen(root: ParentNode): void {
@@ -106,17 +142,51 @@ async function openVoiceFilesFromCard(root: ParentNode): Promise<void> {
     return;
   }
   host.dataset.voiceFilesOpening = "true";
-  refreshToolsCards(host, true);
+  const flags = readOpeningFlags(host);
+  refreshToolsCards(host, true, flags.srt);
   try {
     await openVoiceFilesToolWindowAndWaitReady();
   } catch (error) {
     console.error("open voice files tool", error);
   } finally {
     host.dataset.voiceFilesOpening = "false";
-    refreshToolsCards(host, false);
+    const after = readOpeningFlags(host);
+    refreshToolsCards(host, false, after.srt);
+  }
+}
+
+function bindAudioSrtOpen(root: ParentNode): void {
+  root
+    .querySelector<HTMLButtonElement>("[data-open-audio-srt-tool]")
+    ?.addEventListener("click", () => {
+      void openAudioSrtFromCard(root);
+    });
+}
+
+async function openAudioSrtFromCard(root: ParentNode): Promise<void> {
+  const panel = toolsPanelFromRoot(root);
+  const host = panel.querySelector<HTMLElement>("[data-tools-cards-host]");
+  if (!host) {
+    return;
+  }
+  if (host.dataset.audioSrtOpening === "true") {
+    return;
+  }
+  host.dataset.audioSrtOpening = "true";
+  const flags = readOpeningFlags(host);
+  refreshToolsCards(host, flags.voice, true);
+  try {
+    await openAudioSrtToolWindowAndWaitReady();
+  } catch (error) {
+    console.error("open audio srt tool", error);
+  } finally {
+    host.dataset.audioSrtOpening = "false";
+    const after = readOpeningFlags(host);
+    refreshToolsCards(host, after.voice, false);
   }
 }
 
 export function bindToolsList(root: ParentNode): void {
   bindVoiceFilesOpen(root);
+  bindAudioSrtOpen(root);
 }

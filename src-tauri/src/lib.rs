@@ -18,8 +18,10 @@ pub mod llm;
 mod setup;
 pub mod settings;
 pub mod text;
+pub mod subtitles;
 pub mod timed_text;
 pub mod transcription;
+pub mod word_align;
 mod tools;
 mod tray;
 mod window;
@@ -1590,6 +1592,12 @@ async fn open_voice_files_tool_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn open_audio_srt_tool_window(app: AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    window::await_on_main_thread(&app, move || window::show_audio_srt_tool_window(&handle)).await?
+}
+
+#[tauri::command]
 fn pick_voice_files() -> Result<Vec<String>, String> {
     Ok(rfd::FileDialog::new()
         .add_filter(
@@ -1610,9 +1618,61 @@ fn pick_voice_files() -> Result<Vec<String>, String> {
 async fn transcribe_voice_file(
     app: tauri::AppHandle,
     path: String,
+    options: Option<tools::VoiceFileOptions>,
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<tools::VoiceFileTranscriptionResult, String> {
-    tools::transcribe_voice_file(app, Arc::clone(ctx.inner()), path).await
+    tools::transcribe_voice_file(
+        app,
+        Arc::clone(ctx.inner()),
+        path,
+        options.unwrap_or_default(),
+    )
+    .await
+}
+
+#[tauri::command]
+fn get_subtitle_stt_capability(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::SubtitleSttCapability, String> {
+    let settings = ctx
+        .controller
+        .lock()
+        .map_err(|_| "application controller lock poisoned".to_string())?
+        .settings()
+        .clone();
+    Ok(tools::subtitle_stt_capability(&settings))
+}
+
+#[tauri::command]
+async fn transcribe_audio_to_srt(
+    app: tauri::AppHandle,
+    path: String,
+    options: tools::AudioToSrtOptions,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::AudioToSrtResult, String> {
+    tools::transcribe_audio_to_srt(app, Arc::clone(ctx.inner()), path, options).await
+}
+
+#[tauri::command]
+fn save_subtitle_file(path: String, content: String, utf8_bom: bool) -> Result<(), String> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(&path).map_err(|error| error.to_string())?;
+    if utf8_bom {
+        file.write_all(&[0xEF, 0xBB, 0xBF])
+            .map_err(|error| error.to_string())?;
+    }
+    file.write_all(content.as_bytes())
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn pick_subtitle_save_path(default_name: String) -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter("SubRip subtitles", &["srt"])
+        .save_file()
+        .map(|path| path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -1830,8 +1890,13 @@ pub fn run() {
             open_about_window,
             open_tools_window,
             open_voice_files_tool_window,
+            open_audio_srt_tool_window,
             pick_voice_files,
             transcribe_voice_file,
+            get_subtitle_stt_capability,
+            transcribe_audio_to_srt,
+            save_subtitle_file,
+            pick_subtitle_save_path,
             copy_text_to_clipboard,
             get_homemaker_local_setup,
             get_homemaker_hotkey_presets,
@@ -1960,6 +2025,7 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     if window.label() == window::TOOL_VOICE_FILES_WINDOW_LABEL
+                        || window.label() == window::TOOL_AUDIO_SRT_WINDOW_LABEL
                         || window.label() == window::TOOLS_WINDOW_LABEL
                     {
                         // Tool windows are ephemeral — allow the native close button to dismiss them.
