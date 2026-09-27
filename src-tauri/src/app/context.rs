@@ -103,14 +103,32 @@ impl AppContext {
             .is_some_and(|c| !c.settings().abort_on_focus_loss)
     }
 
+    /// Keep injecting into the field captured at session start while work is still in flight
+    /// (recording, pipeline, deferred buffer, or phase-1 text awaiting AI), even if focus moved.
+    fn should_retain_stale_injection_target(&self) -> bool {
+        if self.focus_defer_buffer.has_pending() {
+            return true;
+        }
+        if self.runtime.pending_count() > 0 {
+            return true;
+        }
+        if self.ptt_postprocess.has_injected_text() {
+            return true;
+        }
+        self.controller
+            .try_lock()
+            .ok()
+            .is_some_and(|c| c.status().state == AppState::Listening)
+    }
+
     fn capture_injection_target_and_sync_buffer(&self) {
         let prev_target = crate::injection::focus_target::injection_target_hwnd();
         #[cfg(windows)]
         if self.defer_injection_without_abort()
             && prev_target != 0
             && !crate::injection::focus_target::focus_target_matches()
+            && self.should_retain_stale_injection_target()
         {
-            // PTT/VAD while another window is focused: keep the original field target.
             return;
         }
         crate::injection::focus_target::capture_injection_target();
@@ -192,6 +210,10 @@ impl AppContext {
                 "focus_hwnd": crate::injection::focus_target::injection_focus_hwnd(),
             }),
         );
+        if !self.should_retain_stale_injection_target() {
+            crate::injection::focus_target::clear_injection_target();
+            crate::injection::focus_watch::stop_focus_watch();
+        }
     }
 
     pub fn schedule_flush_defer_buffer(&self, app: &AppHandle) {

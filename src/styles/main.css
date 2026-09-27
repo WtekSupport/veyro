@@ -48,6 +48,7 @@
   --brass: #ffc145;
   --brass-bright: #ffd875;
   --brass-deep: #e6a820;
+  --brass-dim: #d4921a;
   --copper: #d4921a;
   --steel: #6b7280;
   --parchment: #f0f0f0;
@@ -3177,6 +3178,43 @@ body.tool-window {
   gap: 4px;
 }
 
+.audio-srt-advanced-body .audio-srt-slider-field {
+  gap: 2px;
+}
+
+.audio-srt-advanced-body .audio-srt-slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.audio-srt-advanced-body .audio-srt-slider-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-srt-advanced-body .audio-srt-slider-value {
+  font-size: 0.75rem;
+  color: var(--brass-bright);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
+.audio-srt-advanced-body .audio-srt-slider-field input[type="range"] {
+  width: 100%;
+}
+
+.audio-srt-advanced-body .audio-srt-slider-bounds {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.42);
+  margin-top: -2px;
+}
+
 .audio-srt-advanced-body .field-compact--checkbox {
   flex-direction: row;
   align-items: flex-start;
@@ -3262,6 +3300,19 @@ body.tool-window {
   font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
   font-size: 0.78rem;
   line-height: 1.45;
+}
+
+.voice-files-textarea--error {
+  color: #f0c8c8;
+  border-color: rgba(224, 112, 112, 0.45);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.voice-files-textarea--info {
+  color: var(--parchment-dim);
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .audio-srt-preview-slot {
@@ -3606,7 +3657,8 @@ body.tool-window {
 
 .voice-files-progress {
   flex-shrink: 0;
-  height: 4px;
+  width: 100%;
+  height: 6px;
   border-radius: 999px;
   background: rgba(255, 193, 69, 0.12);
   overflow: hidden;
@@ -3614,8 +3666,9 @@ body.tool-window {
 
 .voice-files-progress-fill {
   height: 100%;
+  min-width: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--brass-dim), var(--brass-bright));
+  background: linear-gradient(90deg, var(--brass-deep), var(--brass-bright));
   transition: width 0.25s ease-out;
 }
 
