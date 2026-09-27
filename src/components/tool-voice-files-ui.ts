@@ -9,6 +9,11 @@ import {
   type VoiceFileTranscriptionResult,
 } from "../api";
 import { iconCopy } from "./icons";
+import { ToolDecodeProgressSmoother } from "../lib/tool-decode-progress";
+import {
+  formatToolErrorForResultField,
+  toolErrorMessageKey,
+} from "../lib/tool-error-display";
 import { runToolWithSttLanguageRecovery } from "../lib/tool-stt-auto-recovery";
 import { t, type MessageKey } from "../i18n";
 
@@ -23,9 +28,12 @@ export interface VoiceFileJob {
   processingPercent: number | null;
   text: string;
   errorKey: string | null;
+  /** Full invoke error (may include `key|technical` suffix). */
+  errorRaw: string | null;
   rewriteFallback: boolean;
   aiRewriteApplied: boolean;
   gecGrammarOnly: boolean;
+  infoMessageKey: string | null;
 }
 
 function resultFootnote(job: VoiceFileJob | null | undefined): string {
@@ -78,14 +86,18 @@ function stageLabel(phase: VoiceFileProgressPhase | null): string {
   }
 }
 
-function statusLabel(job: VoiceFileJob): string {
+function statusLabel(job: VoiceFileJob, visiblePercent: number | null): string {
   switch (job.status) {
     case "pending":
       return t("tools.voiceFiles.status.pending");
     case "processing": {
       const stage = stageLabel(job.processingPhase);
-      if (job.processingPercent !== null && job.processingPercent >= 0) {
-        return `${stage} ${job.processingPercent}%`;
+      const percent =
+        visiblePercent !== null && job.processingPhase === "decoding"
+          ? visiblePercent
+          : job.processingPercent;
+      if (percent !== null && percent >= 0) {
+        return `${stage} ${percent}%`;
       }
       return stage;
     }
@@ -96,7 +108,11 @@ function statusLabel(job: VoiceFileJob): string {
   }
 }
 
-function renderQueueCompact(jobs: VoiceFileJob[], selectedId: string | null): string {
+function renderQueueCompact(
+  jobs: VoiceFileJob[],
+  selectedId: string | null,
+  visiblePercent: number | null,
+): string {
   if (jobs.length === 0) {
     return "";
   }
@@ -119,7 +135,7 @@ function renderQueueCompact(jobs: VoiceFileJob[], selectedId: string | null): st
                 title="${errorText || escapeHtml(job.fileName)}"
               >
                 <span class="voice-files-queue-chip-name">${escapeHtml(job.fileName)}</span>
-                <span class="voice-files-queue-chip-status">${escapeHtml(statusLabel(job))}</span>
+                <span class="voice-files-queue-chip-status">${escapeHtml(statusLabel(job, visiblePercent))}</span>
               </button>
             </li>
           `;
@@ -133,6 +149,7 @@ export function renderVoiceFilesTool(
   jobs: VoiceFileJob[],
   selectedId: string | null,
   copyHint: string | null,
+  visibleProgressPercent: number | null = null,
 ): string {
   const selected =
     jobs.find((job) => job.id === selectedId) ??
@@ -143,15 +160,37 @@ export function renderVoiceFilesTool(
     displayText = `${stageLabel(selected.processingPhase)} — ${selected.fileName}`;
   } else if (selected?.status === "pending") {
     displayText = `${t("tools.voiceFiles.status.pending")} ${selected.fileName}`;
+  } else if (
+    selected?.status === "done" &&
+    !resultText.trim() &&
+    selected.infoMessageKey
+  ) {
+    displayText = formatToolErrorForResultField(
+      selected.infoMessageKey,
+      "tools.voiceFiles.emptyResult",
+    );
   } else if (selected?.status === "done" && !resultText.trim()) {
-    displayText = t("tools.voiceFiles.emptyResult");
+    displayText = formatToolErrorForResultField(
+      "tools.voiceFiles.emptyResult",
+      "tools.voiceFiles.emptyResult",
+    );
+  } else if (selected?.status === "error" && selected.errorRaw) {
+    displayText = formatToolErrorForResultField(
+      selected.errorRaw,
+      "tools.voiceFiles.failed",
+    );
+  } else if (selected?.status === "error") {
+    displayText = formatToolErrorForResultField(
+      selected.errorKey ?? "tools.voiceFiles.failed",
+      "tools.voiceFiles.failed",
+    );
   }
   const processing = jobs.some((job) => job.status === "processing");
   const progressPercent =
-    selected?.status === "processing" && selected.processingPercent !== null
-      ? selected.processingPercent
+    selected?.status === "processing"
+      ? (visibleProgressPercent ?? selected.processingPercent)
       : null;
-  const canCopy = Boolean(resultText.trim());
+  const canCopy = Boolean(displayText.trim()) && selected?.status !== "pending";
   const copyTitle = copyHint ?? t("tools.voiceFiles.copy");
   const footnote = resultFootnote(selected);
   const footnoteClass = selected?.rewriteFallback
@@ -171,7 +210,7 @@ export function renderVoiceFilesTool(
         <button type="button" class="btn btn-secondary btn-compact" data-pick-voice-files ${processing ? "disabled" : ""}>
           ${escapeHtml(t("tools.voiceFiles.pickFiles"))}
         </button>
-        ${renderQueueCompact(jobs, selectedId)}
+        ${renderQueueCompact(jobs, selectedId, visibleProgressPercent)}
       </div>
 
       ${
@@ -202,7 +241,7 @@ export function renderVoiceFilesTool(
             title="${escapeHtml(copyTitle)}"
           >${iconCopy()}</button>
           <textarea
-            class="voice-files-textarea"
+            class="voice-files-textarea${selected?.status === "error" ? " voice-files-textarea--error" : selected?.status === "done" && !resultText.trim() ? " voice-files-textarea--info" : ""}"
             readonly
             data-voice-result-text
             aria-label="${escapeHtml(t("tools.voiceFiles.resultTitle"))}"
@@ -230,6 +269,7 @@ export function createVoiceFilesController(root: HTMLElement): {
   let copyHint: string | null = null;
   let queueRunning = false;
   let progressUnlisten: UnlistenFn | null = null;
+  const decodeProgress = new ToolDecodeProgressSmoother();
 
   const onProgress = (payload: VoiceFileProgressPayload): void => {
     jobs = jobs.map((job) => {
@@ -244,7 +284,7 @@ export function createVoiceFilesController(root: HTMLElement): {
             ? Math.min(100, Math.max(0, Math.round(payload.percent)))
             : null;
       } else if (phaseChanged) {
-        processingPercent = null;
+        processingPercent = 0;
       }
       return {
         ...job,
@@ -252,13 +292,29 @@ export function createVoiceFilesController(root: HTMLElement): {
         processingPercent,
       };
     });
+    const active = jobs.find(
+      (job) => job.status === "processing" && pathsMatch(job.path, payload.path),
+    );
+    decodeProgress.sync(
+      active?.processingPhase ?? null,
+      active?.processingPercent ?? null,
+    );
     paint();
   };
 
   const paint = (): void => {
-    root.innerHTML = renderVoiceFilesTool(jobs, selectedId, copyHint);
+    const selected =
+      jobs.find((job) => job.id === selectedId) ??
+      (jobs.length > 0 ? jobs[jobs.length - 1] : undefined);
+    const visible = decodeProgress.displayPercent(
+      selected?.processingPhase ?? null,
+      selected?.processingPercent ?? null,
+    );
+    root.innerHTML = renderVoiceFilesTool(jobs, selectedId, copyHint, visible);
     bind();
   };
+
+  decodeProgress.bindRepaint(paint);
 
   const bind = (): void => {
     root.querySelector<HTMLButtonElement>("[data-pick-voice-files]")?.addEventListener("click", () => {
@@ -313,18 +369,26 @@ export function createVoiceFilesController(root: HTMLElement): {
   };
 
   const copyResult = async (): Promise<void> => {
+    const textarea = root.querySelector<HTMLTextAreaElement>("[data-voice-result-text]");
+    const fromDom = textarea?.value.trim() ?? "";
     const selected =
       jobs.find((job) => job.id === selectedId) ??
       (jobs.length > 0 ? jobs[jobs.length - 1] : undefined);
-    if (!selected?.text.trim()) {
+    const payload =
+      fromDom ||
+      (selected?.status === "done" ? selected.text.trim() : "") ||
+      (selected?.status === "error" && selected.errorRaw
+        ? formatToolErrorForResultField(selected.errorRaw, "tools.voiceFiles.failed")
+        : "");
+    if (!payload) {
       return;
     }
     try {
-      await copyTextToClipboard(selected.text);
+      await copyTextToClipboard(payload);
       copyHint = t("tools.voiceFiles.copied");
     } catch {
       try {
-        await navigator.clipboard.writeText(selected.text);
+        await navigator.clipboard.writeText(payload);
         copyHint = t("tools.voiceFiles.copied");
       } catch {
         copyHint = t("tools.voiceFiles.copyFailed");
@@ -353,9 +417,11 @@ export function createVoiceFilesController(root: HTMLElement): {
         processingPercent: null,
         text: "",
         errorKey: null,
+        errorRaw: null,
         rewriteFallback: false,
         aiRewriteApplied: false,
         gecGrammarOnly: false,
+        infoMessageKey: null,
       });
       if (!selectedId) {
         selectedId = id;
@@ -378,19 +444,24 @@ export function createVoiceFilesController(root: HTMLElement): {
             processingPhase: null,
             processingPercent: null,
             fileName: result.fileName || job.fileName,
+            infoMessageKey: result.infoMessageKey ?? null,
           }
         : job,
     );
     selectedId = id;
   };
 
-  const applyError = (id: string, errorKey: string): void => {
+  const applyError = (id: string, errorRaw: string): void => {
+    const errorKey = toolErrorMessageKey(errorRaw, "tools.voiceFiles.failed");
     jobs = jobs.map((job) =>
       job.id === id
         ? {
             ...job,
             status: "error",
             errorKey,
+            errorRaw,
+            processingPhase: null,
+            processingPercent: null,
           }
         : job,
     );
@@ -420,6 +491,7 @@ export function createVoiceFilesController(root: HTMLElement): {
         );
         selectedId = next.id;
         copyHint = null;
+        decodeProgress.reset();
         paint();
 
         try {
@@ -429,8 +501,7 @@ export function createVoiceFilesController(root: HTMLElement): {
           applyResult(next.id, result);
         } catch (error) {
           const raw = error instanceof Error ? error.message : String(error);
-          const key = raw.startsWith("tools.") ? raw : "tools.voiceFiles.failed";
-          applyError(next.id, key);
+          applyError(next.id, raw.trim() || "tools.voiceFiles.failed");
         }
         paint();
       }
@@ -452,6 +523,7 @@ export function createVoiceFilesController(root: HTMLElement): {
     dispose: (): void => {
       void progressUnlisten?.();
       progressUnlisten = null;
+      decodeProgress.dispose();
     },
   };
 }

@@ -527,6 +527,7 @@ export const ru: Record<MessageKey, string> = {
   "tools.stt.selectLanguage.languageLabel": "Язык",
   "tools.stt.selectLanguage.confirm": "Распознать",
   "tools.stt.selectLanguage.noLanguages": "Список языков недоступен",
+  "tools.error.technicalDetail": "Технические подробности",
   "tools.voiceFiles.windowLoading": "Загрузка",
   "tools.voiceFiles.title": "Обработка голосовых файлов",
   "tools.voiceFiles.description": "Распознавание аудио в текст — просмотр и копирование.",
@@ -538,6 +539,14 @@ export const ru: Record<MessageKey, string> = {
   "tools.voiceFiles.copied": "Скопировано в буфер обмена",
   "tools.voiceFiles.copyFailed": "Не удалось скопировать в буфер",
   "tools.voiceFiles.emptyResult": "В файле не обнаружена речь.",
+  "tools.voiceFiles.emptyResult.detail":
+    "Распознавание не дало пригодного текста речи. Возможны тишина, слишком тихая запись или тип аудio, не подходящий для STT.",
+  "tools.voiceFiles.musicOnly": "Музыкальная композиция (речи для расшифровки нет)",
+  "tools.voiceFiles.musicOnly.detail":
+    "Модель определила в записи музыку или другой неречевой контент (песня, инструментал и т.п.). Whisper часто выдаёт английскую метку «Music» — это не текст песни. Для инструмента нужна запись разговорной речи; распознавание текста песен здесь не поддерживается.",
+  "tools.voiceFiles.silenceOnly": "Нет пригодного речевого сигнала",
+  "tools.voiceFiles.silenceOnly.detail":
+    "После декодирования уровень сигнала слишком низкий или дорожка фактически без звука. Проверьте громкость, настройки нормализации или выберите другой файл.",
   "tools.voiceFiles.rewriteFallback": "ИИ-переписывание недоступно — применена базовая очистка.",
   "tools.voiceFiles.status.pending": "Ожидание",
   "tools.voiceFiles.status.processing": "Обработка…",
@@ -557,6 +566,22 @@ export const ru: Record<MessageKey, string> = {
   "tools.voiceFiles.emptyAudio": "В файле нет пригодного аудио.",
   "tools.voiceFiles.invalidPath": "Некорректный путь к файлу.",
   "tools.voiceFiles.failed": "Не удалось распознать файл.",
+  "tools.voiceFiles.pttBusy.detail":
+    "Инструменты используют тот же движок, что и диктовка. Завершите или отмените текущую запись PTT, затем запустите файл снова.",
+  "tools.voiceFiles.busy.detail":
+    "Одновременно обрабатывается только один файл. Дождитесь завершения текущей задачи.",
+  "tools.voiceFiles.readFailed.detail":
+    "Файл не удалось открыть или преобразовать в аудио для распознавания. Частые причины: повреждённый файл, неподдерживаемый кодек, DRM или отсутствие аудiodорожки.",
+  "tools.voiceFiles.unsupportedFormat.detail":
+    "Контейнер или кодек не поддерживается встроенным декодером. Экспортируйте в WAV или MP3 либо используйте обычную речевую запись.",
+  "tools.voiceFiles.emptyAudio.detail":
+    "После декодирования нет аудiosamples (тишина, пустая дорожка или сбой чтения). Проверьте файл в проигрывателе.",
+  "tools.voiceFiles.invalidPath.detail":
+    "Путь пустой или без имени файла. Добавьте файл с диска заново, а не через битую ссылку.",
+  "tools.voiceFiles.failed.detail":
+    "Распознавание или обработка текста прервались до результата. Смотрите технические подробности ниже, если они есть.",
+  "tools.stt.selectLanguage.detail":
+    "При языке «Авто» движок не смог надёжно определить речь. Выберите язык записи и повторите; выбор сохранится в настройках «Захват».",
 
   "tools.audioSrt.windowLoading": "Загрузка",
   "tools.audioSrt.title": "Аудио → субтитры (SRT)",
@@ -631,6 +656,20 @@ export const ru: Record<MessageKey, string> = {
   "tools.audioSrt.emptyAudio": "В файле нет пригодного аудио.",
   "tools.audioSrt.invalidPath": "Некорректный путь к файлу.",
   "tools.audioSrt.failed": "Не удалось сгенерировать субтитры.",
+  "tools.audioSrt.unsupportedProvider.detail":
+    "Для SRT нужны таймкоды сегментов от STT. Модели Sherpa без таймингов или неверный провайдер не могут собрать субтитры. Переключитесь на Local Whisper или OpenAI Cloud в настройках «Захват».",
+  "tools.audioSrt.noTimestamps.detail":
+    "Распознавание вернуло текст без сегментов с таймкодами — границы субтитров построить нельзя. Попробуйте другую модель, фиксированный язык вместо «Авто» или более чистую запись.",
+  "tools.audioSrt.readFailed.detail":
+    "Файл не удалось открыть или декодировать в PCM. Смотрите технические подробности с сообщением декодера.",
+  "tools.audioSrt.unsupportedFormat.detail":
+    "Формат не поддерживается декодером. Пересохраните в WAV или MP3 и повторите.",
+  "tools.audioSrt.emptyAudio.detail":
+    "После декодирования нет пригодного аудio (пустая или silent-дорожка).",
+  "tools.audioSrt.invalidPath.detail":
+    "Некорректный путь к файлу. Выберите файл на диске снова.",
+  "tools.audioSrt.failed.detail":
+    "Цепочка субтитров прервалась до записи SRT. Проверьте технические подробности и настройки распознавания.",
 
   "about.open": "О программе Veyro",
   "about.version": "Версия {version}",

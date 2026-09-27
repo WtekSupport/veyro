@@ -15,6 +15,11 @@ import {
 } from "../api";
 import { createAudioSrtPreview, mountAudioSrtPreview } from "./audio-srt-preview";
 import { iconCopy } from "./icons";
+import { ToolDecodeProgressSmoother } from "../lib/tool-decode-progress";
+import {
+  formatToolErrorForResultField,
+  toolErrorMessageKey,
+} from "../lib/tool-error-display";
 import { runToolWithSttLanguageRecovery } from "../lib/tool-stt-auto-recovery";
 import { t, type MessageKey } from "../i18n";
 
@@ -29,6 +34,7 @@ export interface AudioSrtJob {
   processingPercent: number | null;
   srt: string;
   errorKey: string | null;
+  errorRaw: string | null;
   rewriteFallback: boolean;
   aiRewriteApplied: boolean;
 }
@@ -99,14 +105,18 @@ function stageLabel(phase: AudioSrtProgressPhase | null): string {
   }
 }
 
-function statusLabel(job: AudioSrtJob): string {
+function statusLabel(job: AudioSrtJob, visiblePercent: number | null): string {
   switch (job.status) {
     case "pending":
       return t("tools.audioSrt.status.pending");
     case "processing": {
       const stage = stageLabel(job.processingPhase);
-      if (job.processingPercent !== null && job.processingPercent >= 0) {
-        return `${stage} ${job.processingPercent}%`;
+      const percent =
+        visiblePercent !== null && job.processingPhase === "decoding"
+          ? visiblePercent
+          : job.processingPercent;
+      if (percent !== null && percent >= 0) {
+        return `${stage} ${percent}%`;
       }
       return stage;
     }
@@ -132,7 +142,11 @@ function resultFootnote(job: AudioSrtJob | null | undefined): string {
   return "";
 }
 
-function renderQueueCompact(jobs: AudioSrtJob[], selectedId: string | null): string {
+function renderQueueCompact(
+  jobs: AudioSrtJob[],
+  selectedId: string | null,
+  visiblePercent: number | null,
+): string {
   if (jobs.length === 0) {
     return "";
   }
@@ -155,7 +169,7 @@ function renderQueueCompact(jobs: AudioSrtJob[], selectedId: string | null): str
                 title="${errorText || escapeHtml(job.fileName)}"
               >
                 <span class="voice-files-queue-chip-name">${escapeHtml(job.fileName)}</span>
-                <span class="voice-files-queue-chip-status">${escapeHtml(statusLabel(job))}</span>
+                <span class="voice-files-queue-chip-status">${escapeHtml(statusLabel(job, visiblePercent))}</span>
               </button>
             </li>
           `;
@@ -184,15 +198,107 @@ function renderFieldTitle(labelKey: MessageKey, hintKey: MessageKey): string {
   return `<span class="field-compact-title">${escapeHtml(t(labelKey))}${renderFieldHelp(hintKey)}</span>`;
 }
 
+/** Matches clamps in `src-tauri/src/tools/audio_to_srt.rs`. */
+const SRT_ADVANCED_LIMITS = {
+  pauseSplitMs: { min: 100, max: 2000, step: 50 },
+  readingTailMs: { min: 0, max: 1000, step: 50 },
+  maxCueDurationMs: { min: 1000, max: 10_000, step: 500 },
+  minCueDurationMs: { min: 500, max: 5000, step: 250 },
+  maxLineLength: { min: 20, max: 60, step: 1 },
+  globalOffsetMs: { min: -3000, max: 3000, step: 50 },
+} as const;
+
+type SrtSliderFormat = "ms" | "sec-dec" | "sec-int" | "chars" | "offset";
+
+function clampSrtSliderValue(
+  key: keyof typeof SRT_ADVANCED_LIMITS,
+  value: number,
+): number {
+  const { min, max, step } = SRT_ADVANCED_LIMITS[key];
+  const snapped = Math.round((value - min) / step) * step + min;
+  return Math.min(max, Math.max(min, snapped));
+}
+
+function formatSrtSliderDisplay(value: number, format: SrtSliderFormat): string {
+  const rounded = Math.round(value);
+  switch (format) {
+    case "ms":
+      return `${rounded} ms`;
+    case "sec-dec":
+      return `${(rounded / 1000).toFixed(1)} s`;
+    case "sec-int":
+      return `${Math.round(rounded / 1000)} s`;
+    case "chars":
+      return String(rounded);
+    case "offset":
+      return rounded > 0 ? `+${rounded} ms` : `${rounded} ms`;
+  }
+}
+
+function renderAdvancedSlider(
+  sliderId: string,
+  labelKey: MessageKey,
+  hintKey: MessageKey,
+  dataOptAttr: string,
+  value: number,
+  limits: { min: number; max: number; step: number },
+  format: SrtSliderFormat,
+): string {
+  const snapped = Math.min(limits.max, Math.max(limits.min, value));
+  const display = formatSrtSliderDisplay(snapped, format);
+  const minLabel = formatSrtSliderDisplay(limits.min, format);
+  const maxLabel = formatSrtSliderDisplay(limits.max, format);
+  return `
+    <label class="field-compact audio-srt-slider-field">
+      <div class="audio-srt-slider-header">
+        <span class="audio-srt-slider-title">${renderFieldTitle(labelKey, hintKey)}</span>
+        <span class="audio-srt-slider-value" data-srt-slider-value-for="${escapeHtml(sliderId)}">${escapeHtml(display)}</span>
+      </div>
+      <input
+        type="range"
+        ${dataOptAttr}
+        data-srt-slider-id="${escapeHtml(sliderId)}"
+        data-srt-slider-format="${format}"
+        min="${limits.min}"
+        max="${limits.max}"
+        step="${limits.step}"
+        value="${snapped}"
+      />
+      <div class="audio-srt-slider-bounds" aria-hidden="true">
+        <span>${escapeHtml(minLabel)}</span>
+        <span>${escapeHtml(maxLabel)}</span>
+      </div>
+    </label>
+  `;
+}
+
+function syncSrtSliderLabels(root: HTMLElement): void {
+  root.querySelectorAll<HTMLInputElement>("input[data-srt-slider-format]").forEach((input) => {
+    const id = input.dataset.srtSliderId;
+    if (!id) {
+      return;
+    }
+    const span = root.querySelector<HTMLElement>(`[data-srt-slider-value-for="${id}"]`);
+    const format = input.dataset.srtSliderFormat as SrtSliderFormat | undefined;
+    if (!span || !format) {
+      return;
+    }
+    span.textContent = formatSrtSliderDisplay(Number(input.value), format);
+  });
+}
+
 function renderAdvancedOptions(options: AudioSrtUiOptions): string {
   const pauseSplitField = options.smartSplit
     ? ""
-    : `
-        <label class="field-compact">
-          ${renderFieldTitle("tools.audioSrt.pauseSplitMs", "tools.audioSrt.hint.pauseSplitMs")}
-          <input type="number" min="100" max="2000" step="50" data-opt-pause-split value="${options.pauseSplitMs}" />
-        </label>
-      `;
+    : renderAdvancedSlider(
+        "pauseSplit",
+        "tools.audioSrt.pauseSplitMs",
+        "tools.audioSrt.hint.pauseSplitMs",
+        "data-opt-pause-split",
+        options.pauseSplitMs,
+        SRT_ADVANCED_LIMITS.pauseSplitMs,
+        "ms",
+      );
 
   return `
     <details class="audio-srt-advanced"${options.advancedOpen ? " open" : ""} data-audio-srt-advanced>
@@ -203,22 +309,42 @@ function renderAdvancedOptions(options: AudioSrtUiOptions): string {
           ${renderFieldTitle("tools.audioSrt.smartSplit", "tools.audioSrt.hint.smartSplit")}
         </label>
         ${pauseSplitField}
-        <label class="field-compact">
-          ${renderFieldTitle("tools.audioSrt.readingTailMs", "tools.audioSrt.hint.readingTailMs")}
-          <input type="number" min="0" max="1000" step="50" data-opt-reading-tail value="${options.readingTailMs}" />
-        </label>
-        <label class="field-compact">
-          ${renderFieldTitle("tools.audioSrt.maxCueDurationSec", "tools.audioSrt.hint.maxCueDurationSec")}
-          <input type="number" min="1" max="10" step="1" data-opt-max-cue-sec value="${Math.round(options.maxCueDurationMs / 1000)}" />
-        </label>
-        <label class="field-compact">
-          ${renderFieldTitle("tools.audioSrt.minCueDurationSec", "tools.audioSrt.hint.minCueDurationSec")}
-          <input type="number" min="0.5" max="5" step="0.5" data-opt-min-cue-sec value="${options.minCueDurationMs / 1000}" />
-        </label>
-        <label class="field-compact">
-          ${renderFieldTitle("tools.audioSrt.maxLineLength", "tools.audioSrt.hint.maxLineLength")}
-          <input type="number" min="20" max="60" data-opt-max-line value="${options.maxLineLength}" />
-        </label>
+        ${renderAdvancedSlider(
+          "readingTail",
+          "tools.audioSrt.readingTailMs",
+          "tools.audioSrt.hint.readingTailMs",
+          "data-opt-reading-tail",
+          options.readingTailMs,
+          SRT_ADVANCED_LIMITS.readingTailMs,
+          "ms",
+        )}
+        ${renderAdvancedSlider(
+          "maxCueDuration",
+          "tools.audioSrt.maxCueDurationSec",
+          "tools.audioSrt.hint.maxCueDurationSec",
+          "data-opt-max-cue-sec",
+          options.maxCueDurationMs,
+          SRT_ADVANCED_LIMITS.maxCueDurationMs,
+          "sec-int",
+        )}
+        ${renderAdvancedSlider(
+          "minCueDuration",
+          "tools.audioSrt.minCueDurationSec",
+          "tools.audioSrt.hint.minCueDurationSec",
+          "data-opt-min-cue-sec",
+          options.minCueDurationMs,
+          SRT_ADVANCED_LIMITS.minCueDurationMs,
+          "sec-dec",
+        )}
+        ${renderAdvancedSlider(
+          "maxLineLength",
+          "tools.audioSrt.maxLineLength",
+          "tools.audioSrt.hint.maxLineLength",
+          "data-opt-max-line",
+          options.maxLineLength,
+          SRT_ADVANCED_LIMITS.maxLineLength,
+          "chars",
+        )}
         <label class="field-compact">
           ${renderFieldTitle("tools.audioSrt.maxLines", "tools.audioSrt.hint.maxLines")}
           <select data-opt-max-lines>
@@ -226,10 +352,15 @@ function renderAdvancedOptions(options: AudioSrtUiOptions): string {
             <option value="2"${options.maxLinesPerCue === 2 ? " selected" : ""}>2</option>
           </select>
         </label>
-        <label class="field-compact">
-          ${renderFieldTitle("tools.audioSrt.globalOffsetMs", "tools.audioSrt.hint.globalOffsetMs")}
-          <input type="number" data-opt-offset value="${options.globalOffsetMs}" />
-        </label>
+        ${renderAdvancedSlider(
+          "globalOffset",
+          "tools.audioSrt.globalOffsetMs",
+          "tools.audioSrt.hint.globalOffsetMs",
+          "data-opt-offset",
+          options.globalOffsetMs,
+          SRT_ADVANCED_LIMITS.globalOffsetMs,
+          "offset",
+        )}
         <label class="field-compact field-compact--checkbox">
           <input type="checkbox" data-opt-bom ${options.utf8Bom ? "checked" : ""} />
           ${renderFieldTitle("tools.audioSrt.utf8Bom", "tools.audioSrt.hint.utf8Bom")}
@@ -253,6 +384,7 @@ export function renderAudioSrtTool(
   saveHint: string | null,
   capability: SubtitleSttCapability,
   uiOptions: AudioSrtUiOptions,
+  visibleProgressPercent: number | null = null,
 ): string {
   const selected =
     jobs.find((job) => job.id === selectedId) ??
@@ -265,13 +397,24 @@ export function renderAudioSrtTool(
     displayText = `${t("tools.audioSrt.status.pending")} ${selected.fileName}`;
   } else if (selected?.status === "done" && !resultText.trim()) {
     displayText = t("tools.audioSrt.emptyResult");
+  } else if (selected?.status === "error" && selected.errorRaw) {
+    displayText = formatToolErrorForResultField(
+      selected.errorRaw,
+      "tools.audioSrt.failed",
+    );
+  } else if (selected?.status === "error") {
+    displayText = formatToolErrorForResultField(
+      selected.errorKey ?? "tools.audioSrt.failed",
+      "tools.audioSrt.failed",
+    );
   }
   const processing = jobs.some((job) => job.status === "processing");
   const progressPercent =
-    selected?.status === "processing" && selected.processingPercent !== null
-      ? selected.processingPercent
+    selected?.status === "processing"
+      ? (visibleProgressPercent ?? selected.processingPercent)
       : null;
   const canExport = Boolean(resultText.trim());
+  const canCopy = Boolean(displayText.trim()) && selected?.status !== "pending";
   const showPreview = selected?.status === "done" && Boolean(selected.path);
   const copyTitle = copyHint ?? t("tools.audioSrt.copy");
   const saveAsTitle = saveHint ?? t("tools.audioSrt.saveAs");
@@ -299,7 +442,7 @@ export function renderAudioSrtTool(
         <button type="button" class="btn btn-secondary btn-compact" data-pick-audio-srt ${processing || providerBlocked ? "disabled" : ""}>
           ${escapeHtml(t("tools.audioSrt.pickFiles"))}
         </button>
-        ${renderQueueCompact(jobs, selectedId)}
+        ${renderQueueCompact(jobs, selectedId, visibleProgressPercent)}
       </div>
 
       ${renderAdvancedOptions(uiOptions)}
@@ -335,12 +478,12 @@ export function renderAudioSrtTool(
             type="button"
             class="voice-files-copy-overlay icon-btn"
             data-copy-srt-result
-            ${canExport ? "" : "disabled"}
+            ${canCopy ? "" : "disabled"}
             aria-label="${escapeHtml(copyTitle)}"
             title="${escapeHtml(copyTitle)}"
           >${iconCopy()}</button>
           <textarea
-            class="voice-files-textarea audio-srt-textarea"
+            class="voice-files-textarea audio-srt-textarea${selected?.status === "error" ? " voice-files-textarea--error" : ""}"
             data-srt-result-text
             aria-label="${escapeHtml(t("tools.audioSrt.resultTitle"))}"
           >${escapeHtml(displayText)}</textarea>
@@ -386,6 +529,7 @@ export function createAudioSrtController(root: HTMLElement): {
   let capability: SubtitleSttCapability = "supported";
   let uiOptions: AudioSrtUiOptions = { ...DEFAULT_UI_OPTIONS };
   const preview = createAudioSrtPreview();
+  const decodeProgress = new ToolDecodeProgressSmoother();
 
   const syncPreview = (): void => {
     const slot = root.querySelector<HTMLElement>("[data-audio-srt-preview-slot]");
@@ -427,13 +571,19 @@ export function createAudioSrtController(root: HTMLElement): {
     const minCueSec = root.querySelector<HTMLInputElement>("[data-opt-min-cue-sec]");
     const advanced = root.querySelector<HTMLDetailsElement>("[data-audio-srt-advanced]");
     if (maxLine) {
-      uiOptions.maxLineLength = Math.min(60, Math.max(20, Number(maxLine.value) || 42));
+      uiOptions.maxLineLength = clampSrtSliderValue(
+        "maxLineLength",
+        Number(maxLine.value) || 42,
+      );
     }
     if (maxLines) {
       uiOptions.maxLinesPerCue = maxLines.value === "1" ? 1 : 2;
     }
     if (offset) {
-      uiOptions.globalOffsetMs = Number(offset.value) || 0;
+      uiOptions.globalOffsetMs = clampSrtSliderValue(
+        "globalOffsetMs",
+        Number(offset.value) || 0,
+      );
     }
     if (bom) {
       uiOptions.utf8Bom = bom.checked;
@@ -445,18 +595,28 @@ export function createAudioSrtController(root: HTMLElement): {
       uiOptions.smartSplit = smartSplit.checked;
     }
     if (pauseSplit) {
-      uiOptions.pauseSplitMs = Math.min(2000, Math.max(100, Number(pauseSplit.value) || 400));
+      uiOptions.pauseSplitMs = clampSrtSliderValue(
+        "pauseSplitMs",
+        Number(pauseSplit.value) || 400,
+      );
     }
     if (readingTail) {
-      uiOptions.readingTailMs = Math.min(1000, Math.max(0, Number(readingTail.value) || 200));
+      uiOptions.readingTailMs = clampSrtSliderValue(
+        "readingTailMs",
+        Number(readingTail.value) || 200,
+      );
     }
     if (maxCueSec) {
-      uiOptions.maxCueDurationMs =
-        Math.min(10_000, Math.max(1000, Math.round(Number(maxCueSec.value) || 7) * 1000));
+      uiOptions.maxCueDurationMs = clampSrtSliderValue(
+        "maxCueDurationMs",
+        Number(maxCueSec.value) || 7000,
+      );
     }
     if (minCueSec) {
-      uiOptions.minCueDurationMs =
-        Math.min(5000, Math.max(500, Math.round((Number(minCueSec.value) || 1) * 1000)));
+      uiOptions.minCueDurationMs = clampSrtSliderValue(
+        "minCueDurationMs",
+        Number(minCueSec.value) || 1000,
+      );
     }
     if (advanced) {
       uiOptions.advancedOpen = advanced.open;
@@ -487,7 +647,7 @@ export function createAudioSrtController(root: HTMLElement): {
             ? Math.min(100, Math.max(0, Math.round(payload.percent)))
             : null;
       } else if (phaseChanged) {
-        processingPercent = null;
+        processingPercent = 0;
       }
       return {
         ...job,
@@ -495,10 +655,24 @@ export function createAudioSrtController(root: HTMLElement): {
         processingPercent,
       };
     });
+    const active = jobs.find(
+      (job) => job.status === "processing" && pathsMatch(job.path, payload.path),
+    );
+    decodeProgress.sync(
+      active?.processingPhase ?? null,
+      active?.processingPercent ?? null,
+    );
     paint();
   };
 
   const paint = (): void => {
+    const selected =
+      jobs.find((job) => job.id === selectedId) ??
+      (jobs.length > 0 ? jobs[jobs.length - 1] : undefined);
+    const visible = decodeProgress.displayPercent(
+      selected?.processingPhase ?? null,
+      selected?.processingPercent ?? null,
+    );
     root.innerHTML = renderAudioSrtTool(
       jobs,
       selectedId,
@@ -506,10 +680,13 @@ export function createAudioSrtController(root: HTMLElement): {
       saveHint,
       capability,
       uiOptions,
+      visible,
     );
     bind();
     syncPreview();
   };
+
+  decodeProgress.bindRepaint(paint);
 
   const bind = (): void => {
     root.querySelector<HTMLButtonElement>("[data-pick-audio-srt]")?.addEventListener("click", () => {
@@ -542,13 +719,18 @@ export function createAudioSrtController(root: HTMLElement): {
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
       "[data-opt-max-line], [data-opt-max-lines], [data-opt-offset], [data-opt-bom], [data-opt-dictation], [data-opt-smart-split], [data-opt-pause-split], [data-opt-reading-tail], [data-opt-max-cue-sec], [data-opt-min-cue-sec]",
     ).forEach((element) => {
-      element.addEventListener("change", () => {
+      const onUpdate = (): void => {
         const smartBefore = uiOptions.smartSplit;
         readUiOptionsFromDom();
+        syncSrtSliderLabels(root);
         if (element.matches("[data-opt-smart-split]") && smartBefore !== uiOptions.smartSplit) {
           paint();
         }
-      });
+      };
+      element.addEventListener("change", onUpdate);
+      if (element instanceof HTMLInputElement && element.type === "range") {
+        element.addEventListener("input", onUpdate);
+      }
     });
 
     root.querySelector<HTMLElement>(".audio-srt-advanced-body")?.addEventListener("click", (event) => {
@@ -625,16 +807,24 @@ export function createAudioSrtController(root: HTMLElement): {
 
   const copyResult = async (): Promise<void> => {
     syncEditedSrtFromTextarea();
+    const textarea = root.querySelector<HTMLTextAreaElement>("[data-srt-result-text]");
+    const fromDom = textarea?.value.trim() ?? "";
     const selected = selectedJob();
-    if (!selected?.srt.trim()) {
+    const payload =
+      fromDom ||
+      (selected?.status === "done" ? selected.srt.trim() : "") ||
+      (selected?.status === "error" && selected.errorRaw
+        ? formatToolErrorForResultField(selected.errorRaw, "tools.audioSrt.failed")
+        : "");
+    if (!payload) {
       return;
     }
     try {
-      await copyTextToClipboard(selected.srt);
+      await copyTextToClipboard(payload);
       copyHint = t("tools.audioSrt.copied");
     } catch {
       try {
-        await navigator.clipboard.writeText(selected.srt);
+        await navigator.clipboard.writeText(payload);
         copyHint = t("tools.audioSrt.copied");
       } catch {
         copyHint = t("tools.audioSrt.copyFailed");
@@ -696,6 +886,7 @@ export function createAudioSrtController(root: HTMLElement): {
         processingPercent: null,
         srt: "",
         errorKey: null,
+        errorRaw: null,
         rewriteFallback: false,
         aiRewriteApplied: false,
       });
@@ -725,13 +916,17 @@ export function createAudioSrtController(root: HTMLElement): {
     selectedId = id;
   };
 
-  const applyError = (id: string, errorKey: string): void => {
+  const applyError = (id: string, errorRaw: string): void => {
+    const errorKey = toolErrorMessageKey(errorRaw, "tools.audioSrt.failed");
     jobs = jobs.map((job) =>
       job.id === id
         ? {
             ...job,
             status: "error",
             errorKey,
+            errorRaw,
+            processingPhase: null,
+            processingPercent: null,
           }
         : job,
     );
@@ -762,6 +957,7 @@ export function createAudioSrtController(root: HTMLElement): {
         selectedId = next.id;
         copyHint = null;
         saveHint = null;
+        decodeProgress.reset();
         paint();
 
         try {
@@ -771,8 +967,7 @@ export function createAudioSrtController(root: HTMLElement): {
           applyResult(next.id, result);
         } catch (error) {
           const raw = error instanceof Error ? error.message : String(error);
-          const key = raw.startsWith("tools.") ? raw : "tools.audioSrt.failed";
-          applyError(next.id, key);
+          applyError(next.id, raw.trim() || "tools.audioSrt.failed");
         }
         paint();
       }
@@ -795,6 +990,7 @@ export function createAudioSrtController(root: HTMLElement): {
       preview.destroy();
       void progressUnlisten?.();
       progressUnlisten = null;
+      decodeProgress.dispose();
     },
   };
 }
