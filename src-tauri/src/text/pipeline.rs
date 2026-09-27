@@ -501,6 +501,7 @@ mod tests {
         let defer = settings.ai_postprocess_mode().is_some()
             && !ProcessTranscriptionFlags {
                 force_ai_rewrite: true,
+                session_stt_language: None,
             }
             .force_ai_rewrite;
         assert!(!defer);
