@@ -220,71 +220,38 @@ mod tests {
     }
 
     #[test]
-    fn fixes_whisper_mishearing_for_brand_names() {
+    fn fixes_whisper_mishearing_for_product_names() {
         let corrections = sort_corrections(pairs(&[
-            ("AcmeSuite", "AcmeSuite"),
-            ("Example Project", "Example Project"),
-            ("ExampleProduct", "ExampleProduct"),
+            ("acme suite", "AcmeSuite"),
+            ("project atlas", "Project Atlas"),
         ]));
         assert_eq!(
-            apply_corrections("Клебос. Протокол инициации: Сайклозер.", &corrections),
-            "AcmeSuite. Example Project: ExampleProduct."
-        );
-    }
-
-    #[test]
-    fn fixes_llm_invented_russian_words() {
-        let corrections = sort_corrections(pairs(&[
-            ("AcmeSuite", "AcmeSuite"),
-            ("Example Project", "Example Project"),
-            ("ExampleProduct", "ExampleProduct"),
-            ("ExampleProduct", "ExampleProduct"),
-        ]));
-        assert_eq!(
-            apply_corrections("Клитус, Паркакулы, Свирфин, Санк Лозер.", &corrections),
-            "AcmeSuite, Example Project, ExampleProduct, ExampleProduct."
-        );
-    }
-
-    #[test]
-    fn fixes_amnestic_protocol_and_clip_boz() {
-        let corrections = sort_corrections(pairs(&[
-            ("ExampleProduct", "ExampleProduct"),
-            ("Example Project", "Example Project"),
-            ("AcmeSuite", "AcmeSuite"),
-        ]));
-        assert_eq!(
-            apply_corrections(
-                "ПExampleProduct, Example Project клип БОЗ.",
-                &corrections
-            ),
-            "ExampleProduct, Example Project AcmeSuite."
+            apply_corrections("Open acme suite for Project atlas.", &corrections),
+            "Open AcmeSuite for Project Atlas."
         );
     }
 
     #[test]
     fn matches_comma_separated_whisper_output() {
         let corrections = sort_corrections(pairs(&[
-            ("AcmeSuite", "AcmeSuite"),
-            ("протокол донансэйшн", "Example Project"),
-            ("ExampleProduct", "ExampleProduct"),
+            ("acme sweet", "AcmeSuite"),
+            ("project, atlas", "Project Atlas"),
         ]));
         assert_eq!(
-            apply_corrections("Псайк, лоузер, AcmeSuite, протокол донансэйшн.", &corrections),
-            "ExampleProduct, AcmeSuite, Example Project."
+            apply_corrections("Try acme, sweet and project, atlas today.", &corrections),
+            "Try AcmeSuite and Project Atlas today."
         );
     }
 
     #[test]
     fn matches_hyphenated_whisper_output() {
         let corrections = sort_corrections(pairs(&[
-            ("AcmeSuite", "AcmeSuite"),
-            ("Example Project", "Example Project"),
-            ("ExampleProduct", "ExampleProduct"),
+            ("acme-suite", "AcmeSuite"),
+            ("project-atlas", "Project Atlas"),
         ]));
         assert_eq!(
-            apply_corrections("Лип-босс. Протокол и сессия. Псайк-лозер.", &corrections),
-            "AcmeSuite. Example Project. ExampleProduct."
+            apply_corrections("Use acme-suite with project-atlas.", &corrections),
+            "Use AcmeSuite with Project Atlas."
         );
     }
 

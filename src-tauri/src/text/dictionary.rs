@@ -249,10 +249,10 @@ mod tests {
     fn parses_example_dictionary() {
         let example = include_str!("../../../docs/dictionary/dictionary.example.toml");
         let dictionary = parse_dictionary(example);
-        assert!(dictionary.vocabulary.iter().any(|term| term == "послать"));
+        assert!(dictionary.vocabulary.iter().any(|term| term == "AcmeSuite"));
         assert!(dictionary
             .corrections
             .iter()
-            .any(|(from, _)| from == "с лать"));
+            .any(|(from, _)| from == "chat gpt"));
     }
 }

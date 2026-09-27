@@ -46,7 +46,7 @@ pub const OPTIMIZATION_SYSTEM_PROMPT: &str = r#"Ты — литературны�
 
 3. Бренды и защищённые термины
 Имена продуктов, сервисов и технологий пиши в канонической латинской форме:
-MetaMask, не «метамаск»; AcmeSuite, не «AcmeSuite».
+MetaMask, не «метамаск»; AcmeSuite, не «экме сьюит».
 Термины из списка ЗАЩИЩЁННЫХ — дословно, латиницей, даже если STT дал кириллицу.
 Незнакомые имена и бренды не подменяй похожими русскими словами.
 
@@ -268,7 +268,7 @@ mod tests {
     fn optimization_prompt_includes_protected_terms() {
         let prompt = optimization_system_prompt(
             false,
-            &["AcmeSuite".to_string(), "ExampleProduct".to_string()],
+            &["AcmeSuite".to_string(), "Project Atlas".to_string()],
         );
         assert!(prompt.contains("AcmeSuite"));
         assert!(prompt.contains("не «исправляй»"));

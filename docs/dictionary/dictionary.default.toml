@@ -10,15 +10,14 @@
 # ── vocabulary ──────────────────────────────────────────────────────────────
 # Terms passed to Whisper as an initial-prompt hint (biasing).
 #
-# Keep this list SHORT. A long mixed RU/EN list often hurts recognition.
+# Keep this list SHORT. A long mixed-language list often hurts recognition.
 # Prefer Latin spellings for product and brand names you dictate often.
 #
 # Example:
 #   vocabulary = [
 #     "Veyro",
 #     "AcmeSuite",
-#     "Example Project",
-#     "ExampleProduct",
+#     "Project Atlas",
 #   ]
 #
 # ── [corrections] ───────────────────────────────────────────────────────────
@@ -27,36 +26,16 @@
 # Keys: what Whisper (or the AI rewrite step) often outputs — phonetic /
 #       misheard fragments. Values: the text you want. Empty value = remove.
 #
-# Matching ignores hyphens and treats commas like spaces, so
-# "ExampleProduct" can match key "ExampleProduct".
+# Matching ignores hyphens and treats commas like spaces, so multi-word keys
+# can match variants with different punctuation.
 #
 # Example:
 #   [corrections]
-#   "AcmeSuite" = "AcmeSuite"
-#   "Example Project" = "Example Project"
-#   "ExampleProduct" = "ExampleProduct"
+#   "acme suite" = "AcmeSuite"
+#   "project atlas" = "Project Atlas"
 #   "thanks for watching" = ""
 #
 # See dictionary.example.toml in this repo for a larger starter set.
-#
-# Physics / energy dictation (local Whisper turbo) — examples only; uncomment or copy
-# into your live dictionary.toml as needed:
-#
-#   vocabulary = [
-#     "термоядерный",
-#     "дейтерий",
-#     "тритий",
-#     "антипротон",
-#     "KPD",
-#     "KПД",
-#   ]
-#
-#   [corrections]
-#   "литерий" = "лития"
-#   "деитерио" = "дейтериево"
-#   "дейтерио" = "дейтериево"
-#   "взрывалюта" = "взрывают"
-#   "антифизи" = "антиматерии"
 #
 # ── [whisper] (optional, advanced) ──────────────────────────────────────────
 # Decoding overrides for local Whisper. Uncomment only if you know you need them.
