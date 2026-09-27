@@ -81,3 +81,13 @@ For automatic updates, each release must include:
 | **`latest.json`** | Updater manifest — name the file exactly `latest.json` so `…/releases/latest/download/latest.json` works |
 
 Tag the release as `v<semver>` (e.g. `v1.7.67`) so download URLs in `latest.json` match the uploaded setup exe.
+
+## Source code links on GitHub
+
+GitHub always lists **Source code (zip)** and **Source code (tar.gz)** on every release; they cannot be removed. This repo uses `.gitattributes` (`export-ignore`) so those archives contain only `SOURCE-ARCHIVE.txt` (installers stay in release Assets).
+
+After retagging or if an old tag predates `.gitattributes`, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/refresh-release-source-archives.ps1
+```
