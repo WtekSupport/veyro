@@ -9,11 +9,16 @@ use crate::audio::segment::AudioSegment;
 use crate::settings::AppSettings;
 use crate::transcription::prompt::{build_whisper_prompt, WhisperPromptInput};
 use crate::transcription::{
-    TranscriptionError, TranscriptionOptions, TranscriptionProvider, TranscriptionResult,
-    WhisperDecodingOptions,
+    whisper_transcription_language, TranscriptionError, TranscriptionOptions,
+    TranscriptionProvider, TranscriptionResult, WhisperDecodingOptions,
 };
 
 const RETRY_MIN_DURATION_MS: u64 = 400;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TranscribeSegmentFlags {
+    pub request_segment_timestamps: bool,
+}
 
 pub async fn transcribe_segment_with_retries(
     transcriber: Arc<dyn TranscriptionProvider>,
@@ -22,10 +27,13 @@ pub async fn transcribe_segment_with_retries(
     settings: &AppSettings,
     prompt_input: WhisperPromptInput<'_>,
     whisper_progress: Option<WhisperProgressCallback>,
+    flags: TranscribeSegmentFlags,
+    auto_language_hint: Option<String>,
 ) -> Result<TranscriptionResult, TranscriptionError> {
     let prompt = build_whisper_prompt(&prompt_input);
     let options = TranscriptionOptions {
-        language: settings.language.clone(),
+        language: whisper_transcription_language(settings),
+        auto_language_hint,
         prompt: prompt.clone(),
         model: settings.transcription_model.clone(),
         whisper_decoding: Some(WhisperDecodingOptions::default()),
@@ -33,6 +41,7 @@ pub async fn transcribe_segment_with_retries(
             .ok()
             .map(|path| path.display().to_string()),
         whisper_progress: whisper_progress.clone(),
+        request_segment_timestamps: flags.request_segment_timestamps,
     };
 
     let mut transcription = transcriber
@@ -72,6 +81,7 @@ pub async fn transcribe_segment_with_retries(
             whisper_decoding: Some(WhisperDecodingOptions::permissive()),
             prompt: None,
             whisper_progress: whisper_progress.clone(),
+            request_segment_timestamps: flags.request_segment_timestamps,
             ..options
         };
         transcription = transcriber

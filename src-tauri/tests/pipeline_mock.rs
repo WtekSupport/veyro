@@ -43,6 +43,8 @@ async fn mock_pipeline_processes_and_injects() {
                 model: "whisper-1".to_string(),
                 whisper_decoding: None,
                 dictionary_path: None,
+                whisper_progress: None,
+                request_segment_timestamps: false,
             },
         )
         .await

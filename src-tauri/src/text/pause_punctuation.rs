@@ -1,9 +1,9 @@
 use crate::timed_text::TimedTextSegment;
 
 /// Gap between Whisper segments above this → sentence boundary (`.`).
-const SENTENCE_GAP_MS: u64 = 900;
+pub const SENTENCE_GAP_MS: u64 = 900;
 /// Gap above this → clause boundary (`,`).
-const COMMA_GAP_MS: u64 = 450;
+pub const COMMA_GAP_MS: u64 = 450;
 
 const QUESTION_TAIL_WORDS: &[&str] = &["ли", "разве", "неужели", "нет"];
 
@@ -15,6 +15,7 @@ pub fn apply_pause_punctuation(segments: &[TimedTextSegment]) -> String {
             text: segment.text.trim().to_string(),
             start_ms: segment.start_ms,
             end_ms: segment.end_ms,
+            words: segment.words.clone(),
         })
         .filter(|segment| !segment.text.is_empty())
         .collect();
@@ -87,6 +88,7 @@ mod tests {
             text: text.to_string(),
             start_ms: start,
             end_ms: end,
+            words: Vec::new(),
         }
     }
 

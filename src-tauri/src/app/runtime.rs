@@ -39,7 +39,7 @@ use crate::text::normalize::{
 use crate::text::dictionary::protected_terms;
 use crate::app::transcribe_audio::transcribe_segment_with_retries;
 use crate::text::{process_transcription, rewrite_processed_text, ProcessTranscriptionFlags};
-use crate::transcription::prompt::WhisperPromptInput;
+use crate::transcription::prompt::{previous_text_for_whisper_prompt, WhisperPromptInput};
 use crate::transcription::{create_transcriber, TranscriptionProvider};
 use crate::tray;
 
@@ -107,6 +107,7 @@ impl PipelineRuntime {
         let worker_log = activity_log.clone();
         let worker_dictation_activity = dictation_activity_ms.clone();
         let worker_context = Arc::new(Mutex::new(String::new()));
+        let worker_context_session = Arc::new(Mutex::new(0_u64));
         let worker_dictation_session = dictation_session.clone();
 
         tauri::async_runtime::spawn(async move {
@@ -127,6 +128,7 @@ impl PipelineRuntime {
                     worker_log.clone(),
                     worker_dictation_activity.clone(),
                     worker_context.clone(),
+                    worker_context_session.clone(),
                     worker_llm_engine.clone(),
                     worker_dictation_session.clone(),
                 )
@@ -476,6 +478,7 @@ async fn process_one_segment(
     activity_log: Arc<ActivityLog>,
     dictation_activity_ms: Arc<AtomicU64>,
     last_whisper_context: Arc<Mutex<String>>,
+    last_whisper_context_session: Arc<Mutex<u64>>,
     llm_engine: Arc<RwLock<LlmEngine>>,
     dictation_session: Arc<DictationSession>,
 ) {
@@ -592,6 +595,15 @@ async fn process_one_segment(
         return;
     }
 
+    if let Ok(mut last_session) = last_whisper_context_session.lock() {
+        if *last_session != session_id {
+            *last_session = session_id;
+            if let Ok(mut guard) = last_whisper_context.lock() {
+                guard.clear();
+            }
+        }
+    }
+
     let mut captured = segment.clone();
     let preprocessed = preprocess_segment(
         captured.clone(),
@@ -619,11 +631,20 @@ async fn process_one_segment(
 
     let dictionary = crate::text::dictionary::load_dictionary_for_settings(&settings)
         .unwrap_or_default();
+    let session_stt_language = dictation_session.locked_stt_language();
     let previous_text = last_whisper_context
         .lock()
         .ok()
         .map(|guard| guard.clone())
         .filter(|value| !value.is_empty());
+    let previous_text = previous_text_for_whisper_prompt(
+        crate::transcription::whisper_prompt_sticky_language(
+            &settings,
+            session_stt_language.as_deref(),
+        ),
+        previous_text.as_deref(),
+    )
+    .map(str::to_string);
     let active_transcriber = transcriber
         .read()
         .map(|guard| Arc::clone(&*guard))
@@ -641,6 +662,8 @@ async fn process_one_segment(
         captured.clone(),
         &settings,
         prompt_input,
+        None,
+        crate::app::transcribe_audio::TranscribeSegmentFlags::default(),
         None,
     )
     .await
@@ -705,6 +728,13 @@ async fn process_one_segment(
         return;
     }
 
+    dictation_session.note_stt_language_from_segment(
+        settings.language.as_deref(),
+        transcription.detected_language.as_deref(),
+        !transcription.text.trim().is_empty(),
+    );
+    let session_stt_language = dictation_session.locked_stt_language();
+
     emit_transcription_completed(
         &app,
         TranscriptionCompletedPayload {
@@ -763,7 +793,10 @@ async fn process_one_segment(
             &http,
             &llm_snapshot,
             transcription.detected_language.as_deref(),
-            ProcessTranscriptionFlags::default(),
+            ProcessTranscriptionFlags {
+                session_stt_language: session_stt_language.clone(),
+                ..ProcessTranscriptionFlags::default()
+            },
         )
         .await
         {

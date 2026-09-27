@@ -1,6 +1,6 @@
 [package]
 name = "veyro"
-version = "1.8.94"
+version = "1.9.2"
 description = "Veyro — desktop voice dictation by MKdee Tech"
 authors = ["MKdee Tech"]
 edition = "2021"
@@ -32,7 +32,7 @@ tauri-build = { version = "2", features = [] }
 serde_json = "1"
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"

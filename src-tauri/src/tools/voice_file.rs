@@ -1,22 +1,30 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::app::context::AppContext;
 use crate::app::events::{emit_voice_file_progress, VoiceFileProgressPayload, VoiceFileProgressPhase};
-use crate::app::transcribe_audio::transcribe_segment_with_retries;
-use crate::audio::decode_file::{decode_audio_file_with_progress, DecodeProgressCallback};
+use crate::app::transcribe_audio::{transcribe_segment_with_retries, TranscribeSegmentFlags};
 use crate::transcription::models::WhisperProgressCallback;
-use crate::audio::preprocess::{preprocess_segment, PreprocessOptions};
 use crate::error::AppError;
 use crate::llm::LlmEngine;
 use crate::settings::AppSettings;
 use crate::text::pipeline::{process_transcription, ProcessTranscriptionFlags};
 use crate::transcription::prompt::WhisperPromptInput;
+
+use super::shared::{
+    decode_and_preprocess_for_tools, stt_failed_in_auto_mode, throttled_percent_callback,
+    ToolsTranscriptionGuard, STT_SELECT_LANGUAGE_ERROR, validate_tool_file_path,
+};
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceFileOptions {
+    #[serde(default)]
+    pub stt_language_override: Option<String>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,42 +36,6 @@ pub struct VoiceFileTranscriptionResult {
     pub ai_rewrite_applied: bool,
     /// GEC local model in Optimization mode — grammar pass only, not full literary rewrite.
     pub gec_grammar_only: bool,
-}
-
-struct ToolsTranscriptionGuard<'a> {
-    ctx: &'a AppContext,
-    active: bool,
-}
-
-impl<'a> ToolsTranscriptionGuard<'a> {
-    fn try_begin(ctx: &'a AppContext) -> Result<Self, String> {
-        let mut controller = ctx
-            .controller
-            .lock()
-            .map_err(|_| "application controller lock poisoned".to_string())?;
-        if controller.blocks_tools_transcription() {
-            return Err("tools.voiceFiles.pttBusy".to_string());
-        }
-        if controller.is_tools_transcription_busy() {
-            return Err("tools.voiceFiles.busy".to_string());
-        }
-        controller.set_tools_transcription_busy(true);
-        Ok(Self {
-            ctx,
-            active: true,
-        })
-    }
-}
-
-impl Drop for ToolsTranscriptionGuard<'_> {
-    fn drop(&mut self) {
-        if !self.active {
-            return;
-        }
-        if let Ok(mut controller) = self.ctx.controller.lock() {
-            controller.set_tools_transcription_busy(false);
-        }
-    }
 }
 
 fn emit_phase(app: &AppHandle, path: &str, phase: VoiceFileProgressPhase) {
@@ -91,66 +63,52 @@ fn throttled_phase_progress(
     path: String,
     phase: VoiceFileProgressPhase,
 ) -> Arc<dyn Fn(u8) + Send + Sync + 'static> {
-    let last = Arc::new(AtomicU8::new(0));
-    Arc::new(move |percent: u8| {
-        let prev = last.load(Ordering::Relaxed);
-        if percent < prev.saturating_add(2) && percent < 100 {
-            return;
-        }
-        last.store(percent, Ordering::Relaxed);
+    throttled_percent_callback(Arc::new(move |percent: u8| {
         emit_progress(&app, &path, phase, Some(percent));
-    })
+    }))
 }
 
 pub async fn transcribe_voice_file(
     app: AppHandle,
     ctx: Arc<AppContext>,
     path: String,
+    options: VoiceFileOptions,
 ) -> Result<VoiceFileTranscriptionResult, String> {
     let _guard = ToolsTranscriptionGuard::try_begin(&ctx)?;
 
-    let path_key = path.trim().to_string();
-    if path_key.is_empty() {
-        return Err("tools.voiceFiles.invalidPath".to_string());
-    }
+    let (path_key, path_buf, file_name) = validate_tool_file_path(&path)?;
 
-    let path = PathBuf::from(&path_key);
-
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("")
-        .to_string();
-    if file_name.is_empty() {
-        return Err("tools.voiceFiles.invalidPath".to_string());
-    }
-
-    let settings = ctx
+    let base_settings = ctx
         .controller
         .lock()
         .map_err(|_| "application controller lock poisoned".to_string())?
         .settings()
         .clone();
+    let mut settings = base_settings.clone();
+    if let Some(language) = options
+        .stt_language_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        settings.language = Some(language.to_string());
+    }
+    let stt_auto_mode =
+        stt_failed_in_auto_mode(&base_settings, options.stt_language_override.as_deref());
 
     let ai_mode = settings.effective_text_processing_mode();
 
     emit_phase(&app, &path_key, VoiceFileProgressPhase::Decoding);
-    let decode_progress: DecodeProgressCallback =
+    let decode_progress: WhisperProgressCallback =
         throttled_phase_progress(app.clone(), path_key.clone(), VoiceFileProgressPhase::Decoding);
-    let segment = decode_audio_file_with_progress(&path, Some(decode_progress))
-        .map_err(map_decode_error)?;
+    let prepared = decode_and_preprocess_for_tools(
+        &path_buf,
+        &settings,
+        Some(decode_progress),
+        "tools.voiceFiles",
+    )?;
 
-    let captured = segment.clone();
-    let preprocessed = preprocess_segment(
-        captured.clone(),
-        PreprocessOptions {
-            enabled: settings.audio_preprocess_enabled,
-            noise_reduction_enabled: settings.audio_preprocess_enabled
-                && settings.audio_noise_reduction_enabled,
-            normalize_only: false,
-        },
-    );
-    if preprocessed.skipped_as_silence {
+    if prepared.skipped_as_silence {
         emit_phase(&app, &path_key, VoiceFileProgressPhase::Done);
         return Ok(VoiceFileTranscriptionResult {
             file_name,
@@ -161,7 +119,8 @@ pub async fn transcribe_voice_file(
             gec_grammar_only: false,
         });
     }
-    let segment = preprocessed.segment;
+    let segment = prepared.segment;
+    let captured = prepared.captured;
 
     let dictionary = crate::text::dictionary::load_dictionary_for_settings(&settings)
         .unwrap_or_default();
@@ -185,9 +144,15 @@ pub async fn transcribe_voice_file(
         &settings,
         prompt_input,
         Some(transcribe_progress),
+        TranscribeSegmentFlags::default(),
+        None,
     )
     .await
     .map_err(|error| error.user_message(settings.ui_locale))?;
+
+    if transcription.text.trim().is_empty() && stt_auto_mode {
+        return Err(STT_SELECT_LANGUAGE_ERROR.to_string());
+    }
 
     emit_phase(&app, &path_key, VoiceFileProgressPhase::TextCleanup);
     let processed = process_voice_file_text(
@@ -258,19 +223,9 @@ async fn process_voice_file_text(
         whisper_detected_language,
         ProcessTranscriptionFlags {
             force_ai_rewrite: true,
+            ..Default::default()
         },
     )
     .await
     .map_err(|error| error.to_string())
-}
-
-fn map_decode_error(error: String) -> String {
-    if error == "empty_audio" {
-        return "tools.voiceFiles.emptyAudio".to_string();
-    }
-    if error.contains("unsupported codec") || error.contains("unsupported feature") {
-        return "tools.voiceFiles.unsupportedFormat".to_string();
-    }
-    warn!("voice file decode failed: {error}");
-    return "tools.voiceFiles.readFailed".to_string();
 }

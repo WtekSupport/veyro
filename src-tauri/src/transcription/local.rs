@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, get_lang_str};
 
 use crate::audio::preprocess::audio_peak_rms;
@@ -15,6 +15,7 @@ use crate::timed_text::TimedTextSegment;
 use crate::transcription::models::{
     TranscriptionOptions, TranscriptionResult, WhisperDecodingOptions, WhisperProgressCallback,
 };
+use crate::transcription::whisper_auto_lang::rank_spoken_language_candidates;
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
 
 const RETRY_MIN_DURATION_MS: u64 = 400;
@@ -124,6 +125,34 @@ impl SharedModel {
         let decoding = merge_decoding_options(options.whisper_decoding, dictionary);
         let beam_size = self.config.beam_size;
         let (peak, rms) = audio_peak_rms(audio);
+        let auto_mode = options.language.is_none();
+        let mut language_candidates: Vec<(String, f32)> = Vec::new();
+        let decode_language = options
+            .language
+            .clone()
+            .or_else(|| options.auto_language_hint.clone())
+            .or_else(|| {
+                if !auto_mode {
+                    return None;
+                }
+                match rank_spoken_language_candidates(context, audio) {
+                    Ok(ranked) => {
+                        language_candidates = ranked;
+                        if let Some((code, prob)) = language_candidates.first() {
+                            info!(
+                                language = code.as_str(),
+                                prob,
+                                "whisper auto language selected from mel detect"
+                            );
+                        }
+                        language_candidates.first().map(|(code, _)| code.clone())
+                    }
+                    Err(error) => {
+                        warn!("whisper auto language detect failed: {error}");
+                        None
+                    }
+                }
+            });
         let meta = |segments: i32, detected: &Option<String>, timed: Vec<TimedTextSegment>| {
             TranscriptionResult {
                 text: String::new(),
@@ -148,9 +177,9 @@ impl SharedModel {
             beam_size,
             DecodeProfile::Normal,
             true,
-            None,
+            decode_language.as_deref(),
         )?;
-        let whisper_detected = detected_language;
+        let whisper_detected = detected_language.or(decode_language.clone());
         let text = finalize_local_text(&text, dictionary, options.prompt.as_deref());
 
         if !text.is_empty() {
@@ -187,10 +216,7 @@ impl SharedModel {
                 "local transcription empty; retrying with permissive decode"
             );
             let permissive = WhisperDecodingOptions::permissive();
-            let language = options
-                .language
-                .clone()
-                .or(whisper_detected.clone());
+            // Fixed language: keep it on retry. Auto: never pin to a wrong guess from an empty first pass.
             let (retry_text, retry_raw, retry_segments, retry_detected, retry_timed) = self.decode_audio(
                 context,
                 audio,
@@ -199,7 +225,7 @@ impl SharedModel {
                 beam_size,
                 DecodeProfile::Permissive,
                 false,
-                language.as_deref(),
+                decode_language.as_deref().or(options.language.as_deref()),
             )?;
             let whisper_detected = retry_detected.or(whisper_detected);
             let retry_text = finalize_local_text(&retry_text, dictionary, None);
@@ -224,6 +250,46 @@ impl SharedModel {
                     audio_rms: Some(rms),
                     detected_language: whisper_detected.clone(),
                 });
+            }
+            if auto_mode && decode_language.is_some() {
+                for (alt_lang, alt_prob) in language_candidates.iter().skip(1).take(2) {
+                    if alt_prob < &0.05 {
+                        continue;
+                    }
+                    warn!(
+                        language = alt_lang.as_str(),
+                        prob = alt_prob,
+                        "local transcription empty; retrying auto with alternate language"
+                    );
+                    let (alt_text, _, alt_segments, alt_detected, alt_timed) = self.decode_audio(
+                        context,
+                        audio,
+                        options,
+                        &permissive,
+                        beam_size,
+                        DecodeProfile::Permissive,
+                        false,
+                        Some(alt_lang.as_str()),
+                    )?;
+                    let alt_text = finalize_local_text(&alt_text, dictionary, None);
+                    if !alt_text.is_empty() {
+                        let whisper_detected =
+                            Some(alt_lang.clone()).or(alt_detected).or(whisper_detected);
+                        return Ok(TranscriptionResult {
+                            text: alt_text,
+                            confidence: None,
+                            whisper_segments: Some(alt_segments),
+                            timed_segments: if alt_timed.is_empty() {
+                                None
+                            } else {
+                                Some(alt_timed)
+                            },
+                            audio_peak: Some(peak),
+                            audio_rms: Some(rms),
+                            detected_language: whisper_detected,
+                        });
+                    }
+                }
             }
             warn!(
                 duration_ms = audio.duration_ms,
@@ -265,9 +331,16 @@ impl SharedModel {
 
         let mut params = FullParams::new(sampling_strategy(beam_size));
         match language_override.or(options.language.as_deref()) {
-            Some(language) => params.set_language(Some(language)),
-            None => params.set_detect_language(true),
+            Some(language) => {
+                params.set_language(Some(language));
+            }
+            None => {
+                params.set_language(None);
+                params.set_detect_language(true);
+            }
         }
+        // Transcribe only — never translate to English (Whisper translate task).
+        params.set_translate(false);
         if use_initial_prompt {
             if let Some(prompt) = options.prompt.as_deref() {
                 params.set_initial_prompt(prompt);
@@ -292,7 +365,10 @@ impl SharedModel {
             }
             DecodeProfile::Permissive => {
                 params.set_no_speech_thold(0.99);
-                params.set_single_segment(true);
+                // single_segment on long clips often yields zero segments (see tool / long PTT).
+                if audio.duration_ms <= 15_000 {
+                    params.set_single_segment(true);
+                }
                 params.set_suppress_blank(false);
             }
         }
@@ -333,6 +409,7 @@ impl SharedModel {
                 text: trimmed.to_string(),
                 start_ms,
                 end_ms,
+                words: Vec::new(),
             });
             raw_segments.push(trimmed.to_string());
             text.push_str(trimmed);

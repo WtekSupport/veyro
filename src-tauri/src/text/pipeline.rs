@@ -33,10 +33,12 @@ pub enum TextProcessingError {
     Failed(String),
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ProcessTranscriptionFlags {
     /// Voice-file tool: run the selected text mode in one pass (do not stop at PTT phase-1 Basic).
     pub force_ai_rewrite: bool,
+    /// Last Whisper detection in auto mode (post-process hint when a segment omits `detected_language`).
+    pub session_stt_language: Option<String>,
 }
 
 pub async fn process_transcription(
@@ -51,12 +53,14 @@ pub async fn process_transcription(
     let defer_ai_to_ptt_finish =
         settings.ai_postprocess_mode().is_some() && !flags.force_ai_rewrite;
 
+    let session_lang = flags.session_stt_language.clone();
     if defer_ai_to_ptt_finish {
         return process_transcription_immediate(
             raw,
             timed_segments,
             settings,
             whisper_detected_language,
+            session_lang,
         )
         .await;
     }
@@ -66,6 +70,7 @@ pub async fn process_transcription(
         timed_segments,
         settings,
         whisper_detected_language,
+        session_lang,
     )
     .await?;
 
@@ -99,10 +104,12 @@ pub fn process_transcription_immediate_sync(
     timed_segments: Option<&[TimedTextSegment]>,
     settings: &AppSettings,
     whisper_detected_language: Option<&str>,
+    session_stt_language: Option<&str>,
 ) -> Result<ProcessedText, TextProcessingError> {
     let dictionary = crate::text::dictionary::load_dictionary_for_settings(settings)
         .unwrap_or_default();
-    let postprocess_lang = settings.postprocess_language(whisper_detected_language);
+    let postprocess_lang =
+        settings.postprocess_language(whisper_detected_language, session_stt_language);
 
     let stripped = clean_raw_transcription(raw);
     let source_text = if should_apply_silero_te(settings) {
@@ -168,10 +175,12 @@ pub async fn process_transcription_immediate(
     timed_segments: Option<&[TimedTextSegment]>,
     settings: &AppSettings,
     whisper_detected_language: Option<&str>,
+    session_stt_language: Option<String>,
 ) -> Result<ProcessedText, TextProcessingError> {
     let raw = raw.to_string();
     let settings = settings.clone();
     let whisper_lang = whisper_detected_language.map(str::to_string);
+    let session_lang = session_stt_language;
     let timed_owned: Option<Vec<TimedTextSegment>> =
         timed_segments.map(|segments| segments.to_vec());
 
@@ -182,6 +191,7 @@ pub async fn process_transcription_immediate(
                 timed_owned.as_deref(),
                 &settings,
                 whisper_lang.as_deref(),
+                session_lang.as_deref(),
             )
         })) {
             Ok(result) => result,
@@ -280,6 +290,7 @@ mod tests {
             text: text.to_string(),
             start_ms: start,
             end_ms: end,
+            words: Vec::new(),
         }
     }
 
