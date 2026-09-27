@@ -625,6 +625,48 @@ const KNOWN_DIMATORZOK_ONLY: &[&str] = &[
     "dimatorzokov",
 ];
 
+/// Whisper/Sherpa often label non-speech audio (music, applause) with short English tags.
+pub fn is_music_or_media_label_only(text: &str) -> bool {
+    let normalized = alphanumeric_lower(text);
+    if normalized.is_empty() {
+        return false;
+    }
+
+    const MEDIA_ONLY: &[&str] = &[
+        "music",
+        "musics",
+        "backgroundmusic",
+        "instrumental",
+        "instrumentals",
+        "applause",
+        "laughter",
+        "silence",
+        "quiet",
+        "noise",
+        "static",
+        "musicplaying",
+        "bgm",
+        "музыка",
+        "музыкальнаякомпозиция",
+        "композиция",
+        "аплодисменты",
+        "смех",
+        "тишина",
+    ];
+
+    if MEDIA_ONLY.iter().any(|pattern| normalized == *pattern) {
+        return true;
+    }
+
+    let stripped = text
+        .trim()
+        .trim_matches(['[', ']', '(', ')', '♪', '♫', '…', '.'])
+        .trim()
+        .to_lowercase();
+    let stripped_norm = alphanumeric_lower(&stripped);
+    MEDIA_ONLY.iter().any(|pattern| stripped_norm == *pattern)
+}
+
 fn is_whisper_hallucination_only(text: &str) -> bool {
     let normalized = alphanumeric_lower(text);
     if normalized.is_empty() {
@@ -636,6 +678,10 @@ fn is_whisper_hallucination_only(text: &str) -> bool {
     }
 
     if is_dimatorzok_subtitle_hallucination(&normalized) {
+        return true;
+    }
+
+    if is_music_or_media_label_only(text) {
         return true;
     }
 
@@ -947,6 +993,15 @@ mod tests {
             clean_raw_transcription("Привет мир субтитры сделал DimaTorzok"),
             "Привет мир"
         );
+    }
+
+    #[test]
+    fn detects_music_label_only() {
+        assert!(is_music_or_media_label_only("[Music]"));
+        assert!(is_music_or_media_label_only("(music)"));
+        assert!(is_music_or_media_label_only("Music"));
+        assert!(clean_raw_transcription("[Music]").is_empty());
+        assert!(!is_music_or_media_label_only("Hello music lovers"));
     }
 
     #[test]

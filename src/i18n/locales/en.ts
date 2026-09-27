@@ -524,6 +524,7 @@ export const en = {
   "tools.stt.selectLanguage.languageLabel": "Language",
   "tools.stt.selectLanguage.confirm": "Transcribe",
   "tools.stt.selectLanguage.noLanguages": "Language list unavailable",
+  "tools.error.technicalDetail": "Technical details",
   "tools.voiceFiles.windowLoading": "Loading",
   "tools.voiceFiles.title": "Voice file processing",
   "tools.voiceFiles.description": "Transcribe audio files to text — view and copy.",
@@ -535,6 +536,14 @@ export const en = {
   "tools.voiceFiles.copied": "Copied to clipboard",
   "tools.voiceFiles.copyFailed": "Could not copy to clipboard",
   "tools.voiceFiles.emptyResult": "No speech detected in this file.",
+  "tools.voiceFiles.emptyResult.detail":
+    "Recognition did not produce usable speech text. The track may be silent, too quiet, or unsuitable for dictation-style STT.",
+  "tools.voiceFiles.musicOnly": "Musical content (no speech to transcribe)",
+  "tools.voiceFiles.musicOnly.detail":
+    "The speech model classified this audio as music or other non-speech content (for example a song or instrumental). Whisper often returns the English tag «Music» — that is not a transcription of lyrics. Use a recording of spoken voice, or lyrics recognition is not supported in this tool.",
+  "tools.voiceFiles.silenceOnly": "No usable speech signal",
+  "tools.voiceFiles.silenceOnly.detail":
+    "After decoding, the audio level was too low or the track appears silent. Check volume, normalization settings, or pick another file.",
   "tools.voiceFiles.rewriteFallback": "AI rewrite was unavailable — basic cleanup was applied.",
   "tools.voiceFiles.status.pending": "Waiting",
   "tools.voiceFiles.status.processing": "Processing…",
@@ -554,6 +563,22 @@ export const en = {
   "tools.voiceFiles.emptyAudio": "The file contains no usable audio.",
   "tools.voiceFiles.invalidPath": "Invalid file path.",
   "tools.voiceFiles.failed": "Transcription failed.",
+  "tools.voiceFiles.pttBusy.detail":
+    "Voice file tools share the same speech engine as live dictation. Finish or cancel the current recording, then run the file again.",
+  "tools.voiceFiles.busy.detail":
+    "Only one file is processed at a time. Wait until the current job finishes or select another file after it completes.",
+  "tools.voiceFiles.readFailed.detail":
+    "The file could not be opened or converted to audio for recognition. Common causes: corrupted file, missing codec, DRM, or a non-audio track.",
+  "tools.voiceFiles.unsupportedFormat.detail":
+    "This container or codec is not supported by the built-in decoder. Try exporting to WAV or MP3, or use a standard speech recording.",
+  "tools.voiceFiles.emptyAudio.detail":
+    "The decoder found no audio samples (silence-only, zero-length track, or failed read). Check the file in a media player.",
+  "tools.voiceFiles.invalidPath.detail":
+    "The path is empty or does not point to a file name. Re-add the file from disk instead of a broken shortcut.",
+  "tools.voiceFiles.failed.detail":
+    "Speech recognition or text processing stopped before a result was produced. See technical details below if present.",
+  "tools.stt.selectLanguage.detail":
+    "With recognition language set to Auto, the engine could not detect speech reliably. Pick the spoken language and retry; the choice is saved in Capture settings.",
 
   "tools.audioSrt.windowLoading": "Loading",
   "tools.audioSrt.title": "Audio to Subtitles (SRT)",
@@ -628,6 +653,20 @@ export const en = {
   "tools.audioSrt.emptyAudio": "The file contains no usable audio.",
   "tools.audioSrt.invalidPath": "Invalid file path.",
   "tools.audioSrt.failed": "Subtitle generation failed.",
+  "tools.audioSrt.unsupportedProvider.detail":
+    "Subtitle export needs segment timestamps from the STT engine. On-device Sherpa models without timestamps, or a misconfigured provider, cannot build SRT. Switch to Local Whisper or OpenAI Cloud in Capture settings.",
+  "tools.audioSrt.noTimestamps.detail":
+    "Recognition returned text but no timed segments, so cue boundaries cannot be created. Try another model, a fixed language instead of Auto, or a shorter/cleaner recording.",
+  "tools.audioSrt.readFailed.detail":
+    "The file could not be opened or decoded to PCM. See technical details for the decoder message.",
+  "tools.audioSrt.unsupportedFormat.detail":
+    "This format is not supported by the decoder. Re-export to WAV or MP3 and try again.",
+  "tools.audioSrt.emptyAudio.detail":
+    "No usable audio was found after decoding (empty or silent track).",
+  "tools.audioSrt.invalidPath.detail":
+    "The file path is invalid. Choose the file again from disk.",
+  "tools.audioSrt.failed.detail":
+    "The subtitle pipeline failed before writing SRT. Check technical details and recognition settings.",
 
   "about.open": "About Veyro",
   "about.version": "Version {version}",

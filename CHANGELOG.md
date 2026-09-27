@@ -12,6 +12,23 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.9.4] — 2026-09-27
+
+### Added
+
+- **Tools:** Full localized error text in voice file and Audio SRT result areas; music/silence-only transcripts show an info message instead of raw `[Music]` tags.
+- **Tools:** Audio SRT advanced subtitle settings use sliders with sensible ranges and live value labels.
+
+### Changed
+
+- **Capture:** Recognition language list sorted by visible name (locale-aware); **Auto** stays first.
+- **Tools:** Decode/transcription progress uses staged backend percentages and smoother UI updates.
+
+### Fixed
+
+- **Capture:** After PTT injection, leaving the target field clears the pinned injection target so the next dictation goes to the focused field.
+- **Tools:** Progress bar fill visible again; decode stage no longer jumps to 100% on WAV/preprocess.
+
 ## [1.9.3] — 2026-09-27
 
 ### Added
