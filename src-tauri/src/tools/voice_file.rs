@@ -36,6 +36,9 @@ pub struct VoiceFileTranscriptionResult {
     pub ai_rewrite_applied: bool,
     /// GEC local model in Optimization mode — grammar pass only, not full literary rewrite.
     pub gec_grammar_only: bool,
+    /// When `text` is empty, UI may show a localized explanation (`tools.voiceFiles.*` key).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub info_message_key: Option<String>,
 }
 
 fn emit_phase(app: &AppHandle, path: &str, phase: VoiceFileProgressPhase) {
@@ -117,6 +120,7 @@ pub async fn transcribe_voice_file(
             rewrite_fallback_reason: None,
             ai_rewrite_applied: false,
             gec_grammar_only: false,
+            info_message_key: Some("tools.voiceFiles.silenceOnly".to_string()),
         });
     }
     let segment = prepared.segment;
@@ -154,6 +158,19 @@ pub async fn transcribe_voice_file(
         return Err(STT_SELECT_LANGUAGE_ERROR.to_string());
     }
 
+    if crate::text::normalize::is_music_or_media_label_only(&transcription.text) {
+        emit_phase(&app, &path_key, VoiceFileProgressPhase::Done);
+        return Ok(VoiceFileTranscriptionResult {
+            file_name,
+            text: String::new(),
+            rewrite_fallback: false,
+            rewrite_fallback_reason: None,
+            ai_rewrite_applied: false,
+            gec_grammar_only: false,
+            info_message_key: Some("tools.voiceFiles.musicOnly".to_string()),
+        });
+    }
+
     emit_phase(&app, &path_key, VoiceFileProgressPhase::TextCleanup);
     let processed = process_voice_file_text(
         &app,
@@ -176,6 +193,14 @@ pub async fn transcribe_voice_file(
             );
     let ai_rewrite_applied = ai_mode.uses_ai() && !processed.rewrite_fallback && !gec_grammar_only;
 
+    let info_message_key = if processed.text.trim().is_empty()
+        && crate::text::normalize::is_music_or_media_label_only(&transcription.text)
+    {
+        Some("tools.voiceFiles.musicOnly".to_string())
+    } else {
+        None
+    };
+
     Ok(VoiceFileTranscriptionResult {
         file_name,
         text: processed.text,
@@ -183,6 +208,7 @@ pub async fn transcribe_voice_file(
         rewrite_fallback_reason: processed.rewrite_fallback_reason,
         ai_rewrite_applied,
         gec_grammar_only,
+        info_message_key,
     })
 }
 

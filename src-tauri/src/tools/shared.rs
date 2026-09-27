@@ -75,10 +75,10 @@ fn map_decode_error(error: String, prefix: &str) -> String {
         return format!("{prefix}.emptyAudio");
     }
     if error.contains("unsupported codec") || error.contains("unsupported feature") {
-        return format!("{prefix}.unsupportedFormat");
+        return format!("{prefix}.unsupportedFormat|{error}");
     }
     warn!("tool audio decode failed: {error}");
-    format!("{prefix}.readFailed")
+    format!("{prefix}.readFailed|{error}")
 }
 
 pub fn throttled_percent_callback(
@@ -87,7 +87,11 @@ pub fn throttled_percent_callback(
     let last = Arc::new(AtomicU8::new(0));
     Arc::new(move |percent: u8| {
         let prev = last.load(Ordering::Relaxed);
-        if percent < prev.saturating_add(2) && percent < 100 {
+        if percent != 0
+            && percent != 100
+            && percent < prev.saturating_add(2)
+            && percent < 100
+        {
             return;
         }
         last.store(percent, Ordering::Relaxed);
@@ -107,8 +111,12 @@ pub fn decode_and_preprocess_for_tools(
     decode_progress: Option<DecodeProgressCallback>,
     error_prefix: &str,
 ) -> Result<PreparedToolAudio, String> {
-    let raw = decode_audio_file_with_progress(path, decode_progress)
+    let raw = decode_audio_file_with_progress(path, decode_progress.clone())
         .map_err(|error| map_decode_error(error, error_prefix))?;
+
+    if let Some(callback) = &decode_progress {
+        callback(92);
+    }
 
     let captured = raw.clone();
     let preprocessed: PreprocessResult = preprocess_segment(
@@ -120,6 +128,10 @@ pub fn decode_and_preprocess_for_tools(
             normalize_only: false,
         },
     );
+
+    if let Some(callback) = &decode_progress {
+        callback(100);
+    }
 
     Ok(PreparedToolAudio {
         captured,
