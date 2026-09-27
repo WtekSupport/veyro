@@ -89,7 +89,9 @@ pub fn build_subtitle_cues_from_aligned_words(
         out
     };
 
-    merge_short_cues_uniform(&mut cues, options);
+    if !options.smart_split {
+        merge_short_cues_uniform(&mut cues, options);
+    }
     apply_cue_end_preservation(&mut cues, options);
     tighten_overlapping_cues(&mut cues);
     cues
