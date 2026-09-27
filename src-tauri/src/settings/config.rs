@@ -764,6 +764,18 @@ impl AppSettings {
         Ok(())
     }
 
+    /// Legacy configs may store UI token `"auto"` instead of omitting the field.
+    pub fn normalize_transcription_language(&mut self) -> bool {
+        let clear = matches!(
+            self.language.as_deref(),
+            Some("auto") | Some("Auto") | Some("")
+        );
+        if clear {
+            self.language = None;
+        }
+        clear
+    }
+
     pub fn vad_config(&self) -> crate::vad::VadConfig {
         crate::vad::VadConfig {
             engine: effective_vad_engine(self.vad_engine),
@@ -788,14 +800,13 @@ impl AppSettings {
         })
     }
 
-    /// Language for post-STT steps (e.g. numbers-as-words) when UI language is set to auto.
-    pub fn postprocess_language(&self, whisper_detected: Option<&str>) -> String {
-        if let Some(language) = &self.language {
-            return language.clone();
-        }
-        whisper_detected
-            .map(str::to_string)
-            .unwrap_or_else(|| self.effective_language())
+    /// Language for post-STT steps (e.g. numbers-as-words). See [`crate::transcription::postprocess_language`].
+    pub fn postprocess_language(
+        &self,
+        whisper_detected: Option<&str>,
+        session_stt_language: Option<&str>,
+    ) -> String {
+        crate::transcription::postprocess_language(self, whisper_detected, session_stt_language)
     }
 
     pub fn uses_openai_transcription(&self) -> bool {
@@ -901,10 +912,28 @@ pub struct SettingsPatch {
     pub live_dictation_field_indicator: Option<bool>,
     pub hotkey_game_mode: Option<bool>,
     pub hotkey_block_system: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
     pub microphone_device: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
     pub language: Option<Option<String>>,
     pub transcription_provider: Option<String>,
     pub transcription_model: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
     pub local_whisper_models_dir: Option<Option<String>>,
     pub local_stt_family: Option<crate::settings::LocalSttFamily>,
     pub local_stt_quant: Option<crate::settings::LocalSttQuant>,
@@ -915,11 +944,35 @@ pub struct SettingsPatch {
     pub local_sherpa_num_threads: Option<u32>,
     pub text_rewrite_provider: Option<TextRewriteProvider>,
     pub local_llm_model: Option<LlmModelKind>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
     pub local_llm_models_dir: Option<Option<String>>,
     pub local_llm_use_gpu: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
     pub ai_rewrite_skill: Option<Option<String>>,
     pub whisper_prompt_prefix: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
     pub data_storage_dir: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
     pub transcription_dictionary_path: Option<Option<String>>,
     pub audio_preprocess_enabled: Option<bool>,
     pub audio_noise_reduction_enabled: Option<bool>,
@@ -1207,6 +1260,20 @@ mod tests {
         assert!(settings.enabled);
         assert_eq!(settings.language.as_deref(), Some("ru"));
         assert_eq!(settings.global_hotkey, "Shift+F1");
+    }
+
+    #[test]
+    fn patch_json_null_clears_transcription_language() {
+        let patch: SettingsPatch =
+            serde_json::from_str(r#"{"language":null}"#).expect("patch");
+        assert_eq!(patch.language, Some(None));
+
+        let mut settings = AppSettings {
+            language: Some("de".to_string()),
+            ..Default::default()
+        };
+        patch.apply_to(&mut settings);
+        assert!(settings.language.is_none());
     }
 
     #[test]

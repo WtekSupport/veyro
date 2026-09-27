@@ -57,6 +57,7 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
     let locale_normalized = normalize_locale_dependent_settings(&mut settings);
     let stt_normalized = normalize_local_stt_selection(&mut settings);
     let storage_normalized = crate::settings::normalize_data_storage(&mut settings);
+    let language_normalized = settings.normalize_transcription_language();
     settings.validate()?;
 
     if migrated_from_plaintext
@@ -69,6 +70,7 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         || locale_normalized
         || stt_normalized
         || storage_normalized
+        || language_normalized
     {
         save_settings(&settings)?;
     }

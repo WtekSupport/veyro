@@ -107,7 +107,7 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
       (current.recording_indicator ?? current.live_dictation_field_indicator) ||
     patch.abort_on_focus_loss !== (current.abort_on_focus_loss ?? false) ||
     patch.microphone_device !== current.microphone_device ||
-    patch.language !== current.language ||
+    (patch.language ?? null) !== (current.language ?? null) ||
     patch.transcription_provider !== current.transcription_provider ||
     patch.local_stt_family !== current.local_stt_family ||
     patch.local_stt_quant !== current.local_stt_quant ||
@@ -243,6 +243,7 @@ export async function flushPersistSettings(options?: {
       "vad_pre_speech_range",
       "vad_minimum_speech_range",
       "vad_maximum_segment_range",
+      "language_unsupported",
     ]);
     setError({
       code: knownCodes.has(message) ? message : "settings",

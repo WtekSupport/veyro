@@ -25,6 +25,8 @@ pub const SKILL_IMPORT_FLOW: &str = "app://skill-import-flow";
 pub const SKILLS_CHANGED: &str = "app://skills-changed";
 pub const VOICE_FILE_PROGRESS: &str = "app://voice-file-progress";
 pub const VOICE_FILES_WINDOW_READY: &str = "app://voice-files-window-ready";
+pub const AUDIO_SRT_PROGRESS: &str = "app://audio-srt-progress";
+pub const AUDIO_SRT_WINDOW_READY: &str = "app://audio-srt-window-ready";
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -144,4 +146,33 @@ pub fn emit_voice_file_progress(app: &AppHandle, payload: VoiceFileProgressPaylo
 
 pub fn emit_voice_files_window_ready(app: &AppHandle) {
     let _ = app.emit(VOICE_FILES_WINDOW_READY, ());
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioSrtProgressPhase {
+    Decoding,
+    Transcribing,
+    TextCleanup,
+    WordAlignment,
+    GeneratingSubtitles,
+    AiRewrite,
+    Done,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSrtProgressPayload {
+    pub path: String,
+    pub phase: AudioSrtProgressPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u8>,
+}
+
+pub fn emit_audio_srt_progress(app: &AppHandle, payload: AudioSrtProgressPayload) {
+    let _ = app.emit(AUDIO_SRT_PROGRESS, payload);
+}
+
+pub fn emit_audio_srt_window_ready(app: &AppHandle) {
+    let _ = app.emit(AUDIO_SRT_WINDOW_READY, ());
 }

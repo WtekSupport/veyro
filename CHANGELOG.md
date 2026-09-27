@@ -12,6 +12,23 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.9.3] — 2026-09-27
+
+### Added
+
+- **Tools:** **Audio → Subtitles (SRT)** — transcribe files with segment timestamps, advanced subtitle layout (smart split, line limits, reading tail), preview timeline, export `.srt`.
+- **Tools:** When recognition language is **Auto** and STT returns empty, prompt to pick a language and retry (Audio SRT and voice files).
+- **STT:** Auto language detection for local Whisper; fixed-language and post-process fallback policy; nullable settings patch so **Auto** persists from the UI.
+
+### Changed
+
+- **Audio SRT:** Advanced settings use per-field **?** hints; hide pause-based split when **Smart split** is on.
+
+### Fixed
+
+- **Settings:** Recognition language select (including switching back to Auto) saves reliably.
+- **Tools:** Vertical scroll in tool windows when content overflows.
+
 ## [1.8.94] — 2026-09-25
 
 ### Fixed
