@@ -20,7 +20,8 @@ pub fn dedupe_vad_merged_segments(mut segments: Vec<TimedTextSegment>) -> Vec<Ti
                 let overlap_start = seg_start.max(last.start_ms);
                 let overlap_end = seg_end.min(last_end);
                 let overlap = overlap_end.saturating_sub(overlap_start);
-                if overlap * 100 / seg_duration >= 35 {
+                let tail = last_end.saturating_sub(seg_start).max(1);
+                if overlap * 100 / seg_duration >= 35 || overlap * 100 / tail >= 35 {
                     continue;
                 }
             }
