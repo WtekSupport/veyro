@@ -306,6 +306,8 @@ export const EVENTS = {
   appStats: "app-stats",
   voiceFileProgress: "app://voice-file-progress",
   voiceFilesWindowReady: "app://voice-files-window-ready",
+  audioSrtProgress: "app://audio-srt-progress",
+  audioSrtWindowReady: "app://audio-srt-window-ready",
 } as const;
 
 export type VoiceFileProgressPhase =
@@ -846,10 +848,116 @@ export interface VoiceFileTranscriptionResult {
   gecGrammarOnly: boolean;
 }
 
+export interface VoiceFileOptions {
+  sttLanguageOverride?: string | null;
+}
+
 export async function transcribeVoiceFile(
   path: string,
+  options: VoiceFileOptions = {},
 ): Promise<VoiceFileTranscriptionResult> {
-  return invoke<VoiceFileTranscriptionResult>("transcribe_voice_file", { path });
+  return invoke<VoiceFileTranscriptionResult>("transcribe_voice_file", {
+    path,
+    options: {
+      stt_language_override: options.sttLanguageOverride ?? null,
+    },
+  });
+}
+
+export type AudioSrtProgressPhase =
+  | "decoding"
+  | "transcribing"
+  | "text_cleanup"
+  | "word_alignment"
+  | "generating_subtitles"
+  | "ai_rewrite"
+  | "done";
+
+export interface AudioSrtProgressPayload {
+  path: string;
+  phase: AudioSrtProgressPhase;
+  percent?: number;
+}
+
+export type SubtitleSttCapability = "supported" | "unsupportedProvider";
+
+export interface AudioSrtOptions {
+  maxLineLength?: number;
+  maxLinesPerCue?: number;
+  maxCueDurationMs?: number;
+  minCueDurationMs?: number;
+  pauseSplitMs?: number;
+  globalOffsetMs?: number;
+  utf8Bom?: boolean;
+  useDictationTextSettings?: boolean;
+  smartSplit?: boolean;
+  /** 5–90: log-RMS gate between silence and speech (smart split). */
+  speechGatePercent?: number;
+  readingTailMs?: number;
+  /** Fixed STT language for this request only (after user picks in tools UI). */
+  sttLanguageOverride?: string | null;
+}
+
+export interface AudioSrtTranscriptionResult {
+  fileName: string;
+  srt: string;
+  rewriteFallback: boolean;
+  rewriteFallbackReason?: string | null;
+  aiRewriteApplied: boolean;
+}
+
+export async function openAudioSrtToolWindow(): Promise<void> {
+  return invoke<void>("open_audio_srt_tool_window");
+}
+
+export async function openAudioSrtToolWindowAndWaitReady(): Promise<void> {
+  const timeoutMs = 20_000;
+  let settled = false;
+  let finishReady: () => void = () => {};
+  const readyPromise = new Promise<void>((resolve) => {
+    finishReady = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+  });
+  const timer = window.setTimeout(finishReady, timeoutMs);
+  const unlisten = await listen(EVENTS.audioSrtWindowReady, () => {
+    window.clearTimeout(timer);
+    finishReady();
+  });
+
+  try {
+    await openAudioSrtToolWindow();
+    await readyPromise;
+  } finally {
+    window.clearTimeout(timer);
+    void unlisten();
+  }
+}
+
+export async function getSubtitleSttCapability(): Promise<SubtitleSttCapability> {
+  return invoke<SubtitleSttCapability>("get_subtitle_stt_capability");
+}
+
+export async function transcribeAudioToSrt(
+  path: string,
+  options: AudioSrtOptions,
+): Promise<AudioSrtTranscriptionResult> {
+  return invoke<AudioSrtTranscriptionResult>("transcribe_audio_to_srt", { path, options });
+}
+
+export async function saveSubtitleFile(
+  path: string,
+  content: string,
+  utf8Bom: boolean,
+): Promise<void> {
+  return invoke<void>("save_subtitle_file", { path, content, utf8Bom });
+}
+
+export async function pickSubtitleSavePath(defaultName: string): Promise<string | null> {
+  return invoke<string | null>("pick_subtitle_save_path", { defaultName });
 }
 
 export async function copyTextToClipboard(text: string): Promise<void> {

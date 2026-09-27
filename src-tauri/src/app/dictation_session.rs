@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 /// Tracks dictation session ids so aborted sessions skip queued pipeline work.
 pub struct DictationSession {
@@ -6,6 +7,8 @@ pub struct DictationSession {
     aborted_id: AtomicU64,
     /// Successful text injections in the active session (multi-segment / continuous).
     injection_count: AtomicU64,
+    /// Last Whisper language hint in auto mode (post-process / prompt context only; not STT lock).
+    stt_language: Mutex<Option<String>>,
 }
 
 impl Default for DictationSession {
@@ -20,6 +23,7 @@ impl DictationSession {
             current_id: AtomicU64::new(0),
             aborted_id: AtomicU64::new(0),
             injection_count: AtomicU64::new(0),
+            stt_language: Mutex::new(None),
         }
     }
 
@@ -29,7 +33,37 @@ impl DictationSession {
 
     pub fn begin_session(&self) -> u64 {
         self.injection_count.store(0, Ordering::SeqCst);
+        if let Ok(mut guard) = self.stt_language.lock() {
+            *guard = None;
+        }
         self.current_id.fetch_add(1, Ordering::SeqCst).saturating_add(1)
+    }
+
+    pub fn locked_stt_language(&self) -> Option<String> {
+        self.stt_language
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    /// Remember first reliable Whisper detection in auto mode for post-process hints.
+    pub fn note_stt_language_from_segment(
+        &self,
+        fixed_language: Option<&str>,
+        detected: Option<&str>,
+        has_text: bool,
+    ) {
+        if fixed_language.is_some() || !has_text {
+            return;
+        }
+        let Some(code) = detected.map(crate::transcription::normalize_stt_language_code) else {
+            return;
+        };
+        if let Ok(mut guard) = self.stt_language.lock() {
+            if guard.is_none() {
+                *guard = Some(code);
+            }
+        }
     }
 
     pub fn injection_count(&self) -> u64 {
@@ -81,5 +115,17 @@ mod tests {
     fn abort_without_session_returns_none() {
         let session = DictationSession::new();
         assert!(session.abort_current().is_none());
+    }
+
+    #[test]
+    fn stt_language_resets_on_new_session_and_sticks_when_auto() {
+        let session = DictationSession::new();
+        let _ = session.begin_session();
+        session.note_stt_language_from_segment(None, Some("en"), true);
+        assert_eq!(session.locked_stt_language().as_deref(), Some("en"));
+        session.note_stt_language_from_segment(None, Some("ru"), true);
+        assert_eq!(session.locked_stt_language().as_deref(), Some("en"));
+        let _ = session.begin_session();
+        assert!(session.locked_stt_language().is_none());
     }
 }

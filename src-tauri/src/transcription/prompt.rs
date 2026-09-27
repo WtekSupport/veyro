@@ -10,6 +10,58 @@ pub struct WhisperPromptInput<'a> {
     pub previous_text: Option<&'a str>,
 }
 
+/// Drop cross-language tail context that would bias Whisper toward the wrong language.
+pub fn previous_text_for_whisper_prompt<'a>(
+    sticky_language: Option<&str>,
+    previous: Option<&'a str>,
+) -> Option<&'a str> {
+    let previous = previous?.trim();
+    if previous.is_empty() {
+        return None;
+    }
+    let Some(lang) = sticky_language else {
+        return Some(previous);
+    };
+    if language_script_matches_text(lang, previous) {
+        Some(previous)
+    } else {
+        None
+    }
+}
+
+fn language_script_matches_text(lang_code: &str, text: &str) -> bool {
+    let cyrillic = cyrillic_letter_ratio(text);
+    let lang = lang_code
+        .split('-')
+        .next()
+        .unwrap_or(lang_code)
+        .to_ascii_lowercase();
+    match lang.as_str() {
+        "ru" | "uk" | "be" | "kk" | "bg" | "sr" => cyrillic >= 0.12,
+        "en" | "de" | "fr" | "es" | "it" | "pt" | "nl" | "pl" | "cs" | "sv" | "da" | "no"
+        | "fi" | "tr" | "id" | "vi" | "ms" | "tl" | "hi" | "ja" | "ko" | "zh" => cyrillic < 0.2,
+        _ => true,
+    }
+}
+
+fn cyrillic_letter_ratio(text: &str) -> f64 {
+    let mut letters = 0u32;
+    let mut cyrillic = 0u32;
+    for ch in text.chars() {
+        if ch.is_alphabetic() {
+            letters += 1;
+            if ('\u{0400}'..='\u{04FF}').contains(&ch) {
+                cyrillic += 1;
+            }
+        }
+    }
+    if letters == 0 {
+        0.0
+    } else {
+        cyrillic as f64 / letters as f64
+    }
+}
+
 pub fn build_whisper_prompt(input: &WhisperPromptInput<'_>) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
 
@@ -110,6 +162,21 @@ mod tests {
             vocabulary: &[],
             previous_text: None,
         })
+        .is_none());
+    }
+
+    #[test]
+    fn filters_cross_language_previous_text() {
+        assert!(previous_text_for_whisper_prompt(Some("en"), Some("Hello world")).is_some());
+        assert!(previous_text_for_whisper_prompt(
+            Some("en"),
+            Some("Привет, это прошлый сегмент")
+        )
+        .is_none());
+        assert!(previous_text_for_whisper_prompt(
+            Some("ru"),
+            Some("Hello previous segment")
+        )
         .is_none());
     }
 

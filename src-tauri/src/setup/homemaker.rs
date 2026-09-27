@@ -139,11 +139,6 @@ pub fn apply_homemaker_local_recommendations(settings: &mut AppSettings) -> bool
         changed = true;
     }
 
-    if settings.ui_locale == UiLocale::Ru && settings.language.as_deref() != Some("ru") {
-        settings.language = Some("ru".to_string());
-        changed = true;
-    }
-
     settings.transcription_provider = "local".to_string();
     if !matches!(settings.text_rewrite_provider, TextRewriteProvider::Local) {
         settings.text_rewrite_provider = TextRewriteProvider::Local;
@@ -195,10 +190,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_homemaker_sets_max_beam_and_ru_language() {
+    fn apply_homemaker_sets_max_beam_without_forcing_stt_language() {
         let mut settings = AppSettings {
             ui_mode: UiMode::Homemaker,
             ui_locale: UiLocale::Ru,
+            language: None,
             local_whisper_beam_size: 1,
             transcription_provider: "openai".to_string(),
             text_rewrite_provider: TextRewriteProvider::Openai,
@@ -206,7 +202,7 @@ mod tests {
         };
         assert!(apply_homemaker_local_recommendations(&mut settings));
         assert_eq!(settings.local_whisper_beam_size, 5);
-        assert_eq!(settings.language.as_deref(), Some("ru"));
+        assert!(settings.language.is_none());
         assert_eq!(settings.transcription_provider, "local");
     }
 

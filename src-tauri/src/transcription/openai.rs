@@ -8,6 +8,7 @@ use crate::audio::segment::AudioSegment;
 use crate::network::openai_error::OpenAiError;
 use crate::network::retry::RetryConfig;
 use crate::settings::secrets;
+use crate::timed_text::TimedTextSegment;
 use crate::transcription::models::{TranscriptionOptions, TranscriptionResult};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
 
@@ -37,6 +38,12 @@ impl OpenAITranscriptionProvider {
             .text("temperature", "0")
             .part("file", part);
 
+        if options.request_segment_timestamps {
+            form = form
+                .text("response_format", "verbose_json")
+                .text("timestamp_granularities[]", "segment");
+        }
+
         if let Some(language) = &options.language {
             form = form.text("language", language.clone());
         }
@@ -45,6 +52,37 @@ impl OpenAITranscriptionProvider {
         }
 
         Ok(form)
+    }
+
+    fn parse_timed_segments(payload: &serde_json::Value) -> Option<Vec<TimedTextSegment>> {
+        let segments = payload.get("segments")?.as_array()?;
+        let mut timed = Vec::new();
+        for segment in segments {
+            let text = segment
+                .get("text")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if text.is_empty() {
+                continue;
+            }
+            let start_sec = segment.get("start").and_then(|value| value.as_f64())?;
+            let end_sec = segment.get("end").and_then(|value| value.as_f64())?;
+            let start_ms = (start_sec * 1000.0).round().max(0.0) as u64;
+            let end_ms = (end_sec * 1000.0).round().max(start_sec * 1000.0) as u64;
+            timed.push(TimedTextSegment {
+                text,
+                start_ms,
+                end_ms,
+                words: Vec::new(),
+            });
+        }
+        if timed.is_empty() {
+            None
+        } else {
+            Some(timed)
+        }
     }
 }
 
@@ -99,10 +137,16 @@ impl TranscriptionProvider for OpenAITranscriptionProvider {
                             .trim()
                             .to_string();
 
+                        let timed_segments = if options.request_segment_timestamps {
+                            Self::parse_timed_segments(&payload)
+                        } else {
+                            None
+                        };
+
                         debug!(chars = text.len(), "transcription completed");
 
                         return Ok(TranscriptionResult {
-                            timed_segments: None,
+                            timed_segments,
                             text,
                             confidence: None,
                             whisper_segments: None,

@@ -1367,6 +1367,20 @@ function bindEvents(): void {
           }
           return;
         }
+        if (
+          element instanceof HTMLSelectElement &&
+          element.name === "language"
+        ) {
+          const current = getState().settings;
+          if (current) {
+            const baseline = current;
+            const language =
+              element.value === "auto" ? null : element.value;
+            setSettings({ ...current, language });
+            void flushPersistSettings({ compareWith: baseline });
+          }
+          return;
+        }
         onSettingsChange();
       });
     });

@@ -27,4 +27,25 @@ impl AudioSegment {
     pub fn is_empty(&self) -> bool {
         self.samples.is_empty()
     }
+
+    /// Inclusive start, exclusive end in milliseconds on this segment's timeline.
+    pub fn clip_ms(&self, start_ms: u64, end_ms: u64) -> Self {
+        if self.sample_rate == 0 || self.samples.is_empty() {
+            return Self::new(Vec::new(), self.sample_rate, self.channels);
+        }
+        let end_ms = end_ms.max(start_ms);
+        let channels = self.channels.max(1) as u64;
+        let rate = self.sample_rate as u64;
+        let frame_samples = channels;
+        let total_frames = self.samples.len() as u64 / frame_samples;
+        let start_frame = (start_ms.saturating_mul(rate) / 1000).min(total_frames);
+        let end_frame = (end_ms.saturating_mul(rate) / 1000).min(total_frames).max(start_frame);
+        let start_index = (start_frame * frame_samples) as usize;
+        let end_index = (end_frame * frame_samples) as usize;
+        Self::new(
+            self.samples[start_index..end_index].to_vec(),
+            self.sample_rate,
+            self.channels,
+        )
+    }
 }

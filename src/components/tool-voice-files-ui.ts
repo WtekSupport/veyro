@@ -9,6 +9,7 @@ import {
   type VoiceFileTranscriptionResult,
 } from "../api";
 import { iconCopy } from "./icons";
+import { runToolWithSttLanguageRecovery } from "../lib/tool-stt-auto-recovery";
 import { t, type MessageKey } from "../i18n";
 
 export type VoiceFileJobStatus = "pending" | "processing" | "done" | "error";
@@ -422,7 +423,9 @@ export function createVoiceFilesController(root: HTMLElement): {
         paint();
 
         try {
-          const result = await transcribeVoiceFile(next.path);
+          const result = await runToolWithSttLanguageRecovery(() =>
+            transcribeVoiceFile(next.path),
+          );
           applyResult(next.id, result);
         } catch (error) {
           const raw = error instanceof Error ? error.message : String(error);
