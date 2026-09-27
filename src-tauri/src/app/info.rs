@@ -85,4 +85,18 @@ mod tests {
         assert!(window_title_with_elevation(base, UiLocale::En).starts_with(base));
         assert!(window_title_with_elevation(base, UiLocale::Ru).starts_with(base));
     }
+
+    #[test]
+    fn third_party_licenses_json_is_populated() {
+        let licenses = third_party_licenses();
+        assert!(
+            licenses.len() > 500,
+            "expected full dependency license list, got {}",
+            licenses.len()
+        );
+        assert!(licenses.iter().any(|entry| entry.name.starts_with("tauri ")));
+        assert!(licenses
+            .iter()
+            .any(|entry| entry.name.contains("WebView2")));
+    }
 }

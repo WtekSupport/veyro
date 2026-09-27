@@ -676,7 +676,7 @@ export const en = {
     "Veyro is provided free of charge for personal and commercial use. Advanced capabilities may require a separate paid license or subscription in future releases.",
   "about.thirdPartyTitle": "Third-party software",
   "about.thirdPartyIntro":
-    "Veyro includes open-source and third-party components. The list below covers major runtime dependencies. Additional Rust and JavaScript library licenses apply to the full distribution.",
+    "Veyro includes open-source and third-party components. The list below is generated from the release build dependency tree (Rust crates, bundled native runtimes, and npm packages).",
   "about.publisherTitle": "Publisher",
   "about.copyrightTitle": "Copyright",
   "about.disclaimer":

@@ -254,7 +254,7 @@ Whisper-файлы: `%AppData%\Veyro\models\`.
 ## AI skills
 
 Markdown в каталоге skills — system prompt для режима «Свой skill…».  
-Пример: `example-skill.md`. Импорт через Advanced или копирование `.md` в папку skills.
+Импорт через Advanced или копирование `.md` в папку skills пользователя.
 
 ---
 

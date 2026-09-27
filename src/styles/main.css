@@ -420,7 +420,7 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 160px;
+  max-height: min(50vh, 320px);
   overflow: auto;
   display: flex;
   flex-direction: column;

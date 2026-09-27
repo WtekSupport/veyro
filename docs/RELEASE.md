@@ -28,6 +28,14 @@ NSIS is also built under `%CARGO_TARGET_DIR%\release\bundle\nsis\` (default `C:\
 
 Signed builds and the in-app updater: [docs/UPDATER.md](UPDATER.md).
 
+After changing Rust or npm dependencies, refresh the About → third-party list:
+
+```powershell
+node scripts/generate-third-party-licenses.mjs
+```
+
+This rewrites `docs/legal/third-party-licenses.json` (copied into the app at build time).
+
 ## Silero TE on-demand assets
 
 Installers no longer bundle `silero-te` weights. The app downloads them into the user models folder.
