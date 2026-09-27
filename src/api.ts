@@ -846,6 +846,7 @@ export interface VoiceFileTranscriptionResult {
   rewriteFallbackReason?: string | null;
   aiRewriteApplied: boolean;
   gecGrammarOnly: boolean;
+  infoMessageKey?: string | null;
 }
 
 export interface VoiceFileOptions {

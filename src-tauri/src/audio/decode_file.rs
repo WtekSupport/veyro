@@ -12,7 +12,7 @@ use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-use crate::audio::encode::decode_wav_file;
+use crate::audio::encode::{decode_wav, decode_wav_file};
 use crate::audio::resampler::{MonoResampler, TARGET_SAMPLE_RATE};
 use crate::audio::segment::AudioSegment;
 use crate::error::AudioError;
@@ -126,7 +126,8 @@ impl ProgressReader {
             self.read_bytes = position;
             if self.total_bytes > 0 {
                 let percent =
-                    ((self.read_bytes.saturating_mul(100)) / self.total_bytes).min(99) as u8;
+                    ((self.read_bytes.saturating_mul(100)) / self.total_bytes).min(100) as u8;
+                let percent = if percent >= 100 { 99 } else { percent };
                 self.report(percent);
             }
         }
@@ -166,12 +167,62 @@ impl MediaSource for ProgressReader {
     }
 }
 
+fn report_decode_progress(on_progress: &Option<DecodeProgressCallback>, last: &mut u8, percent: u8) {
+    let percent = percent.min(100);
+    if percent <= *last && percent < 100 {
+        return;
+    }
+    *last = percent;
+    if let Some(callback) = on_progress {
+        callback(percent);
+    }
+}
+
+/// Map a local 0–100 sub-progress into `[start, end]` on the outer decode scale.
+fn map_progress_span(
+    parent: Option<DecodeProgressCallback>,
+    start: u8,
+    end: u8,
+) -> Option<DecodeProgressCallback> {
+    let parent = parent?;
+    Some(Arc::new(move |local: u8| {
+        let local = u32::from(local.min(100));
+        let start = u32::from(start);
+        let end = u32::from(end);
+        let span = end.saturating_sub(start);
+        let mapped = start.saturating_add(local.saturating_mul(span) / 100);
+        parent(mapped.min(100) as u8);
+    }))
+}
+
+fn decode_wav_file_with_byte_progress(
+    path: &Path,
+    on_progress: Option<DecodeProgressCallback>,
+) -> Result<AudioSegment, String> {
+    let mut last_reported = 0u8;
+    report_decode_progress(&on_progress, &mut last_reported, 0);
+
+    let read_progress = map_progress_span(on_progress.clone(), 0, 38);
+    let mut reader = ProgressReader::open(path, read_progress)?;
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+
+    let segment = decode_wav(&bytes)?;
+    report_decode_progress(&on_progress, &mut last_reported, 45);
+    Ok(segment)
+}
+
 fn decode_with_symphonia(
     path: &Path,
     on_progress: Option<DecodeProgressCallback>,
 ) -> Result<AudioSegment, String> {
-    let mut reader = ProgressReader::open(path, on_progress.clone())?;
+    let mut decode_last = 0u8;
+    let io_progress = map_progress_span(on_progress.clone(), 0, 22);
+    let mut reader = ProgressReader::open(path, io_progress)?;
     reader.report(0);
+    report_decode_progress(&on_progress, &mut decode_last, 0);
     let mss = MediaSourceStream::new(Box::new(reader), Default::default());
 
     let mut hint = Hint::new();
@@ -209,6 +260,8 @@ fn decode_with_symphonia(
         .map_err(|error| error.to_string())?;
 
     let mut samples: Vec<f32> = Vec::new();
+    let total_frames = track.codec_params.n_frames.filter(|frames| *frames > 0);
+    let mut decoded_frames = 0u64;
 
     loop {
         let packet = match format.next_packet() {
@@ -230,6 +283,12 @@ fn decode_with_symphonia(
         let decoded = decoder
             .decode(&packet)
             .map_err(|error| error.to_string())?;
+        decoded_frames = decoded_frames.saturating_add(decoded.frames() as u64);
+        if let Some(total) = total_frames {
+            let local = ((decoded_frames.saturating_mul(100)) / total).min(100) as u8;
+            let mapped = 22u8.saturating_add(local.saturating_mul(56) / 100);
+            report_decode_progress(&on_progress, &mut decode_last, mapped);
+        }
         append_decoded_buffer(&mut samples, decoded)?;
     }
 
@@ -237,9 +296,7 @@ fn decode_with_symphonia(
         return Err("empty_audio".to_string());
     }
 
-    if let Some(callback) = on_progress {
-        callback(100);
-    }
+    report_decode_progress(&on_progress, &mut decode_last, 78);
 
     Ok(AudioSegment::new(samples, sample_rate, channels))
 }
@@ -253,15 +310,9 @@ pub fn decode_audio_file_with_progress(
     on_progress: Option<DecodeProgressCallback>,
 ) -> Result<AudioSegment, String> {
     let segment = if is_wav_path(path) {
-        if let Some(callback) = &on_progress {
-            callback(0);
-        }
-        let segment = decode_wav_file(path)
-            .or_else(|_| decode_with_symphonia(path, on_progress.clone()))?;
-        if let Some(callback) = &on_progress {
-            callback(100);
-        }
-        segment
+        decode_wav_file_with_byte_progress(path, on_progress.clone())
+            .or_else(|_| decode_wav_file(path))
+            .or_else(|_| decode_with_symphonia(path, on_progress.clone()))?
     } else {
         decode_with_symphonia(path, on_progress.clone())?
     };
@@ -270,9 +321,10 @@ pub fn decode_audio_file_with_progress(
         return Err("empty_audio".to_string());
     }
 
-    if let Some(callback) = &on_progress {
-        callback(100);
-    }
+    let mut last = 0u8;
+    report_decode_progress(&on_progress, &mut last, 82);
+    let resampled = resample_to_stt(segment).map_err(|error| error.to_string())?;
+    report_decode_progress(&on_progress, &mut last, 88);
 
-    resample_to_stt(segment).map_err(|error| error.to_string())
+    Ok(resampled)
 }

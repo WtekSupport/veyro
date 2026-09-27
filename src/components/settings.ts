@@ -25,6 +25,10 @@ import {
   type WhisperModelDownloadProgress,
 } from "../api";
 import { readLocalSttQuantFromForm, renderSttModelPicker } from "./stt-model-picker";
+import {
+  formatTranscriptionLanguageLabel,
+  sortTranscriptionLanguagesForDisplay,
+} from "../lib/transcription-language-display";
 import { getState, type SettingsTab } from "../state";
 import { t } from "../i18n";
 import type { MessageKey } from "../i18n/locales/en";
@@ -659,25 +663,6 @@ function renderAiSkillOptions(values: SettingsFormValues, aiSkills: AiSkillInfo[
   return options;
 }
 
-function formatTranscriptionLanguageLabel(
-  code: string,
-  fallbackName: string,
-  uiLocale: UiLocale,
-): string {
-  try {
-    const locale = uiLocale === "ru" ? "ru" : "en";
-    const display = new Intl.DisplayNames([locale], { type: "language" });
-    const intlCode = code === "yue" ? "yue" : code;
-    const localized = display.of(intlCode);
-    if (localized && localized.toLowerCase() !== code.toLowerCase()) {
-      return localized;
-    }
-  } catch {
-    // Intl.DisplayNames may be unavailable in older WebView2 builds.
-  }
-  return fallbackName;
-}
-
 function renderTranscriptionLanguageOptions(
   languages: TranscriptionLanguageInfo[],
   selected: string,
@@ -688,9 +673,11 @@ function renderTranscriptionLanguageOptions(
     return autoOption;
   }
 
+  const sorted = sortTranscriptionLanguagesForDisplay(languages, uiLocale);
+
   return (
     autoOption +
-    languages
+    sorted
       .map((language) => {
         const label = formatTranscriptionLanguageLabel(
           language.code,

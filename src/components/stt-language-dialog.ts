@@ -1,5 +1,9 @@
 import { listTranscriptionLanguages, type TranscriptionLanguageInfo } from "../api";
-import { t } from "../i18n";
+import { getLocale, t } from "../i18n";
+import {
+  formatTranscriptionLanguageLabel,
+  sortTranscriptionLanguagesForDisplay,
+} from "../lib/transcription-language-display";
 
 function escapeHtml(value: string): string {
   return value
@@ -13,11 +17,12 @@ function renderLanguageOptions(languages: TranscriptionLanguageInfo[]): string {
   if (languages.length === 0) {
     return `<option value="">${escapeHtml(t("tools.stt.selectLanguage.noLanguages"))}</option>`;
   }
-  return languages
-    .map(
-      (language) =>
-        `<option value="${escapeHtml(language.code)}">${escapeHtml(language.name)}</option>`,
-    )
+  const uiLocale = getLocale();
+  return sortTranscriptionLanguagesForDisplay(languages, uiLocale)
+    .map((language) => {
+      const label = formatTranscriptionLanguageLabel(language.code, language.name, uiLocale);
+      return `<option value="${escapeHtml(language.code)}">${escapeHtml(label)}</option>`;
+    })
     .join("");
 }
 
