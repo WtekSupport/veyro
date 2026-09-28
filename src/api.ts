@@ -141,6 +141,10 @@ export interface AppSettings {
   weak_pc_ram_segment_cap: number;
   weak_pc_max_disk_queue_mb: number;
   weak_pc_reduce_prewarm: boolean;
+  vocal_separator_profile?: "quality" | "fast" | "legacy";
+  vocal_separator_output_format?: "wav" | "flac" | "match_source";
+  vocal_separator_output_dir?: string | null;
+  vocal_separator_normalize?: boolean;
 }
 
 export interface SettingsPatch {
@@ -207,6 +211,10 @@ export interface SettingsPatch {
   weak_pc_ram_segment_cap?: number;
   weak_pc_max_disk_queue_mb?: number;
   weak_pc_reduce_prewarm?: boolean;
+  vocal_separator_profile?: "quality" | "fast" | "legacy";
+  vocal_separator_output_format?: "wav" | "flac" | "match_source";
+  vocal_separator_output_dir?: string | null;
+  vocal_separator_normalize?: boolean;
 }
 
 export interface HomemakerLocalSetup {
@@ -308,6 +316,9 @@ export const EVENTS = {
   voiceFilesWindowReady: "app://voice-files-window-ready",
   audioSrtProgress: "app://audio-srt-progress",
   audioSrtWindowReady: "app://audio-srt-window-ready",
+  vocalSeparatorProgress: "app://vocal-separator-progress",
+  vocalSeparatorWindowReady: "app://vocal-separator-window-ready",
+  separationModelDownloadProgress: "app://separation-model-download-progress",
 } as const;
 
 export type VoiceFileProgressPhase =
@@ -963,6 +974,120 @@ export async function pickSubtitleSavePath(defaultName: string): Promise<string 
 
 export async function copyTextToClipboard(text: string): Promise<void> {
   return invoke<void>("copy_text_to_clipboard", { text });
+}
+
+export interface VocalSeparatorCapability {
+  available: boolean;
+}
+
+export async function getVocalSeparatorCapability(): Promise<VocalSeparatorCapability> {
+  return invoke<VocalSeparatorCapability>("get_vocal_separator_capability");
+}
+
+export async function openVocalSeparatorToolWindow(): Promise<void> {
+  return invoke<void>("open_vocal_separator_tool_window");
+}
+
+export async function openVocalSeparatorToolWindowAndWaitReady(): Promise<void> {
+  const timeoutMs = 20_000;
+  let settled = false;
+  let finishReady: () => void = () => {};
+  const readyPromise = new Promise<void>((resolve) => {
+    finishReady = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+  });
+  const timer = window.setTimeout(finishReady, timeoutMs);
+  const unlisten = await listen(EVENTS.vocalSeparatorWindowReady, () => {
+    window.clearTimeout(timer);
+    finishReady();
+  });
+
+  try {
+    await openVocalSeparatorToolWindow();
+    await readyPromise;
+  } finally {
+    window.clearTimeout(timer);
+    void unlisten();
+  }
+}
+
+export type VocalSeparatorProgressPhase =
+  | "decoding"
+  | "separating"
+  | "writing"
+  | "done";
+
+export interface VocalSeparatorProgressPayload {
+  path: string;
+  phase: VocalSeparatorProgressPhase;
+  percent?: number;
+  vocalsPath?: string;
+  instrumentalPath?: string;
+}
+
+export interface VocalSeparatorResult {
+  fileName: string;
+  vocalsPath: string;
+  instrumentalPath: string;
+  warnings: string[];
+}
+
+export interface VocalSeparatorOptions {
+  profile?: "quality" | "fast" | "legacy";
+  outputFormat?: "wav" | "flac" | "matchSource";
+  outputDir?: string | null;
+  normalize?: boolean;
+}
+
+export async function separateVocalFile(
+  path: string,
+  options: VocalSeparatorOptions = {},
+): Promise<VocalSeparatorResult> {
+  return invoke<VocalSeparatorResult>("separate_vocal_file", {
+    path,
+    options: {
+      profile: options.profile ?? null,
+      output_format: options.outputFormat ?? null,
+      output_dir: options.outputDir ?? null,
+      normalize: options.normalize ?? null,
+    },
+  });
+}
+
+export interface SeparationModelDownloadProgress {
+  profile: "quality" | "fast" | "legacy";
+  downloaded: number;
+  total: number | null;
+  percent: number | null;
+}
+
+export interface SeparationModelStatus {
+  profile: "quality" | "fast" | "legacy";
+  path: string;
+  exists: boolean;
+  downloadSizeMb: number;
+  ramMb: number;
+  vramMb: number | null;
+  selected: boolean;
+  hfModelPageUrl: string;
+}
+
+export async function getSeparationModelsStatus(): Promise<SeparationModelStatus[]> {
+  return invoke<SeparationModelStatus[]>("get_separation_models_status");
+}
+
+export async function downloadSeparationModel(
+  profile: SeparationModelStatus["profile"],
+): Promise<string> {
+  return invoke<string>("download_separation_model", { profile });
+}
+
+export async function pickVocalSeparatorOutputDir(): Promise<string | null> {
+  return invoke<string | null>("pick_vocal_separator_output_dir");
 }
 
 export async function getDictionaryPath(): Promise<string> {

@@ -124,6 +124,20 @@ pub fn download_client() -> Result<Client, String> {
         .map_err(|error| error.to_string())
 }
 
+/// GET with Hugging Face–friendly headers and optional `HF_TOKEN` bearer auth.
+pub fn authorized_download_request(client: &Client, url: &str) -> reqwest::RequestBuilder {
+    let mut request = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/octet-stream");
+    if let Ok(token) = std::env::var("HF_TOKEN") {
+        let token = token.trim();
+        if !token.is_empty() {
+            request = request.bearer_auth(token);
+        }
+    }
+    request
+}
+
 pub async fn download_model<F>(
     http: &Client,
     settings: &AppSettings,
@@ -219,17 +233,7 @@ async fn fetch_model_response(
     let mut last_error = String::new();
 
     for attempt in 1..=DOWNLOAD_MAX_ATTEMPTS {
-        let mut request = http
-            .get(download_url)
-            .header(reqwest::header::ACCEPT, "application/octet-stream");
-        if let Ok(token) = std::env::var("HF_TOKEN") {
-            let token = token.trim();
-            if !token.is_empty() {
-                request = request.bearer_auth(token);
-            }
-        }
-
-        match request.send().await {
+        match authorized_download_request(http, download_url).send().await {
             Ok(response) if response.status().is_success() => return Ok(response),
             Ok(response) => {
                 let status = response.status();

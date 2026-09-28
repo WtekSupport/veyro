@@ -21,6 +21,7 @@ pub const SKILL_IMPORT_WINDOW_LABEL: &str = "skill-import";
 pub const TOOLS_WINDOW_LABEL: &str = "tools";
 pub const TOOL_VOICE_FILES_WINDOW_LABEL: &str = "tool-voice-files";
 pub const TOOL_AUDIO_SRT_WINDOW_LABEL: &str = "tool-audio-srt";
+pub const TOOL_VOCAL_SEPARATOR_WINDOW_LABEL: &str = "tool-vocal-separator";
 pub const OVERLAY_WINDOW_LABEL: &str = "overlay";
 
 const WINDOW_WIDTH: f64 = 400.0;
@@ -39,6 +40,8 @@ const TOOL_VOICE_FILES_WINDOW_WIDTH: f64 = 440.0;
 const TOOL_VOICE_FILES_WINDOW_HEIGHT: f64 = 520.0;
 const TOOL_AUDIO_SRT_WINDOW_WIDTH: f64 = 480.0;
 const TOOL_AUDIO_SRT_WINDOW_HEIGHT: f64 = 640.0;
+const TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH: f64 = 460.0;
+const TOOL_VOCAL_SEPARATOR_WINDOW_HEIGHT: f64 = 580.0;
 const OVERLAY_WINDOW_WIDTH: f64 = 140.0;
 const OVERLAY_WINDOW_HEIGHT: f64 = 40.0;
 const OVERLAY_CORNER_MARGIN: f64 = 16.0;
@@ -204,6 +207,18 @@ pub fn configure_audio_srt_tool_window(window: &WebviewWindow) {
         window,
         TOOL_AUDIO_SRT_WINDOW_WIDTH,
         TOOL_AUDIO_SRT_WINDOW_HEIGHT,
+    );
+}
+
+pub fn configure_vocal_separator_tool_window(window: &WebviewWindow) {
+    configure_settings_window_chrome(window);
+    let _ = window.set_resizable(true);
+    let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
+    enforce_window_size(
+        window,
+        TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH,
+        TOOL_VOCAL_SEPARATOR_WINDOW_HEIGHT,
     );
 }
 
@@ -762,6 +777,76 @@ pub fn show_audio_srt_tool_window(app: &AppHandle) -> Result<(), String> {
 
     if !created {
         crate::app::events::emit_audio_srt_window_ready(app);
+    }
+
+    Ok(())
+}
+
+fn ensure_vocal_separator_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool), String> {
+    if let Some(window) = app.get_webview_window(TOOL_VOCAL_SEPARATOR_WINDOW_LABEL) {
+        return Ok((window, false));
+    }
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        TOOL_VOCAL_SEPARATOR_WINDOW_LABEL,
+        WebviewUrl::App("tool-vocal-separator.html".into()),
+    )
+    .title("Veyro")
+    .inner_size(
+        TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH,
+        TOOL_VOCAL_SEPARATOR_WINDOW_HEIGHT,
+    )
+    .decorations(true)
+    .resizable(true)
+    .maximizable(false)
+    .closable(true)
+    .center()
+    .visible(false)
+    .background_color(SETTINGS_WINDOW_BG);
+
+    #[cfg(windows)]
+    {
+        builder = builder.drag_and_drop(true);
+    }
+
+    if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        builder = builder.parent(&parent).map_err(|error| {
+            format!("failed to attach vocal separator tool window parent: {error}")
+        })?;
+    }
+
+    let window = builder
+        .build()
+        .map_err(|error| format!("failed to create vocal separator tool window: {error}"))?;
+
+    configure_vocal_separator_tool_window(&window);
+    Ok((window, true))
+}
+
+pub fn show_vocal_separator_tool_window(app: &AppHandle) -> Result<(), String> {
+    let (window, created) = ensure_vocal_separator_tool_window(app).inspect_err(|error| {
+        warn!("vocal separator tool window creation failed: {error}");
+    })?;
+
+    let _ = window.set_title(&crate::i18n::translate(
+        settings_ui_locale(app),
+        "tools.vocal_separator.window_title",
+        &[],
+    ));
+    configure_vocal_separator_tool_window(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_skip_taskbar(false);
+
+    #[cfg(windows)]
+    activate_window(&window);
+
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+
+    if !created {
+        crate::app::events::emit_vocal_separator_window_ready(app);
     }
 
     Ok(())

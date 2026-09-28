@@ -668,6 +668,69 @@ export const en = {
   "tools.audioSrt.failed.detail":
     "The subtitle pipeline failed before writing SRT. Check technical details and recognition settings.",
 
+  "tools.vocalSeparator.windowLoading": "Loading",
+  "tools.vocalSeparator.title": "Split vocals / instrumental",
+  "tools.vocalSeparator.description":
+    "Separate a song into vocal and instrumental stems locally on this device.",
+  "tools.vocalSeparator.dropHint": "Drop audio files here or choose from disk",
+  "tools.vocalSeparator.pickFiles": "Choose files…",
+  "tools.vocalSeparator.modelsTitle": "Separation models",
+  "tools.vocalSeparator.modelLabel": "Model",
+  "tools.vocalSeparator.modelSpecSize": "Model: ~{size} MB",
+  "tools.vocalSeparator.modelReady": "Ready",
+  "tools.vocalSeparator.modelNotDownloaded": "Not downloaded",
+  "tools.vocalSeparator.download": "Download",
+  "tools.vocalSeparator.downloading": "Downloading…",
+  "tools.vocalSeparator.profile.quality": "Google ReFormer (quality)",
+  "tools.vocalSeparator.profile.fast": "Google ReFormer (speed)",
+  "tools.vocalSeparator.profile.legacy": "Hybrid Transformer Demucs",
+  "tools.vocalSeparator.status.pending": "Waiting",
+  "tools.vocalSeparator.status.processing": "Processing…",
+  "tools.vocalSeparator.status.done": "Done",
+  "tools.vocalSeparator.status.error": "Error",
+  "tools.vocalSeparator.stage.decoding": "Decoding audio…",
+  "tools.vocalSeparator.stage.separating": "Separating stems…",
+  "tools.vocalSeparator.stage.writing": "Writing output files…",
+  "tools.vocalSeparator.outputVocals": "Vocals",
+  "tools.vocalSeparator.outputInstrumental": "Instrumental",
+  "tools.vocalSeparator.downloadStem": "Download file",
+  "tools.vocalSeparator.unavailable":
+    "Vocal separation is not included in this build. Rebuild with local separation features enabled.",
+  "tools.vocalSeparator.modelMissing":
+    "Download the model for the selected profile, or choose another profile in the list.",
+  "tools.vocalSeparator.modelLoadFailed": "Could not load the separation model.",
+  "tools.vocalSeparator.modelIncompatible":
+    "This model file is not compatible (STFT export, not waveform). Remove the old file under models/separation or download again. Google ReFormer may require HF_TOKEN if Hugging Face blocks access.",
+  "tools.vocalSeparator.separationFailed": "Separation failed.",
+  "tools.vocalSeparator.outOfMemory":
+    "Not enough memory or VRAM. Try Google ReFormer (speed) or close other GPU apps.",
+  "tools.vocalSeparator.downloadFailed": "Model download failed.",
+  "tools.vocalSeparator.downloadUnauthorized":
+    "Hugging Face denied access to this model file.",
+  "tools.vocalSeparator.hfAccessIntro":
+    "This model is hosted on Hugging Face. Complete the steps below, then click Download again.",
+  "tools.vocalSeparator.hfStepAcceptLicense":
+    "Open the model page, sign in, and accept the license if prompted.",
+  "tools.vocalSeparator.hfStepCreateToken":
+    "Create a read access token (Settings → Access Tokens).",
+  "tools.vocalSeparator.hfStepEnvToken":
+    "Set the HF_TOKEN environment variable to that token and restart Veyro.",
+  "tools.vocalSeparator.openHfModelPage": "Open model on Hugging Face",
+  "tools.vocalSeparator.openHfAccessTokens": "Create access token",
+  "tools.vocalSeparator.downloadInvalid": "Downloaded file failed validation.",
+  "tools.vocalSeparator.invalidPath": "Invalid file path.",
+  "tools.vocalSeparator.emptyAudio": "The file contains no usable audio.",
+  "tools.vocalSeparator.unsupportedFormat": "This audio format is not supported.",
+  "tools.vocalSeparator.readFailed": "Could not read or decode this audio file.",
+  "tools.vocalSeparator.failed": "Separation failed.",
+  "tools.vocalSeparator.warning.executionProviderFallback":
+    "GPU acceleration unavailable — using CPU for separation.",
+  "tools.vocalSeparator.warning.profileFallback":
+    "Switched to Google ReFormer (speed) due to memory limits.",
+  "about.separationModelsTitle": "Separation model credits",
+  "about.separationModelsBody":
+    "Google ReFormer (quality/speed): musetric/vocal-separation-roformer-onnx (host STFT + ONNX core; public download). Hybrid Transformer Demucs: StemSplitio/htdemucs-ft-vocals-onnx. Verify licenses before redistribution.",
+
   "about.open": "About Veyro",
   "about.version": "Version {version}",
   "about.hwidTitle": "Hardware ID",

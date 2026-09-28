@@ -51,6 +51,11 @@ export function renderAboutWindow(info: AppInfo, licenses: ThirdPartyLicense[]):
         <p class="about-body">${escapeHtml(t("about.licenseBody"))}</p>
       </section>
 
+      <section class="about-section">
+        <h2 class="about-section-title">${escapeHtml(t("about.separationModelsTitle"))}</h2>
+        <p class="about-body">${escapeHtml(t("about.separationModelsBody"))}</p>
+      </section>
+
       ${renderThirdPartyLicenses(licenses)}
 
       <section class="about-section">

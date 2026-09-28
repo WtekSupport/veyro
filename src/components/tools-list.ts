@@ -1,19 +1,19 @@
 import {
+  getVocalSeparatorCapability,
   openAudioSrtToolWindowAndWaitReady,
+  openVocalSeparatorToolWindowAndWaitReady,
   openVoiceFilesToolWindowAndWaitReady,
 } from "../api";
+import { escapeHtml } from "../lib/tool-file-queue";
 import { iconTools } from "./icons";
 import { t } from "../i18n";
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function renderToolsCards(voiceFilesOpening: boolean, audioSrtOpening: boolean): string {
+function renderToolsCards(
+  voiceFilesOpening: boolean,
+  audioSrtOpening: boolean,
+  vocalSepOpening: boolean,
+  showVocalSep: boolean,
+): string {
   return `
     <ul class="tools-list" role="list">
       <li>
@@ -50,6 +50,29 @@ function renderToolsCards(voiceFilesOpening: boolean, audioSrtOpening: boolean):
           <span class="tools-card-desc">${escapeHtml(t("tools.audioSrt.description"))}</span>
         </button>
       </li>
+      ${
+        showVocalSep
+          ? `
+      <li>
+        <button
+          type="button"
+          class="tools-card${vocalSepOpening ? " tools-card--loading" : ""}"
+          data-open-vocal-separator-tool
+          ${vocalSepOpening ? "disabled" : ""}
+          aria-busy="${vocalSepOpening ? "true" : "false"}"
+        >
+          ${
+            vocalSepOpening
+              ? `<span class="tools-card-loading-badge">${escapeHtml(t("tools.vocalSeparator.windowLoading"))}</span>`
+              : ""
+          }
+          <span class="tools-card-title">${escapeHtml(t("tools.vocalSeparator.title"))}</span>
+          <span class="tools-card-desc">${escapeHtml(t("tools.vocalSeparator.description"))}</span>
+        </button>
+      </li>
+      `
+          : ""
+      }
     </ul>
   `;
 }
@@ -58,6 +81,8 @@ function renderToolsCards(voiceFilesOpening: boolean, audioSrtOpening: boolean):
 export function renderToolsPanelEmbedded(
   voiceFilesOpening = false,
   audioSrtOpening = false,
+  vocalSepOpening = false,
+  showVocalSep = false,
 ): string {
   return `
     <div class="status-quick-settings-panel tools-in-main-panel" data-tools-panel-root>
@@ -74,7 +99,7 @@ export function renderToolsPanelEmbedded(
         >×</button>
       </header>
       <div class="status-quick-settings-body tools-in-main-body" data-tools-cards-host>
-        ${renderToolsCards(voiceFilesOpening, audioSrtOpening)}
+        ${renderToolsCards(voiceFilesOpening, audioSrtOpening, vocalSepOpening, showVocalSep)}
       </div>
     </div>
   `;
@@ -95,25 +120,39 @@ export function renderToolsBadgeButton(active: boolean): string {
 }
 
 /** @deprecated Standalone tools window — use embedded panel in main UI. */
-export function renderToolsList(voiceFilesOpening = false, audioSrtOpening = false): string {
-  return renderToolsPanelEmbedded(voiceFilesOpening, audioSrtOpening);
+export function renderToolsList(
+  voiceFilesOpening = false,
+  audioSrtOpening = false,
+  vocalSepOpening = false,
+  showVocalSep = false,
+): string {
+  return renderToolsPanelEmbedded(voiceFilesOpening, audioSrtOpening, vocalSepOpening, showVocalSep);
 }
 
-function refreshToolsCards(
-  host: HTMLElement,
-  voiceFilesOpening: boolean,
-  audioSrtOpening: boolean,
-): void {
-  host.innerHTML = renderToolsCards(voiceFilesOpening, audioSrtOpening);
+function refreshToolsCards(host: HTMLElement): void {
+  const flags = readOpeningFlags(host);
+  const showVocalSep = host.dataset.vocalSepAvailable === "true";
+  host.innerHTML = renderToolsCards(
+    flags.voice,
+    flags.srt,
+    flags.vocalSep,
+    showVocalSep,
+  );
   const panel = host.closest("[data-tools-panel-root]") ?? host;
   bindVoiceFilesOpen(panel);
   bindAudioSrtOpen(panel);
+  bindVocalSepOpen(panel);
 }
 
-function readOpeningFlags(host: HTMLElement): { voice: boolean; srt: boolean } {
+function readOpeningFlags(host: HTMLElement): {
+  voice: boolean;
+  srt: boolean;
+  vocalSep: boolean;
+} {
   return {
     voice: host.dataset.voiceFilesOpening === "true",
     srt: host.dataset.audioSrtOpening === "true",
+    vocalSep: host.dataset.vocalSepOpening === "true",
   };
 }
 
@@ -142,16 +181,14 @@ async function openVoiceFilesFromCard(root: ParentNode): Promise<void> {
     return;
   }
   host.dataset.voiceFilesOpening = "true";
-  const flags = readOpeningFlags(host);
-  refreshToolsCards(host, true, flags.srt);
+  refreshToolsCards(host);
   try {
     await openVoiceFilesToolWindowAndWaitReady();
   } catch (error) {
     console.error("open voice files tool", error);
   } finally {
     host.dataset.voiceFilesOpening = "false";
-    const after = readOpeningFlags(host);
-    refreshToolsCards(host, false, after.srt);
+    refreshToolsCards(host);
   }
 }
 
@@ -173,20 +210,61 @@ async function openAudioSrtFromCard(root: ParentNode): Promise<void> {
     return;
   }
   host.dataset.audioSrtOpening = "true";
-  const flags = readOpeningFlags(host);
-  refreshToolsCards(host, flags.voice, true);
+  refreshToolsCards(host);
   try {
     await openAudioSrtToolWindowAndWaitReady();
   } catch (error) {
     console.error("open audio srt tool", error);
   } finally {
     host.dataset.audioSrtOpening = "false";
-    const after = readOpeningFlags(host);
-    refreshToolsCards(host, after.voice, false);
+    refreshToolsCards(host);
+  }
+}
+
+function bindVocalSepOpen(root: ParentNode): void {
+  root
+    .querySelector<HTMLButtonElement>("[data-open-vocal-separator-tool]")
+    ?.addEventListener("click", () => {
+      void openVocalSepFromCard(root);
+    });
+}
+
+async function openVocalSepFromCard(root: ParentNode): Promise<void> {
+  const panel = toolsPanelFromRoot(root);
+  const host = panel.querySelector<HTMLElement>("[data-tools-cards-host]");
+  if (!host) {
+    return;
+  }
+  if (host.dataset.vocalSepOpening === "true") {
+    return;
+  }
+  host.dataset.vocalSepOpening = "true";
+  refreshToolsCards(host);
+  try {
+    await openVocalSeparatorToolWindowAndWaitReady();
+  } catch (error) {
+    console.error("open vocal separator tool", error);
+  } finally {
+    host.dataset.vocalSepOpening = "false";
+    refreshToolsCards(host);
   }
 }
 
 export function bindToolsList(root: ParentNode): void {
+  const host = root.querySelector<HTMLElement>("[data-tools-cards-host]");
+  if (host && host.dataset.vocalSepCapabilityLoaded !== "true") {
+    host.dataset.vocalSepCapabilityLoaded = "true";
+    void getVocalSeparatorCapability()
+      .then(({ available }) => {
+        host.dataset.vocalSepAvailable = available ? "true" : "false";
+        refreshToolsCards(host);
+      })
+      .catch(() => {
+        host.dataset.vocalSepAvailable = "false";
+        refreshToolsCards(host);
+      });
+  }
   bindVoiceFilesOpen(root);
   bindAudioSrtOpen(root);
+  bindVocalSepOpen(root);
 }

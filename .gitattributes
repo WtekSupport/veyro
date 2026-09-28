@@ -29,8 +29,10 @@ package.json export-ignore
 README.MD export-ignore
 skill-import.html export-ignore
 tool-audio-srt.html export-ignore
+tool-vocal-separator.html export-ignore
 tool-voice-files.html export-ignore
 tools.html export-ignore
+crates export-ignore
 tsconfig.json export-ignore
 version.json export-ignore
 vite.config.ts export-ignore

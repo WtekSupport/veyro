@@ -430,6 +430,14 @@ pub struct AppSettings {
     pub weak_pc_max_disk_queue_mb: u32,
     #[serde(default = "default_weak_pc_reduce_prewarm")]
     pub weak_pc_reduce_prewarm: bool,
+    #[serde(default)]
+    pub vocal_separator_profile: crate::settings::VocalSeparatorProfile,
+    #[serde(default)]
+    pub vocal_separator_output_format: crate::settings::VocalSeparatorOutputFormat,
+    #[serde(default)]
+    pub vocal_separator_output_dir: Option<String>,
+    #[serde(default = "default_vocal_separator_normalize")]
+    pub vocal_separator_normalize: bool,
 }
 
 fn default_weak_pc_spill_to_disk() -> bool {
@@ -446,6 +454,10 @@ fn default_weak_pc_max_disk_queue_mb() -> u32 {
 
 fn default_weak_pc_reduce_prewarm() -> bool {
     true
+}
+
+fn default_vocal_separator_normalize() -> bool {
+    false
 }
 
 fn default_vad_voice_threshold_percent() -> u8 {
@@ -564,6 +576,10 @@ impl Default for AppSettings {
             weak_pc_ram_segment_cap: default_weak_pc_ram_segment_cap(),
             weak_pc_max_disk_queue_mb: default_weak_pc_max_disk_queue_mb(),
             weak_pc_reduce_prewarm: default_weak_pc_reduce_prewarm(),
+            vocal_separator_profile: crate::settings::VocalSeparatorProfile::default(),
+            vocal_separator_output_format: crate::settings::VocalSeparatorOutputFormat::default(),
+            vocal_separator_output_dir: None,
+            vocal_separator_normalize: default_vocal_separator_normalize(),
         }
     }
 }
@@ -1008,6 +1024,16 @@ pub struct SettingsPatch {
     pub weak_pc_ram_segment_cap: Option<u32>,
     pub weak_pc_max_disk_queue_mb: Option<u32>,
     pub weak_pc_reduce_prewarm: Option<bool>,
+    pub vocal_separator_profile: Option<crate::settings::VocalSeparatorProfile>,
+    pub vocal_separator_output_format: Option<crate::settings::VocalSeparatorOutputFormat>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
+    pub vocal_separator_output_dir: Option<Option<String>>,
+    pub vocal_separator_normalize: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -1215,6 +1241,18 @@ impl SettingsPatch {
         }
         if let Some(weak_pc_reduce_prewarm) = self.weak_pc_reduce_prewarm {
             settings.weak_pc_reduce_prewarm = weak_pc_reduce_prewarm;
+        }
+        if let Some(vocal_separator_profile) = self.vocal_separator_profile {
+            settings.vocal_separator_profile = vocal_separator_profile;
+        }
+        if let Some(vocal_separator_output_format) = self.vocal_separator_output_format {
+            settings.vocal_separator_output_format = vocal_separator_output_format;
+        }
+        if let Some(vocal_separator_output_dir) = self.vocal_separator_output_dir {
+            settings.vocal_separator_output_dir = vocal_separator_output_dir;
+        }
+        if let Some(vocal_separator_normalize) = self.vocal_separator_normalize {
+            settings.vocal_separator_normalize = vocal_separator_normalize;
         }
     }
 }

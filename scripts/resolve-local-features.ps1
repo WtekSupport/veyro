@@ -78,6 +78,13 @@ function Resolve-LocalFeatures {
         }
     }
 
+    if ($env:VEYRO_DISABLE_SEPARATION -ne "1") {
+        $parts += "local-separation"
+        if ($IsWindows -and $env:VEYRO_DISABLE_GPU -ne "1") {
+            $parts += "local-separation-directml"
+        }
+    }
+
     if ($parts.Count -eq 0) {
         Write-Warning "All local features disabled - building cloud-only (OpenAI) stack."
         return ""

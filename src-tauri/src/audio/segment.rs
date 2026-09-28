@@ -10,10 +10,12 @@ pub struct AudioSegment {
 
 impl AudioSegment {
     pub fn new(samples: Vec<f32>, sample_rate: u32, channels: u16) -> Self {
+        let channels = channels.max(1);
         let duration_ms = if sample_rate == 0 {
             0
         } else {
-            (samples.len() as u64 * 1000) / sample_rate as u64
+            let frames = samples.len() as u64 / channels as u64;
+            (frames * 1000) / sample_rate as u64
         };
 
         Self {

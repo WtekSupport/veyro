@@ -671,6 +671,69 @@ export const ru: Record<MessageKey, string> = {
   "tools.audioSrt.failed.detail":
     "Цепочка субтитров прервалась до записи SRT. Проверьте технические подробности и настройки распознавания.",
 
+  "tools.vocalSeparator.windowLoading": "Загрузка",
+  "tools.vocalSeparator.title": "Разделить вокал и минус",
+  "tools.vocalSeparator.description":
+    "Локальное разделение песни на вокал и инструментал на этом устройстве.",
+  "tools.vocalSeparator.dropHint": "Перетащите аудиофайлы сюда или выберите на диске",
+  "tools.vocalSeparator.pickFiles": "Выбрать файлы…",
+  "tools.vocalSeparator.modelsTitle": "Модели разделения",
+  "tools.vocalSeparator.modelLabel": "Модель",
+  "tools.vocalSeparator.modelSpecSize": "Модель: ~{size} МБ",
+  "tools.vocalSeparator.modelReady": "Готова",
+  "tools.vocalSeparator.modelNotDownloaded": "Не скачана",
+  "tools.vocalSeparator.download": "Скачать",
+  "tools.vocalSeparator.downloading": "Загрузка…",
+  "tools.vocalSeparator.profile.quality": "Google ReFormer (качество)",
+  "tools.vocalSeparator.profile.fast": "Google ReFormer (скорость)",
+  "tools.vocalSeparator.profile.legacy": "Hybrid Transformer Demucs",
+  "tools.vocalSeparator.status.pending": "Ожидание",
+  "tools.vocalSeparator.status.processing": "Обработка…",
+  "tools.vocalSeparator.status.done": "Готово",
+  "tools.vocalSeparator.status.error": "Ошибка",
+  "tools.vocalSeparator.stage.decoding": "Декодирование аудио…",
+  "tools.vocalSeparator.stage.separating": "Разделение стемов…",
+  "tools.vocalSeparator.stage.writing": "Запись файлов…",
+  "tools.vocalSeparator.outputVocals": "Вокал",
+  "tools.vocalSeparator.outputInstrumental": "Минус",
+  "tools.vocalSeparator.downloadStem": "Скачать файл",
+  "tools.vocalSeparator.unavailable":
+    "Разделение вокала недоступно в этой сборке. Пересоберите приложение с local-separation.",
+  "tools.vocalSeparator.modelMissing":
+    "Сначала скачайте модель для выбранного профиля или выберите другую в списке.",
+  "tools.vocalSeparator.modelLoadFailed": "Не удалось загрузить модель разделения.",
+  "tools.vocalSeparator.modelIncompatible":
+    "Файл модели не подходит для этого инструмента (экспорт STFT, а не waveform). Удалите старый файл в папке models/separation или нажмите «Скачать» снова. Для Google ReFormer может понадобиться HF_TOKEN, если Hugging Face закрывает доступ.",
+  "tools.vocalSeparator.separationFailed": "Разделение не удалось.",
+  "tools.vocalSeparator.outOfMemory":
+    "Недостаточно памяти или VRAM. Попробуйте Google ReFormer (скорость) или закройте другие GPU-приложения.",
+  "tools.vocalSeparator.downloadFailed": "Не удалось скачать модель.",
+  "tools.vocalSeparator.downloadUnauthorized":
+    "Hugging Face отклонил доступ к файлу модели.",
+  "tools.vocalSeparator.hfAccessIntro":
+    "Модель лежит на Hugging Face. Выполните шаги ниже и снова нажмите «Скачать».",
+  "tools.vocalSeparator.hfStepAcceptLicense":
+    "Откройте страницу модели, войдите в аккаунт и примите лицензию, если сайт просит.",
+  "tools.vocalSeparator.hfStepCreateToken":
+    "Создайте read access token (Настройки → Access Tokens).",
+  "tools.vocalSeparator.hfStepEnvToken":
+    "Задайте переменную окружения HF_TOKEN с этим токеном и перезапустите Veyro.",
+  "tools.vocalSeparator.openHfModelPage": "Открыть модель на Hugging Face",
+  "tools.vocalSeparator.openHfAccessTokens": "Создать access token",
+  "tools.vocalSeparator.downloadInvalid": "Скачанный файл не прошёл проверку.",
+  "tools.vocalSeparator.invalidPath": "Неверный путь к файлу.",
+  "tools.vocalSeparator.emptyAudio": "В файле нет пригодного аудио.",
+  "tools.vocalSeparator.unsupportedFormat": "Формат аудио не поддерживается.",
+  "tools.vocalSeparator.readFailed": "Не удалось прочитать или декодировать файл.",
+  "tools.vocalSeparator.failed": "Разделение не удалось.",
+  "tools.vocalSeparator.warning.executionProviderFallback":
+    "GPU недоступен — разделение выполняется на CPU.",
+  "tools.vocalSeparator.warning.profileFallback":
+    "Из-за нехватки памяти выбран Google ReFormer (скорость).",
+  "about.separationModelsTitle": "Модели разделения",
+  "about.separationModelsBody":
+    "Google ReFormer (качество/скорость): musetric/vocal-separation-roformer-onnx (STFT на хосте + ONNX-ядро; публичная загрузка). Hybrid Transformer Demucs: StemSplitio/htdemucs-ft-vocals-onnx. Проверяйте лицензии перед распространением.",
+
   "about.open": "О программе Veyro",
   "about.version": "Версия {version}",
   "about.hwidTitle": "Идентификатор устройства",
