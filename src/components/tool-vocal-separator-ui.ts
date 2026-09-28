@@ -152,6 +152,9 @@ function renderModelPanelError(
     if (model) {
       return renderHfAccessHelp(model);
     }
+    return `<p class="field-hint vocal-sep-models-error" role="alert">${escapeHtml(
+      t("tools.vocalSeparator.downloadUnauthorized"),
+    )}</p>`;
   }
   return `<p class="field-hint vocal-sep-models-error" role="alert">${escapeHtml(error.message)}</p>`;
 }
@@ -620,7 +623,7 @@ export function createVocalSeparatorController(root: HTMLElement): {
               ...entry,
               status: "error",
               errorRaw: raw,
-              errorKey: toolErrorMessageKey(raw),
+              errorKey: toolErrorMessageKey(raw, "tools.vocalSeparator.failed"),
             }
           : entry,
       );
