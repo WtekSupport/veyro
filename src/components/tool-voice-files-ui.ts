@@ -14,6 +14,7 @@ import {
   formatToolErrorForResultField,
   toolErrorMessageKey,
 } from "../lib/tool-error-display";
+import { escapeHtml, fileNameFromPath, pathsMatch } from "../lib/tool-file-queue";
 import { runToolWithSttLanguageRecovery } from "../lib/tool-stt-auto-recovery";
 import { t, type MessageKey } from "../i18n";
 
@@ -50,24 +51,6 @@ function resultFootnote(job: VoiceFileJob | null | undefined): string {
     return t("tools.voiceFiles.aiRewriteDone");
   }
   return "";
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function fileNameFromPath(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const segment = normalized.split("/").pop();
-  return segment ?? path;
-}
-
-function pathsMatch(left: string, right: string): boolean {
-  return left.replace(/\\/g, "/").toLowerCase() === right.replace(/\\/g, "/").toLowerCase();
 }
 
 function stageLabel(phase: VoiceFileProgressPhase | null): string {

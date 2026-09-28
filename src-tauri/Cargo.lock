@@ -7397,7 +7397,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "veyro"
-version = "1.9.4"
+version = "1.9.20"
 dependencies = [
  "aes-gcm",
  "arboard",
@@ -7457,6 +7457,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "veyro-separation",
  "wavekat-vad",
  "webrtc-vad",
  "whisper-rs",
@@ -7465,6 +7466,16 @@ dependencies = [
  "wmi",
  "x11rb",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "veyro-separation"
+version = "0.1.0"
+dependencies = [
+ "ort",
+ "realfft",
+ "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]

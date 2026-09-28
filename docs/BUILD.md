@@ -170,10 +170,13 @@ Portable Vulkan SDK: положите `vulkan_sdk.exe` в `.tools/` — расп
 | `VEYRO_DISABLE_LOCAL_LLM=1` | Без локального LLM (нет «Оптимизация (ИИ)» offline) |
 | `VEYRO_DISABLE_LOCAL_WHISPER=1` | Без локального Whisper (только OpenAI STT) |
 | `VEYRO_DISABLE_SHERPA_STT=1` | Без sherpa-onnx (Parakeet / Qwen3); только Whisper локально |
+| `VEYRO_DISABLE_SEPARATION=1` | Без инструмента «Разделить вокал / минус» (`local-separation`) |
 | `VEYRO_DISABLE_VAD_SILERO=1` | Без Silero VAD (только WebRTC в детекторе речи) |
 | `VEYRO_ALLOW_CUDA=1` | Разрешить авто-выбор CUDA вместо Vulkan (NVIDIA) |
 | `VEYRO_CMAKE_PARALLEL` | Параллелизм cmake для llama.cpp (по умолчанию `1`) |
 | `VEYRO_CARGO_TARGET_DIR` | Переопределить каталог сборки (по умолчанию `C:\veyro-target`) |
+
+Модели разделения: **Quality** / **Fast** — [musetric/vocal-separation-roformer-onnx](https://huggingface.co/musetric/vocal-separation-roformer-onnx) (`syhft_core_t1100.onnx` + `.onnx.data`, STFT на стороне Veyro, CPU); **Legacy** — [StemSplitio/htdemucs-ft-vocals-onnx](https://huggingface.co/StemSplitio/htdemucs-ft-vocals-onnx). После обновления перекачайте модели из окна инструмента (старые silverdaw `folded_fp16_webgpu` больше не используются).
 
 Устаревшие (не рекомендуются): `VEYRO_WHISPER_FEATURE`, `VEYRO_LLM_FEATURE` — жёстко задают feature; используйте opt-out флаги выше.
 

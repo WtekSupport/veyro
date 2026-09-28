@@ -7,6 +7,7 @@ pub mod local_stt;
 pub mod secrets;
 pub mod stt_catalog;
 pub mod storage;
+pub mod vocal_separator;
 
 pub use config::{
     local_llm_compiled, local_llm_gpu_backend_label, local_llm_gpu_compiled,
@@ -32,4 +33,5 @@ pub use data_storage::{
     resolve_llm_models_dir, resolve_stt_models_dir, DICTIONARY_FILE, SUBDIR_DICTIONARY,
     SUBDIR_LLM_MODELS, SUBDIR_STT_MODELS,
 };
+pub use vocal_separator::{VocalSeparatorOutputFormat, VocalSeparatorProfile};
 pub use storage::{load_settings, normalize_locale_dependent_settings, save_settings};

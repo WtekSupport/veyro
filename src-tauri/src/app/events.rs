@@ -27,6 +27,9 @@ pub const VOICE_FILE_PROGRESS: &str = "app://voice-file-progress";
 pub const VOICE_FILES_WINDOW_READY: &str = "app://voice-files-window-ready";
 pub const AUDIO_SRT_PROGRESS: &str = "app://audio-srt-progress";
 pub const AUDIO_SRT_WINDOW_READY: &str = "app://audio-srt-window-ready";
+pub const VOCAL_SEPARATOR_PROGRESS: &str = "app://vocal-separator-progress";
+pub const VOCAL_SEPARATOR_WINDOW_READY: &str = "app://vocal-separator-window-ready";
+pub const SEPARATION_MODEL_DOWNLOAD_PROGRESS: &str = "app://separation-model-download-progress";
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -175,4 +178,50 @@ pub fn emit_audio_srt_progress(app: &AppHandle, payload: AudioSrtProgressPayload
 
 pub fn emit_audio_srt_window_ready(app: &AppHandle) {
     let _ = app.emit(AUDIO_SRT_WINDOW_READY, ());
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VocalSeparatorProgressPhase {
+    Decoding,
+    Separating,
+    Writing,
+    Done,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VocalSeparatorProgressPayload {
+    pub path: String,
+    pub phase: VocalSeparatorProgressPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocals_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instrumental_path: Option<String>,
+}
+
+pub fn emit_vocal_separator_progress(app: &AppHandle, payload: VocalSeparatorProgressPayload) {
+    let _ = app.emit(VOCAL_SEPARATOR_PROGRESS, payload);
+}
+
+pub fn emit_vocal_separator_window_ready(app: &AppHandle) {
+    let _ = app.emit(VOCAL_SEPARATOR_WINDOW_READY, ());
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeparationModelDownloadProgressPayload {
+    pub profile: crate::settings::VocalSeparatorProfile,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub percent: Option<f32>,
+}
+
+pub fn emit_separation_model_download_progress(
+    app: &AppHandle,
+    payload: SeparationModelDownloadProgressPayload,
+) {
+    let _ = app.emit(SEPARATION_MODEL_DOWNLOAD_PROGRESS, payload);
 }

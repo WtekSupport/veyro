@@ -197,7 +197,7 @@ pub async fn transcribe_audio_to_srt(
 ) -> Result<AudioToSrtResult, String> {
     let _guard = ToolsTranscriptionGuard::try_begin(&ctx)?;
 
-    let (path_key, path_buf, file_name) = validate_tool_file_path(&path)?;
+    let (path_key, path_buf, file_name) = validate_tool_file_path(&path, "tools.audioSrt")?;
 
     let base_settings = ctx
         .controller

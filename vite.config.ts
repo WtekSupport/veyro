@@ -16,6 +16,7 @@ export default defineConfig(() => ({
         tools: path.resolve(__dirname, "tools.html"),
         toolVoiceFiles: path.resolve(__dirname, "tool-voice-files.html"),
         toolAudioSrt: path.resolve(__dirname, "tool-audio-srt.html"),
+        toolVocalSeparator: path.resolve(__dirname, "tool-vocal-separator.html"),
       },
     },
   },

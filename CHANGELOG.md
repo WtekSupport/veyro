@@ -12,6 +12,17 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.9.21] — 2026-09-28
+
+### Added
+
+- **Tools:** **Split vocals / instrumental** — offline stem separation with downloadable ONNX models, progress UI, and preview/download for vocals and instrumental stems.
+- **Separation models:** **Google ReFormer (quality)** and **Google ReFormer (speed)** (musetric Mel-Band RoFormer, host STFT + CPU ONNX); **Hybrid Transformer Demucs** (StemSplitio htdemucs-ft vocals).
+
+### Fixed
+
+- **Separation:** STFT time dimension is read from the ONNX graph so frame count matches the loaded model; iSTFT uses correct realFFT normalization.
+
 ## [1.9.4] — 2026-09-27
 
 ### Added

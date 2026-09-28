@@ -23,7 +23,7 @@ pub fn samples_to_i16(segment: &AudioSegment) -> Vec<i16> {
 pub fn encode_wav(segment: &AudioSegment) -> Result<Vec<u8>, String> {
     let mut buffer = Cursor::new(Vec::new());
     let spec = WavSpec {
-        channels: 1,
+        channels: segment.channels.max(1),
         sample_rate: segment.sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
@@ -73,7 +73,8 @@ pub fn encode_flac(segment: &AudioSegment) -> Result<Vec<u8>, String> {
         .map(i32::from)
         .collect();
 
-    let source = MemSource::from_samples(&pcm, 1, 16, segment.sample_rate as usize);
+    let channels = segment.channels.max(1) as usize;
+    let source = MemSource::from_samples(&pcm, channels, 16, segment.sample_rate as usize);
     let config = Encoder::default()
         .into_verified()
         .map_err(|error| format!("{error:?}"))?;

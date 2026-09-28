@@ -80,6 +80,10 @@ if ($features -match "local-sherpa-stt") {
     & (Join-Path $PSScriptRoot "stage-sherpa-dlls.ps1") -RepoRoot $repoRoot -Required
     $syncWindowsBundle = $true
 }
+if ($features -match "local-separation") {
+    & (Join-Path $PSScriptRoot "stage-sherpa-dlls.ps1") -RepoRoot $repoRoot
+    $syncWindowsBundle = $true
+}
 if ($features -match "silero-te") {
     & (Join-Path $PSScriptRoot "stage-libtorch-dlls.ps1") -RepoRoot $repoRoot -Profile "release" -Required
     $syncWindowsBundle = $true

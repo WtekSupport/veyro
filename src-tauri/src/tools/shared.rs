@@ -5,7 +5,10 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::app::context::AppContext;
-use crate::audio::decode_file::{decode_audio_file_with_progress, DecodeProgressCallback};
+use crate::audio::decode_file::{
+    decode_audio_file_raw_with_progress, decode_audio_file_with_progress, DecodeProgressCallback,
+};
+use crate::audio::resampler::{resample_preserve_channels, SEPARATION_SAMPLE_RATE};
 use crate::audio::preprocess::{preprocess_segment, PreprocessOptions, PreprocessResult};
 use crate::audio::segment::AudioSegment;
 use crate::settings::AppSettings;
@@ -53,10 +56,10 @@ impl Drop for ToolsTranscriptionGuard<'_> {
     }
 }
 
-pub fn validate_tool_file_path(path: &str) -> Result<(String, PathBuf, String), String> {
+pub fn validate_tool_file_path(path: &str, error_prefix: &str) -> Result<(String, PathBuf, String), String> {
     let path_key = path.trim().to_string();
     if path_key.is_empty() {
-        return Err("tools.voiceFiles.invalidPath".to_string());
+        return Err(format!("{error_prefix}.invalidPath"));
     }
     let path_buf = PathBuf::from(&path_key);
     let file_name = path_buf
@@ -65,7 +68,7 @@ pub fn validate_tool_file_path(path: &str) -> Result<(String, PathBuf, String), 
         .unwrap_or("")
         .to_string();
     if file_name.is_empty() {
-        return Err("tools.voiceFiles.invalidPath".to_string());
+        return Err(format!("{error_prefix}.invalidPath"));
     }
     Ok((path_key, path_buf, file_name))
 }
@@ -138,4 +141,63 @@ pub fn decode_and_preprocess_for_tools(
         segment: preprocessed.segment,
         skipped_as_silence: preprocessed.skipped_as_silence,
     })
+}
+
+/// Decode for vocal separation: preserve stereo (down/up-mix to 2ch) at model sample rate.
+pub fn decode_for_separation(
+    path: &Path,
+    decode_progress: Option<DecodeProgressCallback>,
+    error_prefix: &str,
+) -> Result<(AudioSegment, u32), String> {
+    let raw = decode_audio_file_raw_with_progress(path, decode_progress.clone())
+        .map_err(|error| map_decode_error(error, error_prefix))?;
+
+    let original_sample_rate = raw.sample_rate.max(1);
+
+    if let Some(callback) = &decode_progress {
+        callback(92);
+    }
+
+    let channels = if raw.channels <= 1 { 1 } else { 2 };
+    let samples = if raw.channels <= 1 {
+        raw.samples.clone()
+    } else if raw.channels == 2 {
+        raw.samples.clone()
+    } else {
+        let ch = raw.channels as usize;
+        raw.samples
+            .chunks(ch)
+            .flat_map(|frame| {
+                let left = frame.first().copied().unwrap_or(0.0);
+                let right = frame.get(1).copied().unwrap_or(left);
+                [left, right]
+            })
+            .collect()
+    };
+
+    let resampled = resample_preserve_channels(
+        &samples,
+        raw.sample_rate,
+        SEPARATION_SAMPLE_RATE,
+        channels,
+    )
+    .map_err(|error| format!("{error_prefix}.readFailed|{error}"))?;
+
+    let stereo = interleaved_stereo(&resampled, channels);
+
+    if let Some(callback) = &decode_progress {
+        callback(100);
+    }
+
+    Ok((
+        AudioSegment::new(stereo, SEPARATION_SAMPLE_RATE, 2),
+        original_sample_rate,
+    ))
+}
+
+fn interleaved_stereo(samples: &[f32], channels: u16) -> Vec<f32> {
+    if channels <= 1 {
+        return samples.iter().flat_map(|sample| [*sample, *sample]).collect();
+    }
+    samples.to_vec()
 }

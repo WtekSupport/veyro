@@ -10,6 +10,7 @@ mod game_input;
 mod hwid;
 mod hotkey;
 mod i18n;
+mod ml;
 mod notify;
 pub mod injection;
 mod network;
@@ -17,6 +18,7 @@ mod privacy;
 pub mod llm;
 mod setup;
 pub mod settings;
+pub mod separation;
 pub mod text;
 pub mod subtitles;
 pub mod timed_text;
@@ -1653,6 +1655,145 @@ async fn transcribe_audio_to_srt(
     tools::transcribe_audio_to_srt(app, Arc::clone(ctx.inner()), path, options).await
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VocalSeparatorCapability {
+    available: bool,
+}
+
+#[tauri::command]
+fn get_vocal_separator_capability() -> VocalSeparatorCapability {
+    VocalSeparatorCapability {
+        available: cfg!(feature = "local-separation"),
+    }
+}
+
+#[tauri::command]
+async fn open_vocal_separator_tool_window(app: AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    window::await_on_main_thread(&app, move || {
+        window::show_vocal_separator_tool_window(&handle)
+    })
+    .await?
+}
+
+#[cfg(feature = "local-separation")]
+#[tauri::command]
+async fn separate_vocal_file(
+    app: tauri::AppHandle,
+    path: String,
+    options: Option<tools::VocalSeparatorInvokeOptions>,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::VocalSeparatorResult, String> {
+    tools::separate_vocal_file(
+        app,
+        Arc::clone(ctx.inner()),
+        path,
+        options.unwrap_or_default(),
+    )
+    .await
+}
+
+#[cfg(not(feature = "local-separation"))]
+#[tauri::command]
+async fn separate_vocal_file(
+    _app: tauri::AppHandle,
+    _path: String,
+    _options: Option<tools::VocalSeparatorInvokeOptions>,
+    _ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::VocalSeparatorResult, String> {
+    Err("tools.vocalSeparator.unavailable".to_string())
+}
+
+#[cfg(feature = "local-separation")]
+#[tauri::command]
+fn get_separation_models_status(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<Vec<separation::model_store::SeparationModelStatus>, String> {
+    let settings = ctx
+        .controller
+        .lock()
+        .map_err(|_| "application controller lock poisoned".to_string())?
+        .settings()
+        .clone();
+    separation::model_store::list_status(&settings).map_err(|error| error.to_string())
+}
+
+#[cfg(not(feature = "local-separation"))]
+#[tauri::command]
+fn get_separation_models_status() -> Result<Vec<serde_json::Value>, String> {
+    Err("tools.vocalSeparator.unavailable".to_string())
+}
+
+#[tauri::command]
+fn pick_vocal_separator_output_dir() -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .pick_folder()
+        .map(|path| path.to_string_lossy().into_owned()))
+}
+
+#[cfg(feature = "local-separation")]
+#[tauri::command]
+async fn download_separation_model(
+    app: AppHandle,
+    profile: settings::VocalSeparatorProfile,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<String, String> {
+    let settings = ctx
+        .controller
+        .lock()
+        .map_err(|_| "application controller lock poisoned".to_string())?
+        .settings()
+        .clone();
+
+    ctx.inner().record_activity(
+        Some(&app),
+        ActivityLevel::Info,
+        "activity.model.download_started",
+        json!({ "model": format!("separation/{}", profile.as_str()) }),
+    );
+
+    let app_handle = app.clone();
+    let path = separation::model_store::download_model(&settings, profile, move |progress| {
+        app::events::emit_separation_model_download_progress(
+            &app_handle,
+            app::events::SeparationModelDownloadProgressPayload {
+                profile,
+                downloaded: progress.downloaded,
+                total: progress.total,
+                percent: progress.percent,
+            },
+        );
+    })
+    .await
+    .inspect_err(|error| {
+        ctx.inner().record_activity(
+            Some(&app),
+            ActivityLevel::Error,
+            "activity.model.download_failed",
+            json!({ "error": error.clone() }),
+        );
+    })?;
+
+    ctx.inner().record_activity(
+        Some(&app),
+        ActivityLevel::Info,
+        "activity.model.download_done",
+        json!({ "path": path.display().to_string() }),
+    );
+
+    Ok(path.display().to_string())
+}
+
+#[cfg(not(feature = "local-separation"))]
+#[tauri::command]
+async fn download_separation_model(
+    _app: AppHandle,
+    _profile: settings::VocalSeparatorProfile,
+) -> Result<String, String> {
+    Err("tools.vocalSeparator.unavailable".to_string())
+}
+
 #[tauri::command]
 fn save_subtitle_file(path: String, content: String, utf8_bom: bool) -> Result<(), String> {
     use std::io::Write;
@@ -1891,9 +2032,15 @@ pub fn run() {
             open_tools_window,
             open_voice_files_tool_window,
             open_audio_srt_tool_window,
+            open_vocal_separator_tool_window,
             pick_voice_files,
             transcribe_voice_file,
             get_subtitle_stt_capability,
+            get_vocal_separator_capability,
+            separate_vocal_file,
+            get_separation_models_status,
+            download_separation_model,
+            pick_vocal_separator_output_dir,
             transcribe_audio_to_srt,
             save_subtitle_file,
             pick_subtitle_save_path,
@@ -1921,6 +2068,11 @@ pub fn run() {
 
             #[cfg(all(windows, feature = "local-llm"))]
             configure_llm_dll_search(&handle);
+
+            #[cfg(feature = "local-separation")]
+            {
+                veyro_separation::init_runtime();
+            }
 
             #[cfg(any(windows, target_os = "linux"))]
             {
@@ -2026,6 +2178,7 @@ pub fn run() {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     if window.label() == window::TOOL_VOICE_FILES_WINDOW_LABEL
                         || window.label() == window::TOOL_AUDIO_SRT_WINDOW_LABEL
+                        || window.label() == window::TOOL_VOCAL_SEPARATOR_WINDOW_LABEL
                         || window.label() == window::TOOLS_WINDOW_LABEL
                     {
                         // Tool windows are ephemeral — allow the native close button to dismiss them.

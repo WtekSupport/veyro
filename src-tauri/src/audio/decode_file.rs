@@ -249,11 +249,14 @@ fn decode_with_symphonia(
         .codec_params
         .sample_rate
         .ok_or_else(|| "missing_sample_rate".to_string())?;
-    let channels = track
+    // AAC/MP4 often omit channel layout in codec_params until the first packet is decoded.
+    // Prefer the decoded buffer's channel count so stereo is not mislabeled as mono
+    // (that would stretch duration ~2× after separation).
+    let mut channels = track
         .codec_params
         .channels
         .map(|channels| channels.count() as u16)
-        .unwrap_or(1);
+        .unwrap_or(0);
 
     let mut decoder = codec_registry()
         .make(&track.codec_params, &DecoderOptions::default())
@@ -283,6 +286,17 @@ fn decode_with_symphonia(
         let decoded = decoder
             .decode(&packet)
             .map_err(|error| error.to_string())?;
+        let packet_channels = decoded.spec().channels.count() as u16;
+        if packet_channels == 0 {
+            return Err("missing_channels".to_string());
+        }
+        if channels == 0 {
+            channels = packet_channels;
+        } else if channels != packet_channels {
+            return Err(format!(
+                "channel count changed during decode ({channels} -> {packet_channels})"
+            ));
+        }
         decoded_frames = decoded_frames.saturating_add(decoded.frames() as u64);
         if let Some(total) = total_frames {
             let local = ((decoded_frames.saturating_mul(100)) / total).min(100) as u8;
@@ -295,6 +309,15 @@ fn decode_with_symphonia(
     if samples.is_empty() {
         return Err("empty_audio".to_string());
     }
+    if channels == 0 {
+        return Err("missing_channels".to_string());
+    }
+    if samples.len() % channels as usize != 0 {
+        return Err(format!(
+            "decoded sample count {} is not divisible by channel count {channels}",
+            samples.len()
+        ));
+    }
 
     report_decode_progress(&on_progress, &mut decode_last, 78);
 
@@ -305,7 +328,7 @@ pub fn decode_audio_file(path: &Path) -> Result<AudioSegment, String> {
     decode_audio_file_with_progress(path, None)
 }
 
-pub fn decode_audio_file_with_progress(
+fn decode_raw_segment(
     path: &Path,
     on_progress: Option<DecodeProgressCallback>,
 ) -> Result<AudioSegment, String> {
@@ -322,9 +345,44 @@ pub fn decode_audio_file_with_progress(
     }
 
     let mut last = 0u8;
+    report_decode_progress(&on_progress, &mut last, 88);
+    Ok(segment)
+}
+
+/// Decode to native PCM without STT resampling (preserves channel count and source rate).
+pub fn decode_audio_file_raw_with_progress(
+    path: &Path,
+    on_progress: Option<DecodeProgressCallback>,
+) -> Result<AudioSegment, String> {
+    decode_raw_segment(path, on_progress)
+}
+
+pub fn decode_audio_file_with_progress(
+    path: &Path,
+    on_progress: Option<DecodeProgressCallback>,
+) -> Result<AudioSegment, String> {
+    let segment = decode_raw_segment(path, on_progress.clone())?;
+
+    let mut last = 0u8;
     report_decode_progress(&on_progress, &mut last, 82);
     let resampled = resample_to_stt(segment).map_err(|error| error.to_string())?;
     report_decode_progress(&on_progress, &mut last, 88);
 
     Ok(resampled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::resampler::TARGET_SAMPLE_RATE;
+
+    #[test]
+    fn stt_decode_path_still_targets_16k_mono() {
+        let samples: Vec<f32> = (0..4410).map(|i| (i as f32).sin() * 0.01).collect();
+        let stereo = AudioSegment::new(samples, 44_100, 2);
+        let resampled = resample_to_stt(stereo).expect("resample");
+        assert_eq!(resampled.sample_rate, TARGET_SAMPLE_RATE);
+        assert_eq!(resampled.channels, 1);
+        assert!(!resampled.samples.is_empty());
+    }
 }

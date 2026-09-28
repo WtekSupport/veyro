@@ -107,6 +107,147 @@ pub fn normalize_segment(
     Ok((resampled, TARGET_SAMPLE_RATE))
 }
 
+/// Target sample rate for source-separation models (Mel-Band RoFormer family).
+pub const SEPARATION_SAMPLE_RATE: u32 = 44_100;
+
+pub struct ChannelPreservingResampler {
+    resampler: Option<FftFixedIn<f32>>,
+    pending: Vec<f32>,
+    chunk_size: usize,
+    channels: u16,
+}
+
+impl ChannelPreservingResampler {
+    pub fn new(source_rate: u32, target_rate: u32, channels: u16) -> Result<Self, AudioError> {
+        let channels = channels.max(1);
+        if source_rate == target_rate {
+            return Ok(Self {
+                resampler: None,
+                pending: Vec::new(),
+                chunk_size: 0,
+                channels,
+            });
+        }
+
+        let resampler = FftFixedIn::<f32>::new(
+            source_rate as usize,
+            target_rate as usize,
+            RESAMPLE_CHUNK,
+            2,
+            channels as usize,
+        )
+        .map_err(|error| AudioError::Processing(error.to_string()))?;
+        let chunk_size = resampler.input_frames_next();
+
+        Ok(Self {
+            resampler: Some(resampler),
+            pending: Vec::new(),
+            chunk_size,
+            channels,
+        })
+    }
+
+    pub fn push(&mut self, samples: &[f32], channels: u16) -> Result<Vec<f32>, AudioError> {
+        let channels = channels.max(1);
+        if channels != self.channels {
+            return Err(AudioError::Processing(format!(
+                "channel count changed from {} to {channels}",
+                self.channels
+            )));
+        }
+        if samples.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let frame_bytes = self.channels as usize;
+        let chunk_size = self.chunk_size;
+
+        let Some(resampler) = self.resampler.as_mut() else {
+            return Ok(samples.to_vec());
+        };
+
+        self.pending.extend_from_slice(samples);
+        let mut output = Vec::new();
+
+        while self.pending.len() / frame_bytes >= chunk_size {
+            let take_samples = chunk_size * frame_bytes;
+            let chunk: Vec<f32> = self.pending.drain(..take_samples).collect();
+            let mut planes: Vec<Vec<f32>> = (0..frame_bytes)
+                .map(|_| Vec::with_capacity(chunk_size))
+                .collect();
+            for frame in chunk.chunks(frame_bytes) {
+                for (ch, value) in frame.iter().enumerate() {
+                    planes[ch].push(*value);
+                }
+            }
+            let processed = resampler
+                .process(&planes, None)
+                .map_err(|error| AudioError::Processing(error.to_string()))?;
+            for frame_idx in 0..processed[0].len() {
+                for plane in &processed {
+                    output.push(plane[frame_idx]);
+                }
+            }
+        }
+
+        Ok(output)
+    }
+
+    pub fn flush(&mut self) -> Result<Vec<f32>, AudioError> {
+        if self.pending.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let frame_bytes = self.channels as usize;
+        let chunk_size = self.chunk_size;
+        let frames = self.pending.len() / frame_bytes;
+
+        let Some(resampler) = self.resampler.as_mut() else {
+            return Ok(std::mem::take(&mut self.pending));
+        };
+
+        let mut padded = std::mem::take(&mut self.pending);
+        padded.resize(chunk_size * frame_bytes, 0.0);
+        let mut planes: Vec<Vec<f32>> = (0..frame_bytes)
+            .map(|_| Vec::with_capacity(chunk_size))
+            .collect();
+        for frame in padded.chunks(frame_bytes) {
+            for (ch, value) in frame.iter().enumerate() {
+                if planes[ch].len() < chunk_size {
+                    planes[ch].push(*value);
+                }
+            }
+        }
+        for plane in &mut planes {
+            plane.resize(chunk_size, 0.0);
+        }
+        let processed = resampler
+            .process(&planes, None)
+            .map_err(|error| AudioError::Processing(error.to_string()))?;
+        let out_frames = processed[0].len();
+        let mut output = Vec::with_capacity(out_frames * frame_bytes);
+        for frame_idx in 0..out_frames {
+            for plane in &processed {
+                output.push(plane[frame_idx]);
+            }
+        }
+        let keep_frames = frames.min(out_frames);
+        Ok(output[..keep_frames * frame_bytes].to_vec())
+    }
+}
+
+pub fn resample_preserve_channels(
+    samples: &[f32],
+    source_rate: u32,
+    target_rate: u32,
+    channels: u16,
+) -> Result<Vec<f32>, AudioError> {
+    let mut resampler = ChannelPreservingResampler::new(source_rate, target_rate, channels)?;
+    let mut out = resampler.push(samples, channels)?;
+    out.extend(resampler.flush()?);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
