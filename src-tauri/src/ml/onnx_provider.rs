@@ -24,10 +24,12 @@ pub fn execution_provider(settings: &AppSettings) -> &'static str {
         return "cpu";
     }
 
-    let layout = crate::settings::variant_spec(settings.local_stt_variant()).sherpa_layout;
     #[cfg(windows)]
-    if layout == Some(crate::settings::SherpaOnnxLayout::Qwen3Int8) {
-        return "cpu";
+    {
+        let layout = crate::settings::variant_spec(settings.local_stt_variant()).sherpa_layout;
+        if layout == Some(crate::settings::SherpaOnnxLayout::Qwen3Int8) {
+            return "cpu";
+        }
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
