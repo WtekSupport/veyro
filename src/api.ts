@@ -133,6 +133,7 @@ export interface AppSettings {
   silero_te: boolean;
   text_processing_mode: TextProcessingMode;
   numbers_as_words: boolean;
+  soft_line_breaks: boolean;
   emulate_enter: boolean;
   enter_trigger_phrase: string;
   start_on_boot: boolean;
@@ -245,6 +246,7 @@ export interface SettingsPatch {
   silero_te?: boolean;
   text_processing_mode?: TextProcessingMode;
   numbers_as_words?: boolean;
+  soft_line_breaks?: boolean;
   emulate_enter?: boolean;
   enter_trigger_phrase?: string;
   start_on_boot?: boolean;
@@ -1053,6 +1055,14 @@ export async function pickVoiceWatchFolder(): Promise<string | null> {
 
 export async function revealVoiceSource(path: string): Promise<void> {
   return invoke<void>("reveal_voice_source", { path });
+}
+
+export async function pickVoiceDocxSavePath(defaultName: string): Promise<string | null> {
+  return invoke<string | null>("pick_voice_docx_save_path", { defaultName });
+}
+
+export async function saveVoiceResultDocx(path: string, text: string): Promise<void> {
+  return invoke<void>("save_voice_result_docx", { path, text });
 }
 
 export async function voiceWatchUsesCloud(): Promise<boolean> {

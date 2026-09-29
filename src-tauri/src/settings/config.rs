@@ -400,6 +400,10 @@ pub struct AppSettings {
     pub silero_te: bool,
     pub text_processing_mode: TextProcessingMode,
     pub numbers_as_words: bool,
+    /// When true, keyboard injection sends Shift+Enter for `\n` (chat-safe).
+    /// When false, sends Enter (hard paragraph break in Word-like editors).
+    #[serde(default = "default_soft_line_breaks")]
+    pub soft_line_breaks: bool,
     pub emulate_enter: bool,
     pub enter_trigger_phrase: String,
     pub start_on_boot: bool,
@@ -499,6 +503,10 @@ fn default_silero_te() -> bool {
     true
 }
 
+fn default_soft_line_breaks() -> bool {
+    true
+}
+
 fn default_hotkey_game_mode() -> bool {
     false
 }
@@ -569,6 +577,7 @@ impl Default for AppSettings {
             silero_te: true,
             text_processing_mode: TextProcessingMode::Original,
             numbers_as_words: false,
+            soft_line_breaks: true,
             emulate_enter: false,
             enter_trigger_phrase: String::new(),
             start_on_boot: false,
@@ -1031,6 +1040,7 @@ pub struct SettingsPatch {
     pub silero_te: Option<bool>,
     pub text_processing_mode: Option<TextProcessingMode>,
     pub numbers_as_words: Option<bool>,
+    pub soft_line_breaks: Option<bool>,
     pub emulate_enter: Option<bool>,
     pub enter_trigger_phrase: Option<String>,
     pub start_on_boot: Option<bool>,
@@ -1202,6 +1212,9 @@ impl SettingsPatch {
         }
         if let Some(numbers_as_words) = self.numbers_as_words {
             settings.numbers_as_words = numbers_as_words;
+        }
+        if let Some(soft_line_breaks) = self.soft_line_breaks {
+            settings.soft_line_breaks = soft_line_breaks;
         }
         if let Some(emulate_enter) = self.emulate_enter {
             settings.emulate_enter = emulate_enter;

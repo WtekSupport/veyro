@@ -156,7 +156,11 @@ pub fn list_skills() -> Result<Vec<AiSkillInfo>, ConfigError> {
         let filename = entry.file_name().to_string_lossy().into_owned();
         let contents = fs::read_to_string(&path)
             .map_err(|error| ConfigError::Read(format!("{}: {error}", path.display())))?;
-        let (name, description, _) = parse_skill_markdown(&contents, &filename);
+        let (name, description, body) = parse_skill_markdown(&contents, &filename);
+        // Empty prompt body cannot run CustomSkill rewrite; keep it out of the picker.
+        if body.trim().is_empty() {
+            continue;
+        }
         skills.push(AiSkillInfo {
             filename,
             name,
@@ -208,6 +212,11 @@ pub fn load_skill_body(filename: Option<&str>) -> Result<Option<String>, ConfigE
     }
 
     Ok(Some(body))
+}
+
+/// True when the skill file exists and has a non-empty prompt body (after frontmatter).
+pub fn is_skill_body_usable(filename: Option<&str>) -> bool {
+    matches!(load_skill_body(filename), Ok(Some(body)) if !body.trim().is_empty())
 }
 
 pub fn is_skill_filename_installed(filename: &str) -> Result<bool, ConfigError> {
@@ -282,7 +291,10 @@ pub fn inspect_skill_file_as(
 
     let contents = fs::read_to_string(source)
         .map_err(|error| ConfigError::Read(format!("{}: {error}", source.display())))?;
-    let (name, description, _) = parse_skill_markdown(&contents, install_filename);
+    let (name, description, body) = parse_skill_markdown(&contents, install_filename);
+    if body.trim().is_empty() {
+        return Err(ConfigError::Invalid("skill_body_empty".to_string()));
+    }
     Ok((
         AiSkillInfo {
             filename: install_filename.to_string(),
@@ -338,7 +350,11 @@ pub fn import_skill_as(from_path: &str, install_filename: &str) -> Result<AiSkil
 
     let contents = fs::read_to_string(&target)
         .map_err(|error| ConfigError::Read(format!("{}: {error}", target.display())))?;
-    let (name, description, _) = parse_skill_markdown(&contents, install_filename);
+    let (name, description, body) = parse_skill_markdown(&contents, install_filename);
+    if body.trim().is_empty() {
+        let _ = fs::remove_file(&target);
+        return Err(ConfigError::Invalid("skill_body_empty".to_string()));
+    }
     Ok(AiSkillInfo {
         filename: install_filename.to_string(),
         name,
@@ -466,5 +482,15 @@ mod tests {
         assert_eq!(name, "custom.md");
         assert!(description.is_empty());
         assert_eq!(body, markdown);
+    }
+
+    #[test]
+    fn frontmatter_only_yields_empty_body() {
+        let markdown = "---\nname: Extract Facts\ndescription: Pull only facts\n---\n\n";
+        let (name, description, body) = parse_skill_markdown(markdown, "extract-facts.md");
+        assert_eq!(name, "Extract Facts");
+        assert_eq!(description, "Pull only facts");
+        assert!(body.trim().is_empty());
+        assert!(!is_skill_body_usable(Some("definitely-missing-skill.md")));
     }
 }

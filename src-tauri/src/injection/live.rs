@@ -25,7 +25,10 @@ pub fn delete_trailing_injected_text(previous_chars: u32) -> Result<(), Injectio
 }
 
 /// Insert optimized text at the end of the focused field (PTT session replace, step 2).
-pub fn insert_trailing_injected_text(text: &str) -> Result<(), InjectionError> {
+pub fn insert_trailing_injected_text(
+    text: &str,
+    soft_line_breaks: bool,
+) -> Result<(), InjectionError> {
     prepare_for_live_injection();
 
     #[cfg(windows)]
@@ -33,27 +36,32 @@ pub fn insert_trailing_injected_text(text: &str) -> Result<(), InjectionError> {
         super::windows_keyboard::send_ctrl_end()?;
     }
 
-    insert_after_prepare(text)
+    insert_after_prepare(text, soft_line_breaks)
 }
 
 /// Replace text that was appended at the end of the focused field (PTT session replace).
-pub fn replace_trailing_injected_text(previous_chars: u32, text: &str) -> Result<(), InjectionError> {
+pub fn replace_trailing_injected_text(
+    previous_chars: u32,
+    text: &str,
+    soft_line_breaks: bool,
+) -> Result<(), InjectionError> {
     delete_trailing_injected_text(previous_chars)?;
-    insert_trailing_injected_text(text)
+    insert_trailing_injected_text(text, soft_line_breaks)
 }
 
-fn insert_after_prepare(text: &str) -> Result<(), InjectionError> {
+fn insert_after_prepare(text: &str, soft_line_breaks: bool) -> Result<(), InjectionError> {
     if text.is_empty() {
         return Ok(());
     }
 
     #[cfg(windows)]
     {
-        return super::windows_keyboard::send_unicode_text(text);
+        return super::windows_keyboard::send_unicode_text(text, soft_line_breaks);
     }
 
     #[cfg(not(windows))]
     {
+        let _ = soft_line_breaks;
         super::clipboard::paste_via_clipboard(text)
     }
 }

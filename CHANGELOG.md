@@ -12,6 +12,16 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+### Added
+
+- **Injection:** Soft line breaks (Shift+Enter) so paragraph newlines in chats do not send the message; toggle in settings (on by default). Hard Enter remains available for Word-like editors and for the Enter trigger phrase.
+
+### Fixed
+
+- **AI rewrite:** Custom skill mode no longer fails with «custom skill is missing» when the selected `.md` has only frontmatter / empty body — falls back to Optimization, excludes empty skills from the picker, and rejects empty catalog/import installs.
+- **Skill catalog:** Locked/unpaid catalog skills (`access: locked`) return empty `content` from the API while the website still shows a preview — install is now rejected with a clear error instead of writing a frontmatter-only file that breaks AI rewrite.
+- **Skill catalog:** Partner-install flow per `docs/veyro-catalog-partner-install.md` — parse `catalog_id` + `install_token` from `veyro://` links and download via `/api/catalog/{id}/partner-install` (fixes purchased skills that looked “locked” without a token).
+
 ## [1.9.25] — 2026-09-29
 
 ### Added

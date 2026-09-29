@@ -38,4 +38,7 @@ pub use vocal_separator::{VocalSeparatorOutputFormat, VocalSeparatorProfile};
 pub use voice_watch::{
     VoiceWatchNotifyMode, VoiceWatchSettings, VoiceWatchTextMode, VoiceWatchTextModeOverride,
 };
-pub use storage::{load_settings, normalize_locale_dependent_settings, save_settings};
+pub use storage::{
+    load_settings, normalize_custom_skill_settings, normalize_locale_dependent_settings,
+    save_settings,
+};

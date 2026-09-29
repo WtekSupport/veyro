@@ -33,7 +33,7 @@ import {
 import { getState, type SettingsTab } from "../state";
 import { t } from "../i18n";
 import type { MessageKey } from "../i18n/locales/en";
-import { iconImport, iconPlus, iconTrash } from "./icons";
+import { iconCaptureMic, iconCaptureMicApp, iconImport, iconPlus, iconTrash } from "./icons";
 import { renderMicMeter } from "./mic-meter";
 import { renderStatusDashboard } from "./status-dashboard";
 import { renderVadThresholdPanel } from "./vad-threshold-panel";
@@ -58,6 +58,7 @@ export interface SettingsFormValues {
   spoken_punctuation: boolean;
   silero_te: boolean;
   numbers_as_words: boolean;
+  soft_line_breaks: boolean;
   emulate_enter: boolean;
   enter_trigger_phrase: string;
   start_on_boot: boolean;
@@ -278,6 +279,7 @@ export function settingsToForm(
     spoken_punctuation: settings.spoken_punctuation,
     silero_te: settings.silero_te ?? true,
     numbers_as_words: settings.numbers_as_words,
+    soft_line_breaks: settings.soft_line_breaks ?? true,
     emulate_enter: settings.emulate_enter,
     enter_trigger_phrase: settings.enter_trigger_phrase,
     start_on_boot: settings.start_on_boot,
@@ -870,14 +872,30 @@ export function renderSettingsForm(
             }>${escapeHtml(app.name)}</option>`;
           })
           .join("");
-  const captureSourceOptions = `
-    <option value="microphone" ${values.capture_source === "microphone" ? "selected" : ""}>${escapeHtml(t("settings.captureSource.microphone"))}</option>
-    ${
-      loopbackSupported
-        ? `<option value="microphone_and_loopback" ${values.capture_source === "microphone_and_loopback" ? "selected" : ""}>${escapeHtml(t("settings.captureSource.microphoneAndLoopback"))}</option>`
-        : ""
-    }
-  `;
+  const captureSourceValue = captureSourceIncludesLoopback
+    ? "microphone_and_loopback"
+    : "microphone";
+  const captureSourceToggle = loopbackSupported
+    ? `
+            <div class="capture-source-toggle" role="group" aria-label="${escapeHtml(t("settings.captureSource"))}">
+              <button
+                type="button"
+                class="icon-btn capture-source-btn${captureSourceValue === "microphone" ? " icon-btn--active" : ""}"
+                data-capture-source="microphone"
+                aria-pressed="${captureSourceValue === "microphone" ? "true" : "false"}"
+                title="${escapeHtml(t("settings.captureSource.microphone"))}"
+                aria-label="${escapeHtml(t("settings.captureSource.microphone"))}"
+              >${iconCaptureMic()}</button>
+              <button
+                type="button"
+                class="icon-btn capture-source-btn${captureSourceValue === "microphone_and_loopback" ? " icon-btn--active" : ""}"
+                data-capture-source="microphone_and_loopback"
+                aria-pressed="${captureSourceValue === "microphone_and_loopback" ? "true" : "false"}"
+                title="${escapeHtml(t("settings.captureSource.microphoneAndLoopback"))}"
+                aria-label="${escapeHtml(t("settings.captureSource.microphoneAndLoopback"))}"
+              >${iconCaptureMicApp()}</button>
+            </div>`
+    : "";
 
   const textModeHint = t(textModeHintKey(values.text_processing_mode));
   const systemNotificationsAvailable = diagnostics?.system_notifications_available ?? true;
@@ -952,19 +970,17 @@ export function renderSettingsForm(
         <section class="settings-section settings-section--capture-device">
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.captureDevice"))}</h3>
         <div class="field-grid voice-fields">
-          <label class="field">
-            <span class="field-label">${escapeHtml(t("settings.captureSource"))}</span>
-            <select name="capture_source" class="device-select" aria-label="${escapeHtml(t("settings.captureSource"))}">
-              ${captureSourceOptions}
-            </select>
-          </label>
           <div class="field mic-device-field">
-            <select
-              name="microphone_device"
-              class="device-select"
-              aria-label="${escapeHtml(t("settings.microphone"))}"
-              title="${escapeHtml(values.microphone_device || t("settings.defaultMic"))}"
-            >${deviceOptions}</select>
+            <div class="mic-capture-row">
+              ${captureSourceToggle}
+              <input type="hidden" name="capture_source" value="${captureSourceValue}" />
+              <select
+                name="microphone_device"
+                class="device-select"
+                aria-label="${escapeHtml(t("settings.microphone"))}"
+                title="${escapeHtml(values.microphone_device || t("settings.defaultMic"))}"
+              >${deviceOptions}</select>
+            </div>
             ${renderMicMeter(true)}
           </div>
           <div class="field loopback-app-field" ${captureSourceIncludesLoopback ? "" : "hidden"}>
@@ -1221,6 +1237,11 @@ export function renderSettingsForm(
             <span>${escapeHtml(t("settings.numbersAsWords"))}</span>
           </label>
 
+          <label class="field checkbox">
+            <input name="soft_line_breaks" type="checkbox" ${values.soft_line_breaks ? "checked" : ""} />
+            <span>${escapeHtml(t("settings.softLineBreaks"))}</span>
+          </label>
+
           <label class="field checkbox enter-emulation-check">
             <input name="emulate_enter" type="checkbox" ${values.emulate_enter ? "checked" : ""} />
             <span>${escapeHtml(t("settings.emulateEnter"))}</span>
@@ -1274,6 +1295,7 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
       return data.get("silero_te") === "on";
     })(),
     numbers_as_words: data.get("numbers_as_words") === "on",
+    soft_line_breaks: data.get("soft_line_breaks") === "on",
     emulate_enter: data.get("emulate_enter") === "on",
     enter_trigger_phrase: String(data.get("enter_trigger_phrase") ?? ""),
     start_on_boot: data.get("start_on_boot") === "on",

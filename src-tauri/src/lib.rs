@@ -1785,6 +1785,24 @@ fn reveal_voice_source(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn pick_voice_docx_save_path(default_name: String) -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter("Word document", &["docx"])
+        .save_file()
+        .map(|path| path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn save_voice_result_docx(path: String, text: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(path.trim());
+    if path.as_os_str().is_empty() {
+        return Err("tools.voiceFiles.invalidPath".to_string());
+    }
+    tools::docx_export::write_plain_docx(&path, &text)
+}
+
+#[tauri::command]
 fn voice_watch_uses_cloud(
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<bool, String> {
@@ -2213,6 +2231,8 @@ pub fn run() {
             voice_watch_set_enabled,
             pick_voice_watch_folder,
             reveal_voice_source,
+            pick_voice_docx_save_path,
+            save_voice_result_docx,
             voice_watch_uses_cloud,
             get_subtitle_stt_capability,
             get_vocal_separator_capability,

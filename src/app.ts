@@ -532,6 +532,7 @@ function syncOpenAiApiKeyUi(form: HTMLFormElement): void {
 
 function syncDependentSettingsUi(form: HTMLFormElement): void {
   syncCaptureModeUi(form);
+  syncLoopbackCaptureUi(form);
   syncEnterPhraseUi(form);
   syncWeakPcOptionsUi(form);
   syncTranscriptionProviderUi(form);
@@ -570,7 +571,41 @@ function syncCaptureModeUi(form: HTMLFormElement): void {
   form.querySelectorAll<HTMLElement>(".continuous-only").forEach((element) => {
     element.hidden = pushToTalk;
   });
+}
 
+function syncLoopbackCaptureUi(form: HTMLFormElement): void {
+  const captureSource =
+    form.querySelector<HTMLInputElement>('input[name="capture_source"]')?.value ??
+    form.querySelector<HTMLSelectElement>('select[name="capture_source"]')?.value ??
+    "microphone";
+  const includeLoopback =
+    captureSource === "microphone_and_loopback" || captureSource === "app_loopback";
+  form.querySelectorAll<HTMLElement>(".loopback-app-field").forEach((element) => {
+    element.hidden = !includeLoopback;
+  });
+  form.querySelectorAll<HTMLButtonElement>("[data-capture-source]").forEach((button) => {
+    const active = button.dataset.captureSource === captureSource;
+    button.classList.toggle("icon-btn--active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function applyCaptureSource(
+  form: HTMLFormElement,
+  next: "microphone" | "microphone_and_loopback",
+): void {
+  const hidden = form.querySelector<HTMLInputElement>('input[name="capture_source"]');
+  if (hidden) {
+    hidden.value = next;
+  }
+  syncLoopbackCaptureUi(form);
+  const current = getState().settings;
+  if (!current) {
+    return;
+  }
+  const baseline = current;
+  setSettings({ ...current, capture_source: next });
+  void flushPersistSettings({ compareWith: baseline });
 }
 
 async function handleRecoverEngine(): Promise<void> {
@@ -943,6 +978,17 @@ function bindEvents(): void {
           const message = error instanceof Error ? error.message : String(error);
           setError({ code: "loopback_apps", message });
         });
+    });
+  });
+
+  form.querySelectorAll<HTMLButtonElement>("[data-capture-source]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const raw = button.dataset.captureSource ?? "microphone";
+      const capture_source =
+        raw === "microphone_and_loopback" || raw === "app_loopback"
+          ? "microphone_and_loopback"
+          : "microphone";
+      applyCaptureSource(form, capture_source);
     });
   });
 
@@ -1380,22 +1426,6 @@ function bindEvents(): void {
             const device =
               element.value.length > 0 ? element.value : null;
             setSettings({ ...current, microphone_device: device });
-            void flushPersistSettings({ compareWith: baseline });
-          }
-          return;
-        }
-        if (
-          element instanceof HTMLSelectElement &&
-          element.name === "capture_source"
-        ) {
-          const current = getState().settings;
-          if (current) {
-            const baseline = current;
-            const capture_source =
-              element.value === "microphone_and_loopback" || element.value === "app_loopback"
-                ? "microphone_and_loopback"
-                : "microphone";
-            setSettings({ ...current, capture_source });
             void flushPersistSettings({ compareWith: baseline });
           }
           return;

@@ -1,7 +1,10 @@
 /**
- * Regenerates docs/legal/third-party-licenses.json from Cargo (release feature set)
- * and npm lockfile. Run from repo root after dependency changes:
+ * Regenerates docs/legal/third-party-licenses.json with **key technologies**
+ * only (STT/LLM/VAD/audio/UI runtimes), not the full Cargo/npm tree.
+ *
  *   node scripts/generate-third-party-licenses.mjs
+ *
+ * Optional: enrich crate versions from `cargo metadata` when Rust is on PATH.
  */
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -12,8 +15,18 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tauriDir = path.join(root, "src-tauri");
 const outPath = path.join(root, "docs", "legal", "third-party-licenses.json");
 
-/** Bundled native / runtime components not fully described by a single crate row. */
-const NATIVE_RUNTIME = [
+/**
+ * Product-facing / notable third-party technologies shown in About.
+ * `crate` — optional Cargo package name used to fill the version when metadata is available.
+ */
+const KEY_TECHNOLOGIES = [
+  {
+    name: "Tauri",
+    crate: "tauri",
+    copyright: "Copyright © Tauri Programme within The Commons Conservancy",
+    license: "MIT OR Apache-2.0",
+    url: "https://github.com/tauri-apps/tauri",
+  },
   {
     name: "Microsoft Edge WebView2",
     copyright: "Copyright © Microsoft Corporation",
@@ -27,16 +40,49 @@ const NATIVE_RUNTIME = [
     url: "https://github.com/ggml-org/whisper.cpp",
   },
   {
+    name: "whisper-rs",
+    crate: "whisper-rs",
+    copyright: "Copyright © whisper-rs contributors",
+    license: "BSD-3-Clause",
+    url: "https://codeberg.org/tazz4843/whisper-rs",
+  },
+  {
     name: "llama.cpp",
     copyright: "Copyright © Georgi Gerganov and llama.cpp contributors",
     license: "MIT",
     url: "https://github.com/ggml-org/llama.cpp",
   },
   {
+    name: "llama-cpp-2",
+    crate: "llama-cpp-2",
+    copyright: "Copyright © utilityai / llama-cpp-rs contributors",
+    license: "MIT OR Apache-2.0",
+    url: "https://github.com/utilityai/llama-cpp-rs",
+  },
+  {
+    name: "sherpa-onnx",
+    crate: "sherpa-onnx",
+    copyright: "Copyright © Next-gen Kaldi / sherpa-onnx contributors",
+    license: "Apache-2.0",
+    url: "https://github.com/k2-fsa/sherpa-onnx",
+  },
+  {
     name: "ONNX Runtime",
     copyright: "Copyright © Microsoft Corporation and ONNX Runtime contributors",
     license: "MIT",
     url: "https://github.com/microsoft/onnxruntime",
+  },
+  {
+    name: "Silero VAD",
+    copyright: "Copyright © Silero Team",
+    license: "MIT",
+    url: "https://github.com/snakers4/silero-vad",
+  },
+  {
+    name: "Silero TE (text enhancement)",
+    copyright: "Copyright © Silero Team",
+    license: "See Silero TE model / project terms",
+    url: "https://github.com/snakers4/silero-models",
   },
   {
     name: "PyTorch / LibTorch",
@@ -50,105 +96,104 @@ const NATIVE_RUNTIME = [
     license: "Intel Simplified Software License",
     url: "https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html",
   },
+  {
+    name: "WebRTC VAD",
+    crate: "webrtc-vad",
+    copyright: "Copyright © webrtc-vad / WebRTC contributors",
+    license: "BSD-3-Clause",
+    url: "https://github.com/kaegi/webrtc-vad",
+  },
+  {
+    name: "nnnoiseless (RNNoise)",
+    crate: "nnnoiseless",
+    copyright: "Copyright © nnnoiseless / RNNoise contributors",
+    license: "BSD-3-Clause OR Apache-2.0 OR MIT",
+    url: "https://github.com/jneem/nnnoiseless",
+  },
+  {
+    name: "cpal",
+    crate: "cpal",
+    copyright: "Copyright © RustAudio / cpal contributors",
+    license: "Apache-2.0 OR MIT",
+    url: "https://github.com/rustaudio/cpal",
+  },
+  {
+    name: "rodio",
+    crate: "rodio",
+    copyright: "Copyright © RustAudio / rodio contributors",
+    license: "MIT OR Apache-2.0",
+    url: "https://github.com/RustAudio/rodio",
+  },
+  {
+    name: "Symphonia",
+    crate: "symphonia",
+    copyright: "Copyright © Philip Deljanov and Symphonia contributors",
+    license: "MPL-2.0",
+    url: "https://github.com/pdeljanov/Symphonia",
+  },
+  {
+    name: "wasapi (Windows loopback)",
+    crate: "wasapi",
+    copyright: "Copyright © wasapi crate contributors",
+    license: "MIT OR Apache-2.0",
+    url: "https://crates.io/crates/wasapi",
+  },
+  {
+    name: "enigo",
+    crate: "enigo",
+    copyright: "Copyright © enigo contributors",
+    license: "MIT",
+    url: "https://github.com/enigo-rs/enigo",
+  },
+  {
+    name: "global-hotkey",
+    crate: "global-hotkey",
+    copyright: "Copyright © Tauri Programme within The Commons Conservancy",
+    license: "MIT OR Apache-2.0",
+    url: "https://github.com/tauri-apps/global-hotkey",
+  },
+  {
+    name: "OpenAI API (optional cloud STT / rewrite)",
+    copyright: "Copyright © OpenAI",
+    license: "OpenAI API Terms of Use (service; not redistributed as code)",
+    url: "https://openai.com/policies/terms-of-use",
+  },
 ];
 
-function resolveReleaseFeatures() {
-  return execSync(
-    `powershell -NoProfile -ExecutionPolicy Bypass -File "${path.join(root, "scripts", "print-release-cargo-features.ps1")}"`,
-    { cwd: root, encoding: "utf8" },
-  )
-    .trim()
-    .split(/\r?\n/)
-    .pop()
-    .trim();
-}
-
-function loadCargoMetadata(features) {
-  const ps = [
-    `$ErrorActionPreference = 'Stop'`,
-    `Set-Location '${tauriDir.replace(/'/g, "''")}'`,
-    `. '${path.join(root, "scripts", "ensure-rust-path.ps1").replace(/'/g, "''")}'`,
-    `cargo metadata --format-version=1 --features '${features.replace(/'/g, "''")}'`,
-  ].join("; ");
-  const json = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`, {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return JSON.parse(json.trim());
-}
-
-function collectResolvedPackages(metadata) {
-  const rootPkg = metadata.packages.find((p) => p.name === "veyro");
-  if (!rootPkg || !metadata.resolve) {
-    throw new Error("cargo metadata missing veyro resolve graph");
-  }
-  const ids = new Set();
-  const visit = (id) => {
-    if (ids.has(id)) return;
-    ids.add(id);
-    const node = metadata.resolve.nodes.find((n) => n.id === id);
-    if (!node) return;
-    for (const dep of node.deps ?? []) {
-      visit(dep.pkg);
-    }
-  };
-  visit(rootPkg.id);
-  return [...ids]
-    .map((id) => metadata.packages.find((p) => p.id === id))
-    .filter((p) => p && p.name !== "veyro");
-}
-
-function formatCopyright(pkg) {
-  const authors = pkg.authors?.filter(Boolean) ?? [];
-  if (authors.length > 0) {
-    return `Copyright © ${authors.join(", ")}`;
-  }
-  return "See project repository";
-}
-
-function formatUrl(pkg) {
-  if (pkg.repository) return pkg.repository;
-  if (pkg.homepage) return pkg.homepage;
-  return `https://crates.io/crates/${pkg.name}`;
-}
-
-function crateEntry(pkg) {
-  return {
-    name: `${pkg.name} ${pkg.version}`,
-    copyright: formatCopyright(pkg),
-    license: pkg.license?.trim() || "See crate metadata",
-    url: formatUrl(pkg),
-  };
-}
-
-function loadNpmPackages() {
-  const lockPath = path.join(root, "package-lock.json");
-  let lock;
+function tryLoadCrateVersions() {
   try {
-    lock = JSON.parse(readFileSync(lockPath, "utf8"));
-  } catch {
-    return [];
-  }
-  const packages = lock.packages ?? {};
-  const entries = [];
-  for (const [pkgPath, info] of Object.entries(packages)) {
-    if (!pkgPath || pkgPath === "") continue;
-    if (!info.name || !info.version) continue;
-    const name = info.name;
-    const key = `${name}@${info.version}`;
-    if (entries.some((e) => e._key === key)) continue;
-    const license = info.license ?? "See package metadata";
-    entries.push({
-      _key: key,
-      name: `${name} ${info.version}`,
-      copyright: "See package repository",
-      license: typeof license === "string" ? license : JSON.stringify(license),
-      url: info.resolved?.startsWith("http")
-        ? info.resolved.replace(/#.*$/, "")
-        : `https://www.npmjs.com/package/${name}`,
+    const features = execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${path.join(root, "scripts", "print-release-cargo-features.ps1")}"`,
+      { cwd: root, encoding: "utf8" },
+    )
+      .trim()
+      .split(/\r?\n/)
+      .pop()
+      .trim();
+
+    const ps = [
+      `$ErrorActionPreference = 'Stop'`,
+      `Set-Location '${tauriDir.replace(/'/g, "''")}'`,
+      `. '${path.join(root, "scripts", "ensure-rust-path.ps1").replace(/'/g, "''")}'`,
+      `cargo metadata --format-version=1 --features '${features.replace(/'/g, "''")}'`,
+    ].join("; ");
+
+    const json = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`, {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
     });
+    const metadata = JSON.parse(json.trim());
+    const versions = new Map();
+    for (const pkg of metadata.packages ?? []) {
+      versions.set(pkg.name, pkg.version);
+    }
+    return versions;
+  } catch (error) {
+    console.warn(
+      `cargo metadata unavailable (${error.message?.split("\n")[0] ?? error}); writing curated list without crate versions.`,
+    );
+    return new Map();
   }
-  return entries.map(({ _key, ...rest }) => rest);
 }
 
 function sortByName(list) {
@@ -158,24 +203,21 @@ function sortByName(list) {
 }
 
 function main() {
-  const features = resolveReleaseFeatures();
-  const metadata = loadCargoMetadata(features);
-  const crates = collectResolvedPackages(metadata).map(crateEntry);
-  const npm = loadNpmPackages();
+  const versions = tryLoadCrateVersions();
+  const entries = KEY_TECHNOLOGIES.map((tech) => {
+    const version = tech.crate ? versions.get(tech.crate) : null;
+    return {
+      name: version ? `${tech.name} ${version}` : tech.name,
+      copyright: tech.copyright,
+      license: tech.license,
+      url: tech.url,
+    };
+  });
 
-  const seen = new Set();
-  const merged = [];
-  for (const entry of [...NATIVE_RUNTIME, ...crates, ...npm]) {
-    const dedupeKey = entry.name.toLowerCase();
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-    merged.push(entry);
-  }
-
-  const sorted = sortByName(merged);
+  const sorted = sortByName(entries);
   mkdirSync(path.dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(sorted, null, 2)}\n`, "utf8");
-  console.log(`Wrote ${sorted.length} entries to ${outPath}`);
+  console.log(`Wrote ${sorted.length} key-technology entries to ${outPath}`);
 }
 
 main();

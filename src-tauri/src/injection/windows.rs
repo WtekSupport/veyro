@@ -14,13 +14,19 @@ impl WindowsInjector {
         Self
     }
 
-    pub fn insert_text_sync(text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+    pub fn insert_text_sync(
+        text: &str,
+        mode: InjectionMode,
+        soft_line_breaks: bool,
+    ) -> Result<(), InjectionError> {
         match mode {
-            InjectionMode::Keyboard => Self::send_unicode_text(text),
-            InjectionMode::Paste => paste_via_clipboard(text),
-            InjectionMode::Auto => {
-                paste_via_clipboard(text).or_else(|_| Self::send_unicode_text(text))
+            InjectionMode::Keyboard => {
+                super::windows_keyboard::send_unicode_text(text, soft_line_breaks)
             }
+            InjectionMode::Paste => paste_via_clipboard(text),
+            InjectionMode::Auto => paste_via_clipboard(text).or_else(|_| {
+                super::windows_keyboard::send_unicode_text(text, soft_line_breaks)
+            }),
         }
     }
 
@@ -32,37 +38,21 @@ impl WindowsInjector {
             }
         }
     }
-
-    fn send_unicode_text(text: &str) -> Result<(), InjectionError> {
-        use enigo::{Enigo, Key, Keyboard, Settings};
-
-        let mut enigo = Enigo::new(&Settings::default())
-            .map_err(|error| InjectionError::Keyboard(error.to_string()))?;
-
-        for ch in text.chars() {
-            enigo
-                .key(Key::Unicode(ch), enigo::Direction::Click)
-                .map_err(|error| InjectionError::Keyboard(error.to_string()))?;
-        }
-
-        Ok(())
-    }
 }
 
 #[async_trait]
 impl TextInjector for WindowsInjector {
-    async fn insert_text(&self, text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+    async fn insert_text(
+        &self,
+        text: &str,
+        mode: InjectionMode,
+        soft_line_breaks: bool,
+    ) -> Result<(), InjectionError> {
         capture_injection_target();
         restore_injection_target();
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_BEFORE_INJECT_MS));
 
-        match mode {
-            InjectionMode::Keyboard => Self::send_unicode_text(text),
-            InjectionMode::Paste => paste_via_clipboard(text),
-            InjectionMode::Auto => {
-                paste_via_clipboard(text).or_else(|_| Self::send_unicode_text(text))
-            }
-        }
+        Self::insert_text_sync(text, mode, soft_line_breaks)
     }
 
     async fn delete_backward(&self, char_count: u32, mode: InjectionMode) -> Result<(), InjectionError> {

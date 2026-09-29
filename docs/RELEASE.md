@@ -28,13 +28,13 @@ NSIS is also built under `%CARGO_TARGET_DIR%\release\bundle\nsis\` (default `C:\
 
 Signed builds and the in-app updater: [docs/UPDATER.md](UPDATER.md).
 
-After changing Rust or npm dependencies, refresh the About → third-party list:
+After adding or renaming a **key** third-party technology shown in About, refresh the curated list:
 
 ```powershell
 node scripts/generate-third-party-licenses.mjs
 ```
 
-This rewrites `docs/legal/third-party-licenses.json` (copied into the app at build time).
+Edit `KEY_TECHNOLOGIES` in `scripts/generate-third-party-licenses.mjs`, then regenerate `docs/legal/third-party-licenses.json` (copied into the app at build time). This is not a full Cargo/npm dump.
 
 ## Silero TE on-demand assets
 

@@ -15,7 +15,12 @@ impl MacOsInjector {
 
 #[async_trait]
 impl TextInjector for MacOsInjector {
-    async fn insert_text(&self, text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+    async fn insert_text(
+        &self,
+        text: &str,
+        mode: InjectionMode,
+        _soft_line_breaks: bool,
+    ) -> Result<(), InjectionError> {
         match mode {
             InjectionMode::Keyboard | InjectionMode::Auto | InjectionMode::Paste => {
                 paste_via_clipboard(text)

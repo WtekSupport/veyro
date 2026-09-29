@@ -24,7 +24,12 @@ pub struct InjectionBackendInfo {
 
 #[async_trait]
 pub trait TextInjector: Send + Sync {
-    async fn insert_text(&self, text: &str, mode: InjectionMode) -> Result<(), InjectionError>;
+    async fn insert_text(
+        &self,
+        text: &str,
+        mode: InjectionMode,
+        soft_line_breaks: bool,
+    ) -> Result<(), InjectionError>;
     async fn delete_backward(&self, char_count: u32, mode: InjectionMode) -> Result<(), InjectionError>;
     async fn send_enter(&self) -> Result<(), InjectionError>;
     fn backend_info(&self) -> InjectionBackendInfo;
@@ -58,7 +63,12 @@ struct UnavailableInjector;
 
 #[async_trait]
 impl TextInjector for UnavailableInjector {
-    async fn insert_text(&self, _text: &str, _mode: InjectionMode) -> Result<(), InjectionError> {
+    async fn insert_text(
+        &self,
+        _text: &str,
+        _mode: InjectionMode,
+        _soft_line_breaks: bool,
+    ) -> Result<(), InjectionError> {
         Err(InjectionError::Unavailable)
     }
 
@@ -93,7 +103,12 @@ impl MockInjector {
 
 #[async_trait]
 impl TextInjector for MockInjector {
-    async fn insert_text(&self, text: &str, _mode: InjectionMode) -> Result<(), InjectionError> {
+    async fn insert_text(
+        &self,
+        text: &str,
+        _mode: InjectionMode,
+        _soft_line_breaks: bool,
+    ) -> Result<(), InjectionError> {
         *self.last_text.lock().unwrap() = Some(text.to_string());
         Ok(())
     }

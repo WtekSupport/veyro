@@ -133,11 +133,7 @@ pub fn handle_skill_import_urls(app: &AppHandle, urls: Vec<String>) {
                 notify::notify(
                     &app,
                     &i18n::translate(locale, "notify.error_title", &[]),
-                    &i18n::translate(
-                        locale,
-                        "notify.skill_import_failed",
-                        &[("error", &error.to_string())],
-                    ),
+                    &localized_import_error(&app, &error),
                 );
             }
         }
@@ -432,6 +428,25 @@ async fn prepare_staged_skill(app: &AppHandle, raw_url: &str) -> Result<StagedSk
         .map(|ctx| ctx.inner().http.clone())
         .unwrap_or_else(reqwest::Client::new);
 
+    // New partner-install contract: catalog_id (+ install_token for paid skills).
+    if trimmed.starts_with(VEYRO_SCHEME_PREFIX) {
+        if let Some(params) = parse_catalog_install_link(trimmed) {
+            if let Some(catalog_id) = params.catalog_id.as_deref() {
+                info!(
+                    "skill import via partner-install catalog_id={catalog_id} token={}",
+                    params.install_token.is_some()
+                );
+                return stage_partner_install(
+                    &client,
+                    catalog_id,
+                    params.install_token.as_deref(),
+                    &params.skill_filename,
+                )
+                .await;
+            }
+        }
+    }
+
     if trimmed.starts_with(VEYRO_SCHEME_PREFIX) {
         if let Some(slug) = catalog_slug_from_raw_deeplink(trimmed) {
             match stage_catalog_skill(&client, &slug).await {
@@ -492,6 +507,173 @@ async fn prepare_staged_skill(app: &AppHandle, raw_url: &str) -> Result<StagedSk
     }
 }
 
+#[derive(Debug, Clone)]
+struct CatalogInstallLink {
+    skill_filename: String,
+    catalog_id: Option<String>,
+    install_token: Option<String>,
+}
+
+/// Parse `veyro://file.md?catalog_id=…&install_token=…` (docs/veyro-catalog-partner-install.md).
+fn parse_catalog_install_link(raw: &str) -> Option<CatalogInstallLink> {
+    let trimmed = raw.trim().trim_matches('"');
+    let skill_filename = catalog_slug_from_raw_deeplink(trimmed)
+        .and_then(|slug| catalog_install_filename(&slug).ok())?;
+
+    let mut catalog_id = None;
+    let mut install_token = None;
+    if let Ok(url) = Url::parse(trimmed) {
+        for (key, value) in url.query_pairs() {
+            let value = value.trim();
+            if value.is_empty() {
+                continue;
+            }
+            match key.as_ref() {
+                "catalog_id" | "catalogId" => catalog_id = Some(value.to_string()),
+                "install_token" | "installToken" => install_token = Some(value.to_string()),
+                _ => {}
+            }
+        }
+    } else if let Some((_, query)) = trimmed
+        .strip_prefix(VEYRO_SCHEME_PREFIX)?
+        .split_once('?')
+    {
+        let query = query.split('#').next().unwrap_or(query);
+        for pair in query.split('&') {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next().unwrap_or("").trim();
+            let value = parts.next().unwrap_or("").trim();
+            if key.is_empty() || value.is_empty() {
+                continue;
+            }
+            match key {
+                "catalog_id" | "catalogId" => catalog_id = Some(value.to_string()),
+                "install_token" | "installToken" => install_token = Some(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+
+    Some(CatalogInstallLink {
+        skill_filename,
+        catalog_id,
+        install_token,
+    })
+}
+
+async fn stage_partner_install(
+    client: &reqwest::Client,
+    catalog_id: &str,
+    install_token: Option<&str>,
+    install_filename: &str,
+) -> Result<StagedSkill, ConfigError> {
+    let temp_path =
+        download_partner_install_markdown(client, catalog_id, install_token, install_filename)
+            .await?;
+    Ok(StagedSkill {
+        path: temp_path,
+        install_filename: install_filename.to_string(),
+        remove_after_flow: true,
+        source_label: format!("aistructedit.com/catalog/{catalog_id}"),
+    })
+}
+
+async fn download_partner_install_markdown(
+    client: &reqwest::Client,
+    catalog_id: &str,
+    install_token: Option<&str>,
+    install_filename: &str,
+) -> Result<PathBuf, ConfigError> {
+    let catalog_id = catalog_id.trim();
+    if catalog_id.is_empty() || !is_catalog_publication_id(catalog_id) {
+        return Err(ConfigError::Invalid("deeplink_invalid_path".to_string()));
+    }
+
+    let mut url = Url::parse(&format!(
+        "{AISTRUCTEDIT_CATALOG_ITEM}{catalog_id}/partner-install"
+    ))
+    .map_err(|error| ConfigError::Read(format!("deeplink_download_failed: {error}")))?;
+    if let Some(token) = install_token.map(str::trim).filter(|value| !value.is_empty()) {
+        url.query_pairs_mut().append_pair("install_token", token);
+    }
+
+    let response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "text/markdown")
+        .timeout(Duration::from_secs(45))
+        .send()
+        .await
+        .map_err(|error| ConfigError::Read(format!("deeplink_download_failed: {error}")))?;
+
+    let status = response.status();
+    if status.as_u16() == 402 {
+        return Err(ConfigError::Invalid(
+            "skill_catalog_purchase_required".to_string(),
+        ));
+    }
+    if status.as_u16() == 503 {
+        return Err(ConfigError::Invalid(
+            "skill_catalog_token_unavailable".to_string(),
+        ));
+    }
+    if !status.is_success() {
+        return Err(ConfigError::Read(format!(
+            "deeplink_download_failed: HTTP {status}"
+        )));
+    }
+
+    let header_filename = response
+        .headers()
+        .get("x-partner-install-filename")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    let markdown = response
+        .text()
+        .await
+        .map_err(|error| ConfigError::Read(format!("deeplink_download_failed: {error}")))?;
+    if markdown.trim().is_empty() {
+        return Err(ConfigError::Invalid("skill_body_empty".to_string()));
+    }
+    if markdown.len() as u64 > MAX_REMOTE_SKILL_BYTES {
+        return Err(ConfigError::Invalid("deeplink_file_too_large".to_string()));
+    }
+    if !partner_install_markdown_has_body(&markdown) {
+        return Err(ConfigError::Invalid(
+            if install_token.is_none() {
+                "skill_catalog_install_from_site".to_string()
+            } else {
+                "skill_body_empty".to_string()
+            },
+        ));
+    }
+
+    let filename = header_filename
+        .filter(|name| crate::text::skill::validate_skill_basename(name).is_ok())
+        .unwrap_or_else(|| install_filename.to_string());
+    let temp_path = allocate_skill_import_temp_path(&filename)?;
+    fs::write(&temp_path, markdown.as_bytes()).map_err(|error| {
+        ConfigError::Write(format!("{}: {error}", temp_path.display()))
+    })?;
+    Ok(temp_path)
+}
+
+fn partner_install_markdown_has_body(markdown: &str) -> bool {
+    let trimmed = markdown.trim_start();
+    if !trimmed.starts_with("---") {
+        return !trimmed.trim().is_empty();
+    }
+    let Some(rest) = trimmed.strip_prefix("---") else {
+        return !trimmed.trim().is_empty();
+    };
+    match rest.split_once("---") {
+        Some((_, body)) => !body.trim().is_empty(),
+        None => !trimmed.trim().is_empty(),
+    }
+}
+
 async fn stage_catalog_skill(
     client: &reqwest::Client,
     install_path: &str,
@@ -515,7 +697,26 @@ fn cleanup_staged(staged: &StagedSkill) {
 
 fn localized_import_error(app: &AppHandle, error: &ConfigError) -> String {
     let locale = app_settings_locale(app);
-    i18n::translate(locale, "notify.skill_import_failed", &[("error", &error.to_string())])
+    let code = match error {
+        ConfigError::Invalid(code) => code.as_str(),
+        ConfigError::Read(code) | ConfigError::Write(code) => code.as_str(),
+    };
+    let detail_key = match code {
+        "skill_catalog_locked" | "skill_catalog_install_from_site" => {
+            "errors.skill_catalog_install_from_site"
+        }
+        "skill_catalog_purchase_required" => "errors.skill_catalog_purchase_required",
+        "skill_catalog_token_unavailable" => "errors.skill_catalog_token_unavailable",
+        "skill_body_empty" => "errors.skill_body_empty",
+        "deeplink_catalog_not_found" => "errors.deeplink_catalog_not_found",
+        _ => "",
+    };
+    let detail = if detail_key.is_empty() {
+        error.to_string()
+    } else {
+        i18n::translate(locale, detail_key, &[])
+    };
+    i18n::translate(locale, "notify.skill_import_failed", &[("error", &detail)])
 }
 
 pub(crate) fn apply_skill_import(app: &AppHandle, skill: AiSkillInfo) -> Result<AiSkillInfo, ConfigError> {
@@ -846,7 +1047,11 @@ struct CatalogListResponse {
 struct CatalogDetail {
     title: String,
     description: Option<String>,
+    #[serde(default)]
     content: String,
+    /// Catalog access: `open` / `locked` (paid or gated). Locked usually returns empty content.
+    #[serde(default)]
+    access: Option<String>,
 }
 
 fn format_catalog_skill_markdown(detail: &CatalogDetail) -> String {
@@ -878,6 +1083,13 @@ fn is_catalog_publication_id(value: &str) -> bool {
         && value.chars().filter(|ch| *ch == '-').count() == 4
 }
 
+fn catalog_skill_is_locked(detail: &CatalogDetail) -> bool {
+    detail
+        .access
+        .as_deref()
+        .is_some_and(|access| access.eq_ignore_ascii_case("locked"))
+}
+
 async fn download_catalog_skill(
     client: &reqwest::Client,
     install_path: &str,
@@ -904,6 +1116,13 @@ async fn download_catalog_skill(
         .json::<CatalogDetail>()
         .await
         .map_err(|error| ConfigError::Read(format!("deeplink_download_failed: {error}")))?;
+
+    if catalog_skill_is_locked(&detail) || detail.content.trim().is_empty() {
+        // Legacy path without catalog_id/install_token — paid skills stay locked anonymously.
+        return Err(ConfigError::Invalid(
+            "skill_catalog_install_from_site".to_string(),
+        ));
+    }
 
     let markdown = format_catalog_skill_markdown(&detail);
     if markdown.len() as u64 > MAX_REMOTE_SKILL_BYTES {
@@ -1249,5 +1468,29 @@ mod tests {
     fn normalizes_catalog_slug_strips_md_suffix() {
         assert_eq!(normalize_catalog_slug("translate-en.md"), "translate-en");
         assert_eq!(normalize_catalog_slug("translate-en"), "translate-en");
+    }
+
+    #[test]
+    fn parses_partner_install_link_with_catalog_id_and_token() {
+        let link = parse_catalog_install_link(
+            "veyro://extract-facts.md?catalog_id=778a07bf-e714-43c1-ac6e-d7d2994f4e2c&install_token=abc.token",
+        )
+        .expect("link");
+        assert_eq!(link.skill_filename, "extract-facts.md");
+        assert_eq!(
+            link.catalog_id.as_deref(),
+            Some("778a07bf-e714-43c1-ac6e-d7d2994f4e2c")
+        );
+        assert_eq!(link.install_token.as_deref(), Some("abc.token"));
+    }
+
+    #[test]
+    fn partner_install_markdown_requires_body_after_frontmatter() {
+        assert!(!partner_install_markdown_has_body(
+            "---\nname: Extract Facts\n---\n\n"
+        ));
+        assert!(partner_install_markdown_has_body(
+            "---\nname: Extract Facts\n---\n\nReturn only the bullets.\n"
+        ));
     }
 }

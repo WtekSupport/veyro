@@ -127,7 +127,7 @@ fn release_modifier_keys(include_toggle_ptt_keys: bool) -> Result<(), InjectionE
     Ok(())
 }
 
-pub fn send_unicode_text(text: &str) -> Result<(), InjectionError> {
+pub fn send_unicode_text(text: &str, soft_line_breaks: bool) -> Result<(), InjectionError> {
     if text.is_empty() {
         return Ok(());
     }
@@ -142,9 +142,9 @@ pub fn send_unicode_text(text: &str) -> Result<(), InjectionError> {
             if paragraph_break {
                 chars.next();
             }
-            send_return()?;
+            send_newline(soft_line_breaks)?;
             if paragraph_break {
-                send_return()?;
+                send_newline(soft_line_breaks)?;
             }
             continue;
         }
@@ -152,6 +152,14 @@ pub fn send_unicode_text(text: &str) -> Result<(), InjectionError> {
     }
 
     Ok(())
+}
+
+fn send_newline(soft_line_breaks: bool) -> Result<(), InjectionError> {
+    if soft_line_breaks {
+        send_shift_return()
+    } else {
+        send_return()
+    }
 }
 
 fn send_unicode_char(ch: char) -> Result<(), InjectionError> {
@@ -308,6 +316,50 @@ pub fn send_return() -> Result<(), InjectionError> {
         if sent as usize != inputs.len() {
             return Err(InjectionError::Keyboard(format!(
                 "SendInput sent {sent}/{} events",
+                inputs.len()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Soft line break (Shift+Enter) — inserts a newline in chats without sending the message.
+pub fn send_shift_return() -> Result<(), InjectionError> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+        VK_RETURN, VK_SHIFT,
+    };
+
+    unsafe {
+        let key_event = |vk: VIRTUAL_KEY, release: bool| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if release {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0)
+                    },
+                    time: 0,
+                    dwExtraInfo: injection_extra_info(),
+                },
+            },
+        };
+
+        let inputs = [
+            key_event(VK_SHIFT, false),
+            key_event(VK_RETURN, false),
+            key_event(VK_RETURN, true),
+            key_event(VK_SHIFT, true),
+        ];
+
+        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if sent as usize != inputs.len() {
+            return Err(InjectionError::Keyboard(format!(
+                "SendInput sent {sent}/{} shift+return events",
                 inputs.len()
             )));
         }

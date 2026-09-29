@@ -11,6 +11,71 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+/** Local / downloadable models shown in About (collapsed, like third-party). */
+const LOCAL_MODELS: ReadonlyArray<{ name: string; detail: string }> = [
+  {
+    name: "Whisper (GGML)",
+    detail: "ggerganov/whisper.cpp — base / small / medium / large-v3-turbo / large-v3",
+  },
+  {
+    name: "Parakeet TDT 0.6B v3",
+    detail: "k2-fsa sherpa-onnx (INT8); Yiivgeny HF packs (FP16 / FP32)",
+  },
+  {
+    name: "Qwen3-ASR 0.6B / 1.7B",
+    detail: "k2-fsa sherpa-onnx asr-models (INT8)",
+  },
+  {
+    name: "Qwen3-4B-Instruct (GGUF)",
+    detail: "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+  },
+  {
+    name: "T-lite-it-2.1 (GGUF)",
+    detail: "t-tech/T-lite-it-2.1-GGUF",
+  },
+  {
+    name: "Qwen2.5-7B-Instruct (GGUF)",
+    detail: "bartowski/Qwen2.5-7B-Instruct-GGUF",
+  },
+  {
+    name: "Qwen3.5-0.8B-GEC (GGUF)",
+    detail: "loqira/Qwen3.5-0.8B-GEC-KAZ-RUS-ENG",
+  },
+  {
+    name: "Silero VAD",
+    detail: "snakers4/silero-vad (ONNX)",
+  },
+  {
+    name: "Silero TE",
+    detail: "snakers4/silero-models — text enhancement",
+  },
+  {
+    name: "Google ReFormer (vocal separation)",
+    detail: "musetric/vocal-separation-roformer-onnx — quality / speed profiles",
+  },
+  {
+    name: "Hybrid Transformer Demucs (vocal separation)",
+    detail: "StemSplitio/htdemucs-ft-vocals-onnx",
+  },
+];
+
+function renderLocalModels(): string {
+  const items = LOCAL_MODELS.map(
+    (entry) => `
+        <li class="about-license-item">
+          <div class="about-license-name">${escapeHtml(entry.name)}</div>
+          <div class="about-license-meta">${escapeHtml(entry.detail)}</div>
+        </li>
+      `,
+  ).join("");
+  return `
+    <details class="about-licenses">
+      <summary class="about-licenses-summary">${escapeHtml(t("about.modelsTitle"))}</summary>
+      <ul class="about-licenses-list">${items}</ul>
+    </details>
+  `;
+}
+
 function renderThirdPartyLicenses(licenses: ThirdPartyLicense[]): string {
   if (licenses.length === 0) {
     return "";
@@ -31,7 +96,6 @@ function renderThirdPartyLicenses(licenses: ThirdPartyLicense[]): string {
   return `
     <details class="about-licenses">
       <summary class="about-licenses-summary">${escapeHtml(t("about.thirdPartyTitle"))}</summary>
-      <p class="about-body about-licenses-intro">${escapeHtml(t("about.thirdPartyIntro"))}</p>
       <ul class="about-licenses-list">${items}</ul>
     </details>
   `;
@@ -51,10 +115,7 @@ export function renderAboutWindow(info: AppInfo, licenses: ThirdPartyLicense[]):
         <p class="about-body">${escapeHtml(t("about.licenseBody"))}</p>
       </section>
 
-      <section class="about-section">
-        <h2 class="about-section-title">${escapeHtml(t("about.separationModelsTitle"))}</h2>
-        <p class="about-body">${escapeHtml(t("about.separationModelsBody"))}</p>
-      </section>
+      ${renderLocalModels()}
 
       ${renderThirdPartyLicenses(licenses)}
 

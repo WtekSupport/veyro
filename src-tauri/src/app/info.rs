@@ -90,13 +90,18 @@ mod tests {
     fn third_party_licenses_json_is_populated() {
         let licenses = third_party_licenses();
         assert!(
-            licenses.len() > 500,
-            "expected full dependency license list, got {}",
+            (10..=80).contains(&licenses.len()),
+            "expected curated key-technology license list, got {}",
             licenses.len()
         );
-        assert!(licenses.iter().any(|entry| entry.name.starts_with("tauri ")));
+        assert!(licenses.iter().any(|entry| {
+            entry.name.eq_ignore_ascii_case("tauri") || entry.name.starts_with("Tauri ")
+        }));
         assert!(licenses
             .iter()
             .any(|entry| entry.name.contains("WebView2")));
+        assert!(licenses
+            .iter()
+            .any(|entry| entry.name.contains("Silero")));
     }
 }

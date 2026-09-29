@@ -374,6 +374,7 @@ export const en = {
   "settings.sileroVadDownloadHint":
     "Voice activity model (~3 MB). Required for Silero VAD; WebRTC works without it.",
   "settings.numbersAsWords": "Numbers as words",
+  "settings.softLineBreaks": "Soft line breaks (Shift+Enter)",
   "settings.emulateEnter": "Emulate Enter",
   "settings.enterTriggerPhrase": "Enter trigger phrase",
   "settings.enterTriggerPhrasePlaceholder": "e.g. new line — empty uses defaults",
@@ -510,6 +511,17 @@ export const en = {
   "errors.provider_empty": "Transcription provider must not be empty",
   "errors.silence_timeout_range": "Pause timeout must be between 200 and 10000 ms",
   "errors.enter_trigger_phrase_too_long": "Enter trigger phrase must be at most 120 characters",
+  "errors.custom_skill_missing": "Custom skill mode needs a skill file with a non-empty prompt body",
+  "errors.skill_body_empty": "Skill file has no prompt body (only title/description)",
+  "errors.skill_catalog_locked":
+    "This catalog skill is locked or unpaid — the prompt body is not available to install",
+  "errors.skill_catalog_install_from_site":
+    "Open the skill on aistructedit.com and click Install (purchased skills need a one-time install link)",
+  "errors.skill_catalog_purchase_required":
+    "Purchase this skill on aistructedit.com, then click Install again",
+  "errors.skill_catalog_token_unavailable":
+    "Catalog install tokens are temporarily unavailable. Try again later",
+  "errors.deeplink_catalog_not_found": "Skill was not found in the catalog",
   "errors.settings": "Failed to save settings",
   "errors.bootstrap": "Failed to load application",
   "errors.recoverOk": "OK",
@@ -590,7 +602,7 @@ export const en = {
     "With recognition language set to Auto, the engine could not detect speech reliably. Pick the spoken language and retry; the choice is saved in Capture settings.",
 
   "tools.voiceWatch.title": "Auto transcription",
-  "tools.voiceWatch.enable": "Transcribe voice messages",
+  "tools.voiceWatch.enable": "Auto-transcribe",
   "tools.voiceWatch.howTo":
     "Voice messages are watched automatically in the selected folder.",
   "tools.voiceWatch.pausedCloud":
@@ -603,6 +615,7 @@ export const en = {
   "tools.voiceWatch.preset.downloads": "Downloads",
   "tools.voiceWatch.preset.telegram": "Telegram Desktop",
   "tools.voiceWatch.expertOptions": "Expert options",
+  "tools.voiceWatch.expertClose": "Close",
   "tools.voiceWatch.recursive": "Include subfolders (depth ≤ 2)",
   "tools.voiceWatch.extensions": "Extensions",
   "tools.voiceWatch.textMode": "Text mode for voice watch",
@@ -635,6 +648,9 @@ export const en = {
   "tools.voiceFiles.sidebarExpand": "Show file list",
   "tools.voiceFiles.indexEmpty": "No files in the index yet",
   "tools.voiceFiles.showInFolder": "Show in folder",
+  "tools.voiceFiles.saveDocx": "Save as DOCX",
+  "tools.voiceFiles.saveDocxFailed": "Could not save DOCX",
+  "tools.voiceFiles.saveDocxDone": "DOCX saved",
   "tools.voiceWatch.status.speechUnrecognized": "Speech not recognized",
   "tools.voiceWatch.status.tooLong": "Too long — run manually",
   "tools.voiceWatch.status.notAudio": "Not audio / damaged",
@@ -802,19 +818,14 @@ export const en = {
     "GPU acceleration unavailable — using CPU for separation.",
   "tools.vocalSeparator.warning.profileFallback":
     "Switched to Google ReFormer (speed) due to memory limits.",
-  "about.separationModelsTitle": "Separation model credits",
-  "about.separationModelsBody":
-    "Google ReFormer (quality/speed): musetric/vocal-separation-roformer-onnx (host STFT + ONNX core; public download). Hybrid Transformer Demucs: StemSplitio/htdemucs-ft-vocals-onnx. Verify licenses before redistribution.",
-
   "about.open": "About Veyro",
   "about.version": "Version {version}",
   "about.hwidTitle": "Hardware ID",
   "about.licenseTitle": "License",
   "about.licenseBody":
     "Veyro is provided free of charge for personal and commercial use. Advanced capabilities may require a separate paid license or subscription in future releases.",
+  "about.modelsTitle": "Models",
   "about.thirdPartyTitle": "Third-party software",
-  "about.thirdPartyIntro":
-    "Veyro includes open-source and third-party components. The list below is generated from the release build dependency tree (Rust crates, bundled native runtimes, and npm packages).",
   "about.publisherTitle": "Publisher",
   "about.copyrightTitle": "Copyright",
   "about.disclaimer":

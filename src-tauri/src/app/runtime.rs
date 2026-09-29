@@ -960,7 +960,11 @@ async fn process_one_segment(
     }
 
     let injection_result = injector
-        .insert_text(&normalized, settings.injection_mode_for_host())
+        .insert_text(
+            &normalized,
+            settings.injection_mode_for_host(),
+            settings.soft_line_breaks,
+        )
         .await;
 
     if let Err(error) = injection_result {
@@ -1042,7 +1046,11 @@ fn delete_injected_session_text(
     }
 }
 
-fn insert_injected_session_text(final_text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+fn insert_injected_session_text(
+    final_text: &str,
+    mode: InjectionMode,
+    soft_line_breaks: bool,
+) -> Result<(), InjectionError> {
     if final_text.is_empty() {
         return Ok(());
     }
@@ -1050,12 +1058,16 @@ fn insert_injected_session_text(final_text: &str, mode: InjectionMode) -> Result
     #[cfg(windows)]
     {
         let _ = mode;
-        return crate::injection::live::insert_trailing_injected_text(final_text);
+        return crate::injection::live::insert_trailing_injected_text(
+            final_text,
+            soft_line_breaks,
+        );
     }
 
     #[cfg(not(windows))]
     {
         let _ = mode;
+        let _ = soft_line_breaks;
         crate::injection::prepare::prepare_for_live_injection();
         crate::injection::clipboard::paste_via_clipboard(final_text)
     }
@@ -1065,9 +1077,10 @@ fn replace_injected_session_text(
     rollback_chars: u32,
     final_text: &str,
     mode: InjectionMode,
+    soft_line_breaks: bool,
 ) -> Result<(), InjectionError> {
     delete_injected_session_text(rollback_chars, mode)?;
-    insert_injected_session_text(final_text, mode)
+    insert_injected_session_text(final_text, mode, soft_line_breaks)
 }
 
 pub(crate) fn schedule_ptt_postprocess_finish(app: AppHandle, ctx: Arc<AppContext>) {
@@ -1193,6 +1206,7 @@ async fn try_finish_ptt_postprocess(
     tray::blink::start_purple_blink(app);
 
     let injection_mode = settings.injection_mode_for_host();
+    let soft_line_breaks = settings.soft_line_breaks;
     let rollback_for_delete = rollback_chars;
     let rewrite_fut = rewrite_processed_text(
         &rewrite_input,
@@ -1233,7 +1247,8 @@ async fn try_finish_ptt_postprocess(
                 "activity.text.rewrite_fallback",
                 json!({ "reason": error.to_string(), "session": true }),
             );
-            restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+            restore_phase1_injected_text(delete_ok, injection_mode, soft_line_breaks, &rewrite_input)
+                .await;
             let _ = with_controller(controller, app, |controller, handle| {
                 controller.recover_to_ready(handle)
             });
@@ -1286,7 +1301,8 @@ async fn try_finish_ptt_postprocess(
     }
     let final_text = ensure_trailing_block_separator(&cleaned);
     if final_text.is_empty() {
-        restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+        restore_phase1_injected_text(delete_ok, injection_mode, soft_line_breaks, &rewrite_input)
+            .await;
         let _ = with_controller(controller, app, |controller, handle| {
             controller.recover_to_ready(handle)
         });
@@ -1295,7 +1311,8 @@ async fn try_finish_ptt_postprocess(
 
     if ctx.runtime.pending_count() > 0 {
         warn!("PTT AI postprocess: replace skipped, segments still pending");
-        restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+        restore_phase1_injected_text(delete_ok, injection_mode, soft_line_breaks, &rewrite_input)
+            .await;
         return;
     }
 
@@ -1307,9 +1324,14 @@ async fn try_finish_ptt_postprocess(
         let final_text = final_text.clone();
         move || {
             if delete_ok {
-                insert_injected_session_text(&final_text, injection_mode)
+                insert_injected_session_text(&final_text, injection_mode, soft_line_breaks)
             } else {
-                replace_injected_session_text(rollback_chars, &final_text, injection_mode)
+                replace_injected_session_text(
+                    rollback_chars,
+                    &final_text,
+                    injection_mode,
+                    soft_line_breaks,
+                )
             }
         }
     })
@@ -1319,12 +1341,14 @@ async fn try_finish_ptt_postprocess(
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
             warn!("PTT AI postprocess replace failed: {error}");
-            restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+            restore_phase1_injected_text(delete_ok, injection_mode, soft_line_breaks, &rewrite_input)
+                .await;
             return;
         }
         Err(error) => {
             warn!("PTT AI postprocess replace task failed: {error}");
-            restore_phase1_injected_text(delete_ok, injection_mode, &rewrite_input).await;
+            restore_phase1_injected_text(delete_ok, injection_mode, soft_line_breaks, &rewrite_input)
+                .await;
             return;
         }
     }
@@ -1359,14 +1383,17 @@ impl Drop for PttFinishGuard<'_> {
 async fn restore_phase1_injected_text(
     delete_succeeded: bool,
     injection_mode: InjectionMode,
+    soft_line_breaks: bool,
     text: &str,
 ) {
     if !delete_succeeded || text.is_empty() {
         return;
     }
     let text = text.to_string();
-    match tokio::task::spawn_blocking(move || insert_injected_session_text(&text, injection_mode))
-        .await
+    match tokio::task::spawn_blocking(move || {
+        insert_injected_session_text(&text, injection_mode, soft_line_breaks)
+    })
+    .await
     {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
@@ -1507,7 +1534,11 @@ pub async fn flush_focus_defer_buffer(app: &AppHandle, ctx: &Arc<AppContext>) {
     tray::menu::refresh_tray_menu(app);
 
     let injection_result = injector
-        .insert_text(&text, settings.injection_mode_for_host())
+        .insert_text(
+            &text,
+            settings.injection_mode_for_host(),
+            settings.soft_line_breaks,
+        )
         .await;
 
     if let Err(error) = injection_result {

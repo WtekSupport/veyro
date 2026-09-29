@@ -21,7 +21,12 @@ impl X11Injector {
 
 #[async_trait]
 impl TextInjector for X11Injector {
-    async fn insert_text(&self, text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+    async fn insert_text(
+        &self,
+        text: &str,
+        mode: InjectionMode,
+        _soft_line_breaks: bool,
+    ) -> Result<(), InjectionError> {
         match mode {
             InjectionMode::Keyboard | InjectionMode::Auto | InjectionMode::Paste => {
                 paste_via_clipboard(text)

@@ -7,11 +7,12 @@ import {
   getSettings,
   getVoiceQueue,
   listVoiceHistory,
+  pickVoiceDocxSavePath,
   pickVoiceFiles,
   pickVoiceWatchFolder,
   removeVoiceIndexEntry,
-  revealVoiceSource,
   retryVoiceHistoryEntry,
+  saveVoiceResultDocx,
   updateSettings,
   voiceWatchSetEnabled,
   voiceWatchUsesCloud,
@@ -26,6 +27,7 @@ import {
   iconCopy,
   iconFolder,
   iconList,
+  iconSettings,
   iconSidebarCollapse,
   iconSidebarExpand,
   iconTrash,
@@ -126,12 +128,132 @@ function buildIndex(
   return Array.from(byId.values());
 }
 
+function renderExpertFields(watch: VoiceWatchSettings, expert: boolean): string {
+  const notifyField = `
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.notify"))}</span>
+      <select data-watch-notify>
+        <option value="off" ${watch.notify === "off" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.off"))}</option>
+        <option value="result" ${watch.notify === "result" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.result"))}</option>
+        <option value="result_and_copy" ${watch.notify === "result_and_copy" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.resultAndCopy"))}</option>
+      </select>
+    </label>`;
+
+  if (!expert) {
+    return notifyField;
+  }
+
+  return `
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.recursive"))}</span>
+      <input type="checkbox" data-watch-recursive ${watch.recursive ? "checked" : ""} />
+    </label>
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.extensions"))}</span>
+      <input type="text" data-watch-extensions value="${escapeHtml(watch.extensions.join(", "))}" />
+    </label>
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.textMode"))}</span>
+      <select data-watch-text-mode>
+        <option value="inherit" ${watch.text_mode_override === "inherit" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.textMode.inherit"))}</option>
+        <option value="original" ${watch.text_mode_override === "original" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.textMode.original"))}</option>
+        <option value="basic" ${watch.text_mode_override === "basic" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.textMode.basic"))}</option>
+      </select>
+    </label>
+    ${notifyField}
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.onlyLocal"))}</span>
+      <input type="checkbox" data-watch-only-local ${watch.only_local_providers ? "checked" : ""} />
+    </label>
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.deleteSource"))}</span>
+      <input type="checkbox" data-watch-delete-source ${watch.delete_source_after ? "checked" : ""} />
+    </label>
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.moveSource"))}</span>
+      <input type="checkbox" data-watch-move-source ${watch.move_source_after ? "checked" : ""} />
+    </label>
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.retention"))}</span>
+      <input type="number" min="1" max="365" data-watch-retention value="${watch.history_retention_days}" />
+    </label>
+    <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.nameFilter"))}</span>
+      <input type="text" data-watch-name-filter value="${escapeHtml(watch.name_filter)}" placeholder="audio_*" />
+    </label>
+  `;
+}
+
+function renderExpertDialog(watch: VoiceWatchSettings, expert: boolean): string {
+  return `
+    <div class="confirm-overlay voice-watch-expert-overlay" data-expert-overlay>
+      <div class="confirm-dialog voice-watch-expert-dialog" role="dialog" aria-modal="true" aria-labelledby="voice-watch-expert-title">
+        <h2 id="voice-watch-expert-title" class="confirm-dialog-title">${escapeHtml(t("tools.voiceWatch.expertOptions"))}</h2>
+        <div class="voice-watch-expert-body">
+          ${renderExpertFields(watch, expert)}
+        </div>
+        <div class="confirm-dialog-actions">
+          <button type="button" class="btn btn-primary" data-close-expert>
+            ${escapeHtml(t("tools.voiceWatch.expertClose"))}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderWatchCompact(
+  watch: VoiceWatchSettings,
+  cloudPaused: boolean,
+  foldersOpen: boolean,
+): string {
+  const folders = watch.folders
+    .map(
+      (folder, index) => `
+      <li class="voice-watch-folder">
+        <span class="voice-watch-folder-path" title="${escapeHtml(folder)}">${escapeHtml(folder)}</span>
+        <button type="button" class="icon-btn voice-watch-folder-remove" data-remove-folder="${index}"
+          aria-label="${escapeHtml(t("tools.voiceWatch.removeFolder"))}"
+          title="${escapeHtml(t("tools.voiceWatch.removeFolder"))}">${iconTrash()}</button>
+      </li>`,
+    )
+    .join("");
+
+  return `
+    <section class="voice-watch-panel voice-watch-panel--sidebar" aria-label="${escapeHtml(t("tools.voiceWatch.title"))}">
+      <div class="voice-watch-header">
+        <label class="voice-watch-toggle" title="${escapeHtml(t("tools.voiceWatch.howTo"))}">
+          <input type="checkbox" data-voice-watch-enabled ${watch.enabled ? "checked" : ""} />
+          <span>${escapeHtml(t("tools.voiceWatch.enable"))}</span>
+        </label>
+        <div class="voice-watch-folder-actions">
+          <button type="button" class="icon-btn" data-pick-folder
+            aria-label="${escapeHtml(t("tools.voiceWatch.chooseFolder"))}"
+            title="${escapeHtml(t("tools.voiceWatch.chooseFolder"))}">${iconFolder()}</button>
+          <button type="button" class="icon-btn${foldersOpen ? " icon-btn--active" : ""}" data-toggle-folders
+            aria-expanded="${foldersOpen}"
+            aria-label="${escapeHtml(t("tools.voiceWatch.listFolders"))}"
+            title="${escapeHtml(t("tools.voiceWatch.listFolders"))}">${iconList()}</button>
+          <button type="button" class="icon-btn" data-open-expert
+            aria-label="${escapeHtml(t("tools.voiceWatch.expertOptions"))}"
+            title="${escapeHtml(t("tools.voiceWatch.expertOptions"))}">${iconSettings()}</button>
+        </div>
+      </div>
+      ${cloudPaused ? `<p class="voice-watch-warn">${escapeHtml(t("tools.voiceWatch.pausedCloud"))}</p>` : ""}
+      ${
+        watch.enabled && watch.folders.length === 0
+          ? `<p class="voice-watch-warn">${escapeHtml(t("tools.voiceWatch.noFolders"))}</p>`
+          : ""
+      }
+      ${
+        foldersOpen
+          ? `<ul class="voice-watch-folders">${folders || `<li class="muted">${escapeHtml(t("tools.voiceWatch.foldersEmpty"))}</li>`}</ul>`
+          : ""
+      }
+    </section>
+  `;
+}
+
 function renderFileBrowser(
   entries: IndexEntry[],
   selectedId: string | null,
   progressByPath: Map<string, { phase: VoiceFileProgressPhase; percent: number | null }>,
   collapsed: boolean,
   processing: boolean,
+  watch: VoiceWatchSettings,
+  cloudPaused: boolean,
+  foldersOpen: boolean,
 ): string {
   if (collapsed) {
     return `
@@ -192,112 +314,9 @@ function renderFileBrowser(
         </button>
       </div>
       <ul class="voice-files-browser" role="list">${rows}</ul>
+      ${renderWatchCompact(watch, cloudPaused, foldersOpen)}
     </aside>`;
 }
-
-function renderWatchPanel(
-  watch: VoiceWatchSettings,
-  expert: boolean,
-  cloudPaused: boolean,
-  foldersOpen: boolean,
-): string {
-  const folders = watch.folders
-    .map(
-      (folder, index) => `
-      <li class="voice-watch-folder">
-        <span class="voice-watch-folder-path" title="${escapeHtml(folder)}">${escapeHtml(folder)}</span>
-        <button type="button" class="icon-btn voice-watch-folder-remove" data-remove-folder="${index}"
-          aria-label="${escapeHtml(t("tools.voiceWatch.removeFolder"))}"
-          title="${escapeHtml(t("tools.voiceWatch.removeFolder"))}">${iconTrash()}</button>
-      </li>`,
-    )
-    .join("");
-
-  return `
-    <section class="voice-watch-panel" aria-label="${escapeHtml(t("tools.voiceWatch.title"))}">
-      <div class="voice-watch-header">
-        <label class="voice-watch-toggle">
-          <input type="checkbox" data-voice-watch-enabled ${watch.enabled ? "checked" : ""} />
-          <span>${escapeHtml(t("tools.voiceWatch.enable"))}</span>
-        </label>
-        <div class="voice-watch-folder-actions">
-          <button type="button" class="icon-btn" data-pick-folder
-            aria-label="${escapeHtml(t("tools.voiceWatch.chooseFolder"))}"
-            title="${escapeHtml(t("tools.voiceWatch.chooseFolder"))}">${iconFolder()}</button>
-          <button type="button" class="icon-btn${foldersOpen ? " icon-btn--active" : ""}" data-toggle-folders
-            aria-expanded="${foldersOpen}"
-            aria-label="${escapeHtml(t("tools.voiceWatch.listFolders"))}"
-            title="${escapeHtml(t("tools.voiceWatch.listFolders"))}">${iconList()}</button>
-        </div>
-      </div>
-      <p class="voice-watch-hint">${escapeHtml(t("tools.voiceWatch.howTo"))}</p>
-      ${cloudPaused ? `<p class="voice-watch-warn">${escapeHtml(t("tools.voiceWatch.pausedCloud"))}</p>` : ""}
-      ${
-        watch.enabled && watch.folders.length === 0
-          ? `<p class="voice-watch-warn">${escapeHtml(t("tools.voiceWatch.noFolders"))}</p>`
-          : ""
-      }
-      ${
-        foldersOpen
-          ? `<ul class="voice-watch-folders">${folders || `<li class="muted">${escapeHtml(t("tools.voiceWatch.foldersEmpty"))}</li>`}</ul>`
-          : ""
-      }
-      ${
-        expert
-          ? `
-        <details class="voice-watch-expert">
-          <summary>${escapeHtml(t("tools.voiceWatch.expertOptions"))}</summary>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.recursive"))}</span>
-            <input type="checkbox" data-watch-recursive ${watch.recursive ? "checked" : ""} />
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.extensions"))}</span>
-            <input type="text" data-watch-extensions value="${escapeHtml(watch.extensions.join(", "))}" />
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.textMode"))}</span>
-            <select data-watch-text-mode>
-              <option value="inherit" ${watch.text_mode_override === "inherit" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.textMode.inherit"))}</option>
-              <option value="original" ${watch.text_mode_override === "original" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.textMode.original"))}</option>
-              <option value="basic" ${watch.text_mode_override === "basic" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.textMode.basic"))}</option>
-            </select>
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.notify"))}</span>
-            <select data-watch-notify>
-              <option value="off" ${watch.notify === "off" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.off"))}</option>
-              <option value="result" ${watch.notify === "result" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.result"))}</option>
-              <option value="result_and_copy" ${watch.notify === "result_and_copy" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.resultAndCopy"))}</option>
-            </select>
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.onlyLocal"))}</span>
-            <input type="checkbox" data-watch-only-local ${watch.only_local_providers ? "checked" : ""} />
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.deleteSource"))}</span>
-            <input type="checkbox" data-watch-delete-source ${watch.delete_source_after ? "checked" : ""} />
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.moveSource"))}</span>
-            <input type="checkbox" data-watch-move-source ${watch.move_source_after ? "checked" : ""} />
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.retention"))}</span>
-            <input type="number" min="1" max="365" data-watch-retention value="${watch.history_retention_days}" />
-          </label>
-          <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.nameFilter"))}</span>
-            <input type="text" data-watch-name-filter value="${escapeHtml(watch.name_filter)}" placeholder="audio_*" />
-          </label>
-        </details>
-      `
-          : `
-        <label class="field-row"><span>${escapeHtml(t("tools.voiceWatch.notify"))}</span>
-          <select data-watch-notify>
-            <option value="off" ${watch.notify === "off" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.off"))}</option>
-            <option value="result" ${watch.notify === "result" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.result"))}</option>
-            <option value="result_and_copy" ${watch.notify === "result_and_copy" ? "selected" : ""}>${escapeHtml(t("tools.voiceWatch.notify.resultAndCopy"))}</option>
-          </select>
-        </label>
-      `
-      }
-    </section>
-  `;
-}
-
 function renderTool(args: {
   jobs: VoiceJob[];
   selectedId: string | null;
@@ -308,6 +327,7 @@ function renderTool(args: {
   expert: boolean;
   cloudPaused: boolean;
   foldersOpen: boolean;
+  expertOpen: boolean;
   sidebarCollapsed: boolean;
   history: VoiceHistoryEntry[];
   selectedHistoryId: string | null;
@@ -322,6 +342,7 @@ function renderTool(args: {
     expert,
     cloudPaused,
     foldersOpen,
+    expertOpen,
     sidebarCollapsed,
     history,
     selectedHistoryId,
@@ -368,6 +389,10 @@ function renderTool(args: {
       : null;
   const canCopy =
     Boolean(displayText.trim()) && selectedEntry?.status !== "pending";
+  const canSaveDocx =
+    Boolean(displayText.trim()) &&
+    !isError &&
+    selectedEntry?.status === "done";
   const copyTitle = copyHint ?? t("tools.voiceFiles.copy");
   const showRetryLang =
     selectedEntry?.status === "speech_unrecognized" ||
@@ -375,10 +400,17 @@ function renderTool(args: {
 
   return `
     <main class="voice-files-tool voice-files-tool--with-browser${sidebarCollapsed ? " voice-files-tool--sidebar-collapsed" : ""}">
-      ${renderFileBrowser(index, selectedEntry?.id ?? null, progressByPath, sidebarCollapsed, processing)}
+      ${renderFileBrowser(
+        index,
+        selectedEntry?.id ?? null,
+        progressByPath,
+        sidebarCollapsed,
+        processing,
+        watch,
+        cloudPaused,
+        foldersOpen,
+      )}
       <div class="voice-files-main">
-        ${renderWatchPanel(watch, expert, cloudPaused, foldersOpen)}
-
         ${
           progressPercent !== null
             ? `
@@ -398,7 +430,7 @@ function renderTool(args: {
           ${
             selectedEntry
               ? `<div class="voice-history-item-actions">
-                  <button type="button" class="btn btn-secondary btn-compact" data-reveal-source>${escapeHtml(t("tools.voiceFiles.showInFolder"))}</button>
+                  <button type="button" class="btn btn-secondary btn-compact" data-save-docx ${canSaveDocx ? "" : "disabled"}>${escapeHtml(t("tools.voiceFiles.saveDocx"))}</button>
                   <button type="button" class="btn btn-secondary btn-compact" data-retry-history>${escapeHtml(t("tools.voiceWatch.retry"))}</button>
                   ${showRetryLang ? `<button type="button" class="btn btn-secondary btn-compact" data-retry-with-lang>${escapeHtml(t("tools.voiceWatch.retryWithLang"))}</button>` : ""}
                   <button type="button" class="btn btn-ghost btn-compact" data-remove-index-selected
@@ -409,10 +441,10 @@ function renderTool(args: {
           }
         </div>
       </div>
+      ${expertOpen ? renderExpertDialog(watch, expert) : ""}
     </main>
   `;
 }
-
 export function createVoiceFilesController(root: HTMLElement): {
   enqueuePaths: (paths: string[]) => void;
   dispose: () => void;
@@ -426,7 +458,9 @@ export function createVoiceFilesController(root: HTMLElement): {
   let expert = false;
   let cloudPaused = false;
   let foldersOpen = false;
+  let expertOpen = false;
   let sidebarCollapsed = false;
+  let expertKeyHandler: ((event: KeyboardEvent) => void) | null = null;
   const progressByPath = new Map<
     string,
     { phase: VoiceFileProgressPhase; percent: number | null }
@@ -434,6 +468,12 @@ export function createVoiceFilesController(root: HTMLElement): {
   const decodeProgress = new ToolDecodeProgressSmoother();
   const unlistens: UnlistenFn[] = [];
 
+  const clearExpertKeyHandler = (): void => {
+    if (expertKeyHandler) {
+      document.removeEventListener("keydown", expertKeyHandler);
+      expertKeyHandler = null;
+    }
+  };
   const paint = (): void => {
     const selected = jobs.find((j) => j.id === selectedId);
     const prog = selected ? progressByPath.get(selected.path) : undefined;
@@ -451,6 +491,7 @@ export function createVoiceFilesController(root: HTMLElement): {
       expert,
       cloudPaused,
       foldersOpen,
+      expertOpen,
       sidebarCollapsed,
       history,
       selectedHistoryId,
@@ -682,6 +723,34 @@ export function createVoiceFilesController(root: HTMLElement): {
       paint();
     });
 
+    root.querySelector<HTMLButtonElement>("[data-open-expert]")?.addEventListener("click", () => {
+      expertOpen = true;
+      paint();
+    });
+
+    const closeExpert = (): void => {
+      clearExpertKeyHandler();
+      expertOpen = false;
+      paint();
+    };
+
+    root.querySelector<HTMLButtonElement>("[data-close-expert]")?.addEventListener("click", closeExpert);
+    root.querySelector<HTMLElement>("[data-expert-overlay]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeExpert();
+      }
+    });
+    clearExpertKeyHandler();
+    if (expertOpen) {
+      expertKeyHandler = (event: KeyboardEvent): void => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeExpert();
+        }
+      };
+      document.addEventListener("keydown", expertKeyHandler);
+    }
+
     root.querySelectorAll<HTMLButtonElement>("[data-pick-folder]").forEach((button) => {
       button.addEventListener("click", () => {
         void pickVoiceWatchFolder().then((path) => {
@@ -742,11 +811,33 @@ export function createVoiceFilesController(root: HTMLElement): {
       name_filter: el.value,
     }));
 
-    root.querySelector("[data-reveal-source]")?.addEventListener("click", () => {
-      const entry = buildIndex(history, jobs).find(
-        (e) => e.id === selectedHistoryId || e.id === selectedId,
-      );
-      if (entry?.path) void revealVoiceSource(entry.path);
+    root.querySelector("[data-save-docx]")?.addEventListener("click", () => {
+      void (async () => {
+        const entry = buildIndex(history, jobs).find(
+          (e) => e.id === selectedHistoryId || e.id === selectedId,
+        );
+        const text = entry?.text?.trim() ?? "";
+        if (!entry || !text || entry.status !== "done") {
+          return;
+        }
+        const base = entry.fileName.replace(/\.[^.]+$/, "") || "transcript";
+        const defaultName = `${base}.docx`;
+        try {
+          const target = await pickVoiceDocxSavePath(defaultName);
+          if (!target) {
+            return;
+          }
+          await saveVoiceResultDocx(target, text);
+          copyHint = t("tools.voiceFiles.saveDocxDone");
+        } catch {
+          copyHint = t("tools.voiceFiles.saveDocxFailed");
+        }
+        paint();
+        window.setTimeout(() => {
+          copyHint = null;
+          paint();
+        }, 1600);
+      })();
     });
 
     root.querySelector("[data-remove-index-selected]")?.addEventListener("click", () => {
@@ -849,6 +940,7 @@ export function createVoiceFilesController(root: HTMLElement): {
   return {
     enqueuePaths,
     dispose: (): void => {
+      clearExpertKeyHandler();
       for (const u of unlistens) void u();
       decodeProgress.dispose();
     },

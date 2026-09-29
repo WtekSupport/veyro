@@ -101,6 +101,18 @@ pub async fn rewrite_transcription(
     protected_terms: &[String],
 ) -> Result<RewriteOutcome, RewriteError> {
     let ui_locale = settings.ui_locale;
+    // Broken/empty custom skills must not block AI rewrite: fall back to Optimization.
+    let mode = if mode.requires_custom_skill()
+        && !crate::text::skill::is_skill_body_usable(ai_rewrite_skill)
+    {
+        warn!(
+            "custom skill unavailable ({}); falling back to optimization",
+            ai_rewrite_skill.unwrap_or("")
+        );
+        TextProcessingMode::Optimization
+    } else {
+        mode
+    };
     let result = match settings.text_rewrite_provider {
         TextRewriteProvider::Openai => {
             rewrite_with_openai(

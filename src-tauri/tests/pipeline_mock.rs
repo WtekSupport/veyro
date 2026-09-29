@@ -68,7 +68,7 @@ async fn mock_pipeline_processes_and_injects() {
         .unwrap();
 
     injector
-        .insert_text(&processed.text, InjectionMode::Auto)
+        .insert_text(&processed.text, InjectionMode::Auto, true)
         .await
         .unwrap();
 

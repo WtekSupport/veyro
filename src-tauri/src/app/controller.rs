@@ -149,6 +149,7 @@ impl AppController {
             apply_homemaker_local_setup.unwrap_or(false),
         );
         crate::settings::normalize_locale_dependent_settings(&mut self.settings);
+        let _ = crate::settings::normalize_custom_skill_settings(&mut self.settings);
         self.settings.sync_capslock_hotkey(previous_capslock);
         self.settings.enabled = true;
         if self.settings.text_processing_mode.uses_ai()

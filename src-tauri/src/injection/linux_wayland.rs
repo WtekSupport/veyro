@@ -35,7 +35,12 @@ impl WaylandInjector {
 
 #[async_trait]
 impl TextInjector for WaylandInjector {
-    async fn insert_text(&self, text: &str, mode: InjectionMode) -> Result<(), InjectionError> {
+    async fn insert_text(
+        &self,
+        text: &str,
+        mode: InjectionMode,
+        _soft_line_breaks: bool,
+    ) -> Result<(), InjectionError> {
         if !self.paste_available {
             return Err(InjectionError::Unavailable);
         }

@@ -12,6 +12,7 @@ import {
   PanelLeftOpen,
   Mic,
   MicAudioLines,
+  MonitorSpeaker,
   Plus,
   Settings,
   Speech,
@@ -67,6 +68,16 @@ export function iconSettings(): string {
 
 export function iconTools(): string {
   return icon(Wrench);
+}
+
+/** Capture source: microphone only. */
+export function iconCaptureMic(): string {
+  return icon(Mic);
+}
+
+/** Capture source: microphone + app loopback. */
+export function iconCaptureMicApp(): string {
+  return icon(MonitorSpeaker);
 }
 
 /** Audio pipeline (capture / playback). */

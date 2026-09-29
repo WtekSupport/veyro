@@ -377,6 +377,7 @@ export const ru: Record<MessageKey, string> = {
   "settings.sileroVadDownloadHint":
     "Модель детекции речи (~3 МБ). Нужна для Silero VAD; WebRTC работает без неё.",
   "settings.numbersAsWords": "Числа прописью",
+  "settings.softLineBreaks": "Перенос строки без отправки (Shift+Enter)",
   "settings.emulateEnter": "Эмуляция ENTER",
   "settings.enterTriggerPhrase": "Фраза для Enter",
   "settings.enterTriggerPhrasePlaceholder": "напр. новая строка — пусто = по умолчанию",
@@ -513,6 +514,17 @@ export const ru: Record<MessageKey, string> = {
   "errors.provider_empty": "Провайдер распознавания не может быть пустым",
   "errors.silence_timeout_range": "Таймаут паузы должен быть от 200 до 10000 мс",
   "errors.enter_trigger_phrase_too_long": "Фраза для Enter — не более 120 символов",
+  "errors.custom_skill_missing": "Для режима «Свой skill» нужен файл skill с непустым текстом промпта",
+  "errors.skill_body_empty": "В skill-файле нет текста промпта (только заголовок/описание)",
+  "errors.skill_catalog_locked":
+    "Skill в каталоге закрыт или не оплачен — текст промпта недоступен для установки",
+  "errors.skill_catalog_install_from_site":
+    "Откройте skill на aistructedit.com и нажмите «Установить» (для купленных нужна одноразовая ссылка установки)",
+  "errors.skill_catalog_purchase_required":
+    "Купите skill на aistructedit.com, затем снова нажмите «Установить»",
+  "errors.skill_catalog_token_unavailable":
+    "Токены установки каталога временно недоступны. Попробуйте позже",
+  "errors.deeplink_catalog_not_found": "Skill не найден в каталоге",
   "errors.settings": "Не удалось сохранить настройки",
   "errors.bootstrap": "Не удалось загрузить приложение",
   "errors.recoverOk": "OK",
@@ -593,7 +605,7 @@ export const ru: Record<MessageKey, string> = {
     "При языке «Авто» движок не смог надёжно определить речь. Выберите язык записи и повторите; выбор сохранится в настройках «Захват».",
 
   "tools.voiceWatch.title": "Авторасшифровка",
-  "tools.voiceWatch.enable": "Транскрибирование голосовых",
+  "tools.voiceWatch.enable": "Авторасшифровка",
   "tools.voiceWatch.howTo":
     "Голосовые сообщения автоматически отслеживаются в указанной папке",
   "tools.voiceWatch.pausedCloud":
@@ -606,6 +618,7 @@ export const ru: Record<MessageKey, string> = {
   "tools.voiceWatch.preset.downloads": "Загрузки",
   "tools.voiceWatch.preset.telegram": "Telegram Desktop",
   "tools.voiceWatch.expertOptions": "Экспертные параметры",
+  "tools.voiceWatch.expertClose": "Закрыть",
   "tools.voiceWatch.recursive": "Включая подпапки (глубина ≤ 2)",
   "tools.voiceWatch.extensions": "Расширения",
   "tools.voiceWatch.textMode": "Режим текста для голосовых",
@@ -638,6 +651,9 @@ export const ru: Record<MessageKey, string> = {
   "tools.voiceFiles.sidebarExpand": "Показать список файлов",
   "tools.voiceFiles.indexEmpty": "В индексе пока нет файлов",
   "tools.voiceFiles.showInFolder": "Показать в папке",
+  "tools.voiceFiles.saveDocx": "Сохранить в DOCX",
+  "tools.voiceFiles.saveDocxFailed": "Не удалось сохранить DOCX",
+  "tools.voiceFiles.saveDocxDone": "DOCX сохранён",
   "tools.voiceWatch.status.speechUnrecognized": "Речь не распознана",
   "tools.voiceWatch.status.tooLong": "Слишком длинный — запустить вручную",
   "tools.voiceWatch.status.notAudio": "Не аудио / повреждён",
@@ -805,19 +821,14 @@ export const ru: Record<MessageKey, string> = {
     "GPU недоступен — разделение выполняется на CPU.",
   "tools.vocalSeparator.warning.profileFallback":
     "Из-за нехватки памяти выбран Google ReFormer (скорость).",
-  "about.separationModelsTitle": "Модели разделения",
-  "about.separationModelsBody":
-    "Google ReFormer (качество/скорость): musetric/vocal-separation-roformer-onnx (STFT на хосте + ONNX-ядро; публичная загрузка). Hybrid Transformer Demucs: StemSplitio/htdemucs-ft-vocals-onnx. Проверяйте лицензии перед распространением.",
-
   "about.open": "О программе Veyro",
   "about.version": "Версия {version}",
   "about.hwidTitle": "Идентификатор устройства",
   "about.licenseTitle": "Лицензия",
   "about.licenseBody":
     "Veyro предоставляется бесплатно для личного и коммерческого использования. Расширенные возможности в будущих версиях могут требовать отдельной платной лицензии или подписки.",
+  "about.modelsTitle": "Модели",
   "about.thirdPartyTitle": "Стороннее ПО",
-  "about.thirdPartyIntro":
-    "Veyro использует компоненты с открытым исходным кодом и сторонние технологии. Ниже — полный список из дерева зависимостей release-сборки (Rust, bundled native, npm).",
   "about.publisherTitle": "Издатель",
   "about.copyrightTitle": "Авторские права",
   "about.disclaimer":

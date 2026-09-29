@@ -1,5 +1,6 @@
 pub mod audio_to_srt;
 pub mod audio_to_srt_timing;
+pub mod docx_export;
 pub mod shared;
 pub mod voice_file;
 pub mod voice_watch;

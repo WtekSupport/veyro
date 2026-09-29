@@ -81,6 +81,7 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     spoken_punctuation: values.spoken_punctuation,
     silero_te: values.silero_te,
     numbers_as_words: values.numbers_as_words,
+    soft_line_breaks: values.soft_line_breaks,
     emulate_enter: values.emulate_enter,
     enter_trigger_phrase: values.enter_trigger_phrase,
     start_on_boot: values.start_on_boot,
@@ -138,6 +139,7 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
     patch.spoken_punctuation !== current.spoken_punctuation ||
     patch.silero_te !== current.silero_te ||
     patch.numbers_as_words !== current.numbers_as_words ||
+    patch.soft_line_breaks !== current.soft_line_breaks ||
     patch.emulate_enter !== current.emulate_enter ||
     patch.enter_trigger_phrase !== current.enter_trigger_phrase ||
     patch.start_on_boot !== current.start_on_boot ||

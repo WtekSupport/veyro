@@ -385,6 +385,10 @@ body {
   background: rgba(0, 0, 0, 0.15);
 }
 
+.about-licenses + .about-licenses {
+  margin-top: 8px;
+}
+
 .about-licenses-summary {
   cursor: pointer;
   color: var(--brass);
@@ -418,7 +422,7 @@ body {
 
 .about-licenses-list {
   list-style: none;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 0;
   max-height: min(50vh, 320px);
   overflow: auto;
@@ -1577,7 +1581,8 @@ select.llm-model-select option {
 [data-whisper-beam-field][hidden],
 .ptt-only[hidden],
 .continuous-only[hidden],
-.enter-phrase-only[hidden] {
+.enter-phrase-only[hidden],
+.loopback-app-field[hidden] {
   display: none !important;
 }
 
@@ -2420,6 +2425,31 @@ input[type="range"]::-moz-range-thumb {
 
 .mic-device-field {
   min-width: 0;
+}
+
+.mic-capture-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mic-capture-row .device-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.capture-source-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.capture-source-btn.icon-btn--active {
+  color: var(--brass-bright);
+  background: rgba(255, 193, 69, 0.22);
+  border-color: var(--brass);
 }
 
 .loopback-app-field {
@@ -3708,6 +3738,84 @@ body.tool-window {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.voice-watch-panel--sidebar {
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 8px 6px;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.voice-watch-panel--sidebar .voice-watch-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.voice-watch-panel--sidebar .voice-watch-toggle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  gap: 6px;
+  width: 100%;
+}
+
+.voice-watch-panel--sidebar .voice-watch-toggle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.voice-watch-panel--sidebar .voice-watch-folder-actions {
+  align-self: flex-end;
+}
+
+.voice-watch-panel--sidebar .voice-watch-warn {
+  font-size: 0.65rem;
+  margin: 0;
+}
+
+.voice-watch-panel--sidebar .voice-watch-folders {
+  max-height: 72px;
+  overflow: auto;
+  padding-top: 4px;
+}
+
+.voice-watch-expert-dialog {
+  width: min(100%, 420px);
+  max-height: min(86vh, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.voice-watch-expert-body {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 2px;
+}
+
+.voice-watch-expert-body .field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0;
+  font-size: 0.8rem;
+}
+
+.voice-watch-expert-body input[type="text"],
+.voice-watch-expert-body input[type="number"],
+.voice-watch-expert-body select {
+  max-width: 55%;
+  min-width: 0;
 }
 
 .voice-watch-header {

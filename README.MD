@@ -16,6 +16,10 @@
 
 The app runs in the background and is opened from the **system tray** (Windows/Linux) or the **menu bar** (macOS).
 
+<p align="center">
+  <img src="docs/assets/veyro-screens.png" alt="Veyro — local or cloud voice dictation" width="100%" />
+</p>
+
 ---
 
 ## Quick start

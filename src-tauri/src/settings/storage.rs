@@ -143,18 +143,20 @@ fn normalize_gpu_settings(settings: &mut AppSettings) -> bool {
     true
 }
 
-fn normalize_custom_skill_settings(settings: &mut AppSettings) -> bool {
-    if settings.text_processing_mode.requires_custom_skill()
-        && settings
-            .ai_rewrite_skill
-            .as_deref()
-            .is_none_or(str::is_empty)
-    {
-        settings.text_processing_mode = TextProcessingMode::Optimization;
-        return true;
+pub fn normalize_custom_skill_settings(settings: &mut AppSettings) -> bool {
+    if !settings.text_processing_mode.requires_custom_skill() {
+        return false;
     }
 
-    false
+    let skill_usable = crate::text::skill::is_skill_body_usable(
+        settings.ai_rewrite_skill.as_deref(),
+    );
+    if skill_usable {
+        return false;
+    }
+
+    settings.text_processing_mode = TextProcessingMode::Optimization;
+    true
 }
 
 pub fn normalize_locale_dependent_settings(settings: &mut AppSettings) -> bool {
@@ -464,6 +466,17 @@ mod tests {
     fn default_settings_use_homemaker_ui_mode() {
         let settings = AppSettings::default();
         assert_eq!(settings.ui_mode, UiMode::Homemaker);
+    }
+
+    #[test]
+    fn normalizes_custom_skill_without_usable_body_to_optimization() {
+        let mut settings = AppSettings {
+            text_processing_mode: TextProcessingMode::CustomSkill,
+            ai_rewrite_skill: Some("missing-or-empty.md".to_string()),
+            ..Default::default()
+        };
+        assert!(normalize_custom_skill_settings(&mut settings));
+        assert_eq!(settings.text_processing_mode, TextProcessingMode::Optimization);
     }
 
     #[test]
