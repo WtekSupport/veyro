@@ -108,6 +108,8 @@ impl AppController {
     pub fn plan_settings_update(&mut self, patch: SettingsPatch) -> Result<SettingsUpdatePlan, AppError> {
         let previous_hotkey = self.settings.global_hotkey.clone();
         let previous_device = self.settings.microphone_device.clone();
+        let previous_capture_source = self.settings.capture_source;
+        let previous_loopback_pid = self.settings.loopback_app_pid;
         let previous_ptt = self.settings.push_to_talk;
         let previous_silence = self.settings.silence_timeout_ms;
         let previous_vad_pre = self.settings.vad_pre_speech_buffer_ms;
@@ -160,6 +162,8 @@ impl AppController {
         self.settings.validate().map_err(AppError::from)?;
 
         let audio_action = if previous_device != self.settings.microphone_device
+            || previous_capture_source != self.settings.capture_source
+            || previous_loopback_pid != self.settings.loopback_app_pid
             || previous_ptt != self.settings.push_to_talk
             || previous_silence != self.settings.silence_timeout_ms
             || previous_vad_pre != self.settings.vad_pre_speech_buffer_ms
@@ -522,6 +526,10 @@ impl AppController {
             tray::menu::TrayVisualSnapshot {
                 status: self.status(),
                 locale: self.settings.ui_locale,
+                voice_watch_enabled: self.settings.voice_watch.enabled,
+                voice_watch_cloud: crate::tools::voice_watch::is_cloud_provider_active(
+                    &self.settings,
+                ) && self.settings.voice_watch.enabled,
             },
         );
         Ok(())

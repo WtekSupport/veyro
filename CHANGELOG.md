@@ -12,6 +12,23 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.9.25] — 2026-09-29
+
+### Added
+
+- **Tools — Voice files:** Auto-watch folders for messenger voice downloads; shared processing queue with history index, tray controls, and OS notifications.
+- **Tools — Voice files:** Wider tool window with a collapsible mini file browser (real paths, status, remove-from-index without deleting the file).
+- **Capture:** Optional **Microphone + app output** mode (Windows WASAPI process loopback) — mixes selected app audio with the microphone for dictation.
+
+### Changed
+
+- **Tools:** Subtitles and vocal/instrumental tools keep the previous vertical layout; only voice-file processing uses the sidebar browser.
+- **Windows:** Tool windows use normal z-order (not always-on-top); the main Veyro window stays on top.
+
+### Fixed
+
+- **Tools — Voice files:** Selecting a file in the sidebar shows its processed text in the result field.
+
 ## [1.9.21] — 2026-09-28
 
 ### Added

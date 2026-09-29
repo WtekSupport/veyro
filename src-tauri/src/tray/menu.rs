@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
@@ -11,28 +11,77 @@ use crate::app::context::AppContext;
 use crate::app::state::{AppState, StatusSnapshot};
 use crate::i18n::{self, state_label};
 use crate::settings::UiLocale;
+use crate::tools::voice_watch;
 use crate::tray::state::{TrayIconSet, TrayState};
-use crate::window::{hide_init_window, show_init_window, show_settings_window};
+use crate::window::{hide_init_window, show_init_window, show_settings_window, show_voice_files_tool_window};
 
 const TRAY_ID_SETTINGS: &str = "settings";
 const TRAY_ID_QUIT: &str = "quit";
+const TRAY_ID_VOICE_WATCH: &str = "voice_watch";
+const TRAY_ID_RECENT_PREFIX: &str = "voice_recent:";
+const TRAY_ID_RECENT_EMPTY: &str = "voice_recent_empty";
 
 #[derive(Clone)]
 pub struct TrayVisualSnapshot {
     pub status: StatusSnapshot,
     pub locale: UiLocale,
+    pub voice_watch_enabled: bool,
+    pub voice_watch_cloud: bool,
 }
 
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, TRAY_ID_SETTINGS, "Settings", false, None::<&str>)?;
+    let voice_watch_item = CheckMenuItem::with_id(
+        app,
+        TRAY_ID_VOICE_WATCH,
+        "Transcribe voice messages",
+        true,
+        false,
+        None::<&str>,
+    )?;
+    let recent_empty = MenuItem::with_id(
+        app,
+        TRAY_ID_RECENT_EMPTY,
+        "No recent transcripts",
+        false,
+        None::<&str>,
+    )?;
+    let r0 = MenuItem::with_id(app, format!("{TRAY_ID_RECENT_PREFIX}0"), "—", false, None::<&str>)?;
+    let r1 = MenuItem::with_id(app, format!("{TRAY_ID_RECENT_PREFIX}1"), "—", false, None::<&str>)?;
+    let r2 = MenuItem::with_id(app, format!("{TRAY_ID_RECENT_PREFIX}2"), "—", false, None::<&str>)?;
+    let r3 = MenuItem::with_id(app, format!("{TRAY_ID_RECENT_PREFIX}3"), "—", false, None::<&str>)?;
+    let r4 = MenuItem::with_id(app, format!("{TRAY_ID_RECENT_PREFIX}4"), "—", false, None::<&str>)?;
+    let recent_sub = Submenu::with_id_and_items(
+        app,
+        "recent_transcripts",
+        "Recent transcripts",
+        true,
+        &[&recent_empty, &r0, &r1, &r2, &r3, &r4],
+    )?;
+    let recent_items = vec![r0, r1, r2, r3, r4];
     let quit = MenuItem::with_id(app, TRAY_ID_QUIT, "Quit", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
-        &[&settings, &PredefinedMenuItem::separator(app)?, &quit],
+        &[
+            &settings,
+            &PredefinedMenuItem::separator(app)?,
+            &voice_watch_item,
+            &recent_sub,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
     )?;
 
-    let tray_state = TrayState::new(app, settings, quit);
+    let tray_state = TrayState::new(
+        app,
+        settings,
+        quit,
+        voice_watch_item,
+        recent_sub,
+        recent_items,
+        recent_empty,
+    );
     let initial_icon = tray_state.icons.initializing.clone();
 
     app.manage(tray_state);
@@ -43,9 +92,27 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .tooltip("Veyro — Starting")
         .on_menu_event(|app, event| {
-            match event.id.as_ref() {
+            let id = event.id.as_ref();
+            match id {
                 TRAY_ID_SETTINGS => {
                     show_settings_window(app);
+                }
+                TRAY_ID_VOICE_WATCH => {
+                    if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
+                        let enabled = ctx
+                            .inner()
+                            .controller
+                            .lock()
+                            .ok()
+                            .map(|c| !c.settings().voice_watch.enabled)
+                            .unwrap_or(true);
+                        let _ = voice_watch::voice_watch_set_enabled(
+                            app,
+                            Arc::clone(ctx.inner()),
+                            enabled,
+                        );
+                        refresh_tray_menu(app);
+                    }
                 }
                 TRAY_ID_QUIT => {
                     if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
@@ -60,6 +127,18 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                         }
                     }
                     app.exit(0);
+                }
+                other if other.starts_with(TRAY_ID_RECENT_PREFIX) => {
+                    let slot: usize = other[TRAY_ID_RECENT_PREFIX.len()..]
+                        .parse()
+                        .unwrap_or(usize::MAX);
+                    if let Some(tray_state) = app.try_state::<TrayState>() {
+                        let ids = tray_state.recent_ids.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(Some(hist_id)) = ids.get(slot) {
+                            let _ = show_voice_files_tool_window(app);
+                            let _ = app.emit("app://voice-history-open", hist_id.clone());
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -82,12 +161,11 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+use tauri::Emitter;
+
 /// Push a tray refresh using a snapshot already read under the controller lock.
 pub fn schedule_tray_visual(app: &AppHandle, snapshot: TrayVisualSnapshot) {
     let handle = app.clone();
-    // Never block the caller on the UI thread: PTT workers may hold `controller` while
-    // transitioning state, and a synchronous `run_on_main_thread` deadlocks with the main
-    // thread when it tries to lock the controller for settings/status IPC.
     std::thread::spawn(move || {
         let app = handle.clone();
         let _ = handle.run_on_main_thread(move || {
@@ -103,7 +181,6 @@ pub fn refresh_tray_menu(app: &AppHandle) {
         return;
     }
 
-    // `transition()` may call refresh while holding `controller.lock()` on this thread.
     let app = app.clone();
     std::thread::spawn(move || {
         for delay_ms in [16_u64, 32, 64, 128] {
@@ -119,9 +196,14 @@ pub fn refresh_tray_menu(app: &AppHandle) {
 fn read_tray_snapshot(app: &AppHandle) -> Option<TrayVisualSnapshot> {
     let ctx = app.try_state::<Arc<AppContext>>()?;
     let controller = ctx.inner().controller.try_lock().ok()?;
+    let settings = controller.settings();
+    let cloud = voice_watch::is_cloud_provider_active(settings)
+        && settings.voice_watch.enabled;
     Some(TrayVisualSnapshot {
         status: controller.status(),
-        locale: controller.settings().ui_locale,
+        locale: settings.ui_locale,
+        voice_watch_enabled: settings.voice_watch.enabled,
+        voice_watch_cloud: cloud,
     })
 }
 
@@ -130,7 +212,12 @@ fn apply_tray_visual(app: &AppHandle, snapshot: TrayVisualSnapshot) {
         return;
     };
 
-    let TrayVisualSnapshot { status, locale } = snapshot;
+    let TrayVisualSnapshot {
+        status,
+        locale,
+        voice_watch_enabled,
+        voice_watch_cloud,
+    } = snapshot;
 
     let _ = tray_state
         .settings_item()
@@ -138,6 +225,53 @@ fn apply_tray_visual(app: &AppHandle, snapshot: TrayVisualSnapshot) {
     let _ = tray_state
         .quit_item()
         .set_text(i18n::translate(locale, "tray.quit", &[]));
+
+    let watch_label = if voice_watch_cloud {
+        i18n::translate(locale, "tray.voice_watch_cloud", &[])
+    } else {
+        i18n::translate(locale, "tray.voice_watch", &[])
+    };
+    let _ = tray_state.voice_watch_item().set_text(watch_label);
+    let _ = tray_state.voice_watch_item().set_checked(voice_watch_enabled);
+
+    let _ = tray_state
+        .recent_submenu()
+        .set_text(&i18n::translate(locale, "tray.recent_transcripts", &[]));
+
+    let recent = voice_watch::list_history()
+        .into_iter()
+        .filter(|e| matches!(e.status, voice_watch::HistoryStatus::Done) && !e.text.is_empty())
+        .take(5)
+        .collect::<Vec<_>>();
+
+    {
+        let mut ids = tray_state
+            .recent_ids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for slot in 0..5 {
+            ids[slot] = recent.get(slot).map(|e| e.id.clone());
+            if let Some(item) = tray_state.recent_items().get(slot) {
+                if let Some(entry) = recent.get(slot) {
+                    let preview: String = entry.text.chars().take(40).collect();
+                    let label = format!("{} — {preview}", entry.file_name);
+                    let _ = item.set_text(label);
+                    let _ = item.set_enabled(true);
+                } else {
+                    let _ = item.set_text("—");
+                    let _ = item.set_enabled(false);
+                }
+            }
+        }
+    }
+    let _ = tray_state.recent_empty().set_text(i18n::translate(
+        locale,
+        "tray.recent_empty",
+        &[],
+    ));
+    let _ = tray_state
+        .recent_empty()
+        .set_enabled(false);
 
     let initializing = status.state == AppState::Initializing;
     let (icon, tooltip) = tray_visual(&status, locale, &tray_state.icons);
@@ -150,7 +284,7 @@ fn apply_tray_visual(app: &AppHandle, snapshot: TrayVisualSnapshot) {
         if !crate::tray::blink::is_purple_blink_active() {
             let _ = tray.set_icon(Some(icon));
         }
-        let _ = tray.set_tooltip(Some(&tooltip));
+        let _ = tray.set_tooltip(Some(tooltip.as_str()));
     }
 }
 

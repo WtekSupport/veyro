@@ -94,13 +94,13 @@ pub(crate) fn apply_audio_action(
         AudioAction::None => Ok(()),
         AudioAction::Enable => {
             ctx.runtime.reset_cancel();
-            let (device, mode, vad_config) = {
+            let (source, mode, vad_config) = {
                 let controller = ctx
                     .controller
                     .lock()
                     .map_err(|_| error::AppError::Internal("controller lock poisoned".into()))?;
                 (
-                    controller.settings().microphone_device.clone(),
+                    audio::CaptureSource::from_settings(controller.settings()),
                     controller.capture_mode(),
                     controller.settings().vad_config(),
                 )
@@ -112,7 +112,7 @@ pub(crate) fn apply_audio_action(
                     .lock()
                     .map_err(|_| error::AppError::Internal("audio lock poisoned".into()))?;
                 audio.set_vad_config(vad_config);
-                audio.start(device, mode).map_err(error::AppError::from)
+                audio.start(source, mode).map_err(error::AppError::from)
             };
             if let Err(error) = audio_result {
                 ctx.set_audio_callbacks_enabled(true);
@@ -167,13 +167,13 @@ pub(crate) fn apply_audio_action(
             result
         }
         AudioAction::Restart => {
-            let (device, mode, vad_config) = {
+            let (source, mode, vad_config) = {
                 let controller = ctx
                     .controller
                     .lock()
                     .map_err(|_| error::AppError::Internal("controller lock poisoned".into()))?;
                 (
-                    controller.settings().microphone_device.clone(),
+                    audio::CaptureSource::from_settings(controller.settings()),
                     controller.capture_mode(),
                     controller.settings().vad_config(),
                 )
@@ -186,7 +186,7 @@ pub(crate) fn apply_audio_action(
                     .map_err(|_| error::AppError::Internal("audio lock poisoned".into()))?;
                 let stop_join = audio.stop().map_err(error::AppError::from)?;
                 audio.set_vad_config(vad_config);
-                audio.start(device, mode).map_err(error::AppError::from)?;
+                audio.start(source, mode).map_err(error::AppError::from)?;
                 stop_join
             };
             join_vad_worker(vad_join);
@@ -300,11 +300,11 @@ pub(crate) fn spawn_prewarm_local_models(
 pub(crate) fn spawn_prewarm_microphone(
     ctx: Arc<AppContext>,
     app: Option<AppHandle>,
-    device_id: Option<String>,
+    source: audio::CaptureSource,
 ) {
     std::thread::spawn(move || {
         if let Ok(mut audio) = ctx.audio.lock() {
-            match audio.prewarm(device_id) {
+            match audio.prewarm(source) {
                 Ok(()) => {
                     if audio.is_capturing() {
                         ctx.record_activity(
@@ -630,6 +630,7 @@ async fn update_settings(
     let post_settings = plan.settings.clone();
     let background_plan = plan.clone();
     let background_app = app.clone();
+    let voice_watch_ctx = ctx.clone();
     tauri::async_runtime::spawn(async move {
         ctx.apply_memory_policy(Some(&background_app), &post_settings, &background_plan)
             .await;
@@ -656,7 +657,7 @@ async fn update_settings(
             spawn_prewarm_microphone(
                 ctx.clone(),
                 Some(background_app.clone()),
-                post_settings.microphone_device.clone(),
+                audio::CaptureSource::from_settings(&post_settings),
             );
             let model_identity_changed = reload_whisper || reload_llm;
             if !model_identity_changed {
@@ -685,6 +686,7 @@ async fn update_settings(
         });
     }
     let _ = app.emit("app://settings-changed", &plan.settings);
+    tools::voice_watch::apply_settings_to_voice_watch(&app, voice_watch_ctx, &plan.settings);
     Ok(plan.settings)
 }
 
@@ -741,7 +743,7 @@ async fn recover_engine(
     spawn_prewarm_microphone(
         ctx.clone(),
         Some(app.clone()),
-        settings.microphone_device.clone(),
+        audio::CaptureSource::from_settings(&settings),
     );
     spawn_prewarm_local_models_if_enabled(ctx.clone(), Some(app.clone()), settings.clone());
 
@@ -759,12 +761,29 @@ fn get_devices() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn get_loopback_apps() -> audio::LoopbackAppsResponse {
+    audio::list_loopback_apps()
+}
+
+#[tauri::command]
 fn prewarm_microphone(
     app: AppHandle,
     ctx: tauri::State<'_, Arc<AppContext>>,
     device_id: Option<String>,
 ) -> Result<(), String> {
-    spawn_prewarm_microphone(ctx.inner().clone(), Some(app), device_id);
+    let source = {
+        let controller = ctx
+            .controller
+            .lock()
+            .map_err(|_| "application controller lock poisoned".to_string())?;
+        let mut settings = controller.settings().clone();
+        if device_id.is_some() {
+            settings.microphone_device = device_id;
+            settings.capture_source = audio::CaptureSourceKind::Microphone;
+        }
+        audio::CaptureSource::from_settings(&settings)
+    };
+    spawn_prewarm_microphone(ctx.inner().clone(), Some(app), source);
     Ok(())
 }
 
@@ -1633,6 +1652,152 @@ async fn transcribe_voice_file(
 }
 
 #[tauri::command]
+fn enqueue_voice_file(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    paths: Vec<String>,
+    source: Option<String>,
+    stt_language_override: Option<String>,
+) -> Result<Vec<tools::voice_watch::VoiceJob>, String> {
+    let source = match source.as_deref() {
+        Some("auto-watch") => tools::voice_watch::VoiceJobSource::AutoWatch,
+        _ => tools::voice_watch::VoiceJobSource::Manual,
+    };
+    let meta = tools::voice_watch::VoiceJobMeta {
+        source,
+        messenger: None,
+        appeared_at_ms: None,
+        content_sha256: None,
+        stt_language_override,
+    };
+    tools::voice_watch::enqueue_paths(&app, Arc::clone(ctx.inner()), paths, meta)
+}
+
+#[tauri::command]
+fn get_voice_queue() -> tools::voice_watch::VoiceQueueSnapshot {
+    tools::voice_watch::get_queue_snapshot()
+}
+
+#[tauri::command]
+fn list_voice_history() -> Vec<tools::voice_watch::HistoryEntry> {
+    tools::voice_watch::list_history()
+}
+
+#[tauri::command]
+fn clear_voice_history() -> Result<(), String> {
+    tools::voice_watch::clear_history()
+}
+
+#[tauri::command]
+fn delete_voice_history_entry(id: String) -> Result<Vec<tools::voice_watch::HistoryEntry>, String> {
+    tools::voice_watch::delete_history_entry(&id)
+}
+
+#[tauri::command]
+fn remove_voice_index_entry(
+    app: AppHandle,
+    id: String,
+) -> Result<Vec<tools::voice_watch::HistoryEntry>, String> {
+    tools::voice_watch::remove_from_index(&app, &id)
+}
+
+#[tauri::command]
+fn retry_voice_history_entry(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    id: String,
+    language: Option<String>,
+) -> Result<tools::voice_watch::VoiceJob, String> {
+    tools::voice_watch::retry_history_entry(&app, Arc::clone(ctx.inner()), &id, language)
+}
+
+#[tauri::command]
+fn get_voice_watch_presets() -> Vec<tools::voice_watch::VoiceWatchPreset> {
+    tools::voice_watch::list_presets()
+}
+
+#[tauri::command]
+fn get_voice_watch_status(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::voice_watch::VoiceWatchStatus, String> {
+    let settings = ctx
+        .controller
+        .lock()
+        .map_err(|_| "controller lock poisoned".to_string())?
+        .settings()
+        .voice_watch
+        .clone();
+    Ok(tools::voice_watch::voice_watch_runtime().status(&settings))
+}
+
+#[tauri::command]
+fn voice_watch_set_enabled(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    enabled: bool,
+) -> Result<AppSettings, String> {
+    tools::voice_watch::voice_watch_set_enabled(&app, Arc::clone(ctx.inner()), enabled)
+}
+
+#[tauri::command]
+fn pick_voice_watch_folder() -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_title("Select folder to watch")
+        .pick_folder()
+        .map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn reveal_voice_source(path: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(path.trim());
+    if !path.exists() {
+        return Err("tools.voiceWatch.fileMissing".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.to_string_lossy()))
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path.to_string_lossy()])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        if let Some(parent) = path.parent() {
+            std::process::Command::new("xdg-open")
+                .arg(parent)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn voice_watch_uses_cloud(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<bool, String> {
+    let settings = ctx
+        .controller
+        .lock()
+        .map_err(|_| "controller lock poisoned".to_string())?
+        .settings()
+        .clone();
+    Ok(tools::voice_watch::is_cloud_provider_active(&settings))
+}
+
+#[tauri::command]
 fn get_subtitle_stt_capability(
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<tools::SubtitleSttCapability, String> {
@@ -1978,6 +2143,7 @@ pub fn run() {
             get_settings,
             update_settings,
             get_devices,
+            get_loopback_apps,
             prewarm_microphone,
             prewarm_local_models,
             force_unload_local_models,
@@ -2035,6 +2201,19 @@ pub fn run() {
             open_vocal_separator_tool_window,
             pick_voice_files,
             transcribe_voice_file,
+            enqueue_voice_file,
+            get_voice_queue,
+            list_voice_history,
+            clear_voice_history,
+            delete_voice_history_entry,
+            remove_voice_index_entry,
+            retry_voice_history_entry,
+            get_voice_watch_presets,
+            get_voice_watch_status,
+            voice_watch_set_enabled,
+            pick_voice_watch_folder,
+            reveal_voice_source,
+            voice_watch_uses_cloud,
             get_subtitle_stt_capability,
             get_vocal_separator_capability,
             separate_vocal_file,
@@ -2127,6 +2306,7 @@ pub fn run() {
                 let _ = text::skill::seed_skills_from_resources(&resource_dir);
             }
             text::skill::start_skills_watcher(handle.clone());
+            tools::voice_watch::start_voice_watch_runtime(&handle, context.clone());
 
             if settings.start_on_boot {
                 let _ = app.handle().autolaunch().enable();

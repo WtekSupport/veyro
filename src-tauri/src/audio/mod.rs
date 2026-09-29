@@ -1,4 +1,5 @@
 pub mod capture;
+pub mod capture_source;
 pub mod debug;
 pub mod denoise;
 pub mod feedback;
@@ -7,6 +8,7 @@ pub mod decode_file;
 pub mod encode;
 pub mod device;
 pub mod level;
+pub mod loopback;
 pub mod monitor;
 pub mod pipeline;
 pub mod warmup;
@@ -17,6 +19,8 @@ pub mod segment_queue_store;
 pub mod stream;
 
 pub use capture::CaptureMode;
+pub use capture_source::{CaptureSource, CaptureSourceKind};
 pub use device::{list_devices, AudioDeviceInfo};
+pub use loopback::{list_loopback_apps, LoopbackAppInfo, LoopbackAppsResponse};
 pub use pipeline::AudioPipeline;
 pub use segment::AudioSegment;

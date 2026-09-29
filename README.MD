@@ -51,7 +51,9 @@ Two providers:
 - **Whisper** (whisper.cpp) — Base through Large v3 / Turbo; broad language support; Q4/Q5/Q8 quantizations.
 - **Sherpa-onnx** — **Parakeet TDT 0.6B v3** and **Qwen3-ASR** bundles (INT8 / FP16 / FP32); English-focused or multilingual depending on model.
 
-Recognition language: automatic, Russian, or English.
+Recognition language: automatic, Russian, English, or another fixed language from the list.
+
+**Voice activity (VAD):** Silero VAD by default (with a quiet-frame WebRTC pre-filter); optional WebRTC-only mode. Threshold can be auto or manual, with calibration from the mic.
 
 A **transcription dictionary** (`dictionary.toml`) helps with names, jargon, and custom vocabulary.
 
@@ -73,7 +75,9 @@ For AI modes you choose a provider:
 - **OpenAI** — via API (key required)
 - **Local LLM** — on-device model (downloaded from the app)
 
-Skills can be imported from disk or installed from the in-app flow; they live in your user **skills** folder.
+Optional **Silero TE** adds on-device punctuation and text enhancement after STT (downloaded when enabled).
+
+Skills can be imported from disk, the in-app catalog, or a `veyro://` deeplink; they live in your user **skills** folder.
 
 ### Extra text options
 
@@ -85,15 +89,31 @@ Skills can be imported from disk or installed from the in-app flow; they live in
 
 ## Tools
 
-Open **Tools** from the main settings window for utilities that reuse the same speech engine and text pipeline as live dictation.
+Open **Tools** from the main settings window (or the status bar) for utilities that reuse the same speech engine and text pipeline as live dictation.
 
 ### Voice file processing
 
 Transcribe audio files to text — queue multiple files, read the result, and copy to the clipboard. Processing uses your current STT provider and text mode (including **AI optimization** and **custom skills** when configured).
 
 - **Input:** drag-and-drop or file picker — common formats such as WAV, MP3, OGG/Opus, FLAC, M4A, AAC, WMA.
-- **Progress:** decoding and recognition show stage labels and a percentage for long files (local Whisper reports inference progress; decode progress follows file read).
-- **Safety:** file transcription is paused while PTT dictation is active; one file runs at a time.
+- **Progress:** decoding and recognition show stage labels and a percentage for long files.
+- **Safety:** file transcription waits while PTT dictation is active; one file runs at a time.
+- **Auto transcription:** optional watch of Download / Telegram Desktop (and custom) folders. When enabled, new `.ogg` / `.oga` / `.opus` files are enqueued automatically. Results appear in **Voice history** and can be opened from the tray (**Recent transcripts**). Default: off; local models only; source files are not deleted.
+
+### Audio to Subtitles (SRT)
+
+Transcribe audio with segment timestamps and export `.srt` subtitles.
+
+- Preview timeline with cue editing.
+- Advanced layout: smart split, line limits, reading-tail options.
+- Same STT provider and language settings as live dictation; if **Auto** language returns empty speech, the app can prompt for a fixed language and retry.
+
+### Split vocals / instrumental
+
+Offline stem separation for music tracks — downloadable ONNX models, progress UI, and preview/download for **vocals** and **instrumental** stems.
+
+- Models include **Google ReFormer** (quality / speed) and **Hybrid Transformer Demucs**.
+- Shown in Tools when the build includes local separation support.
 
 ---
 
@@ -110,21 +130,32 @@ On macOS, keyboard injection requires **Accessibility** permission.
 
 ## Settings
 
+Two UI modes:
+
+| Mode | Audience |
+|------|----------|
+| **Standard** | Simplified capture and text options |
+| **Expert** | Full Capture / Transform / Status controls |
+
+Also available:
+
 - **Microphone** — device selection and level meter
 - **UI language** — Russian or English
 - **Launch at login**
 - **Notifications** for app events
-- **Advanced audio** — preprocessing before recognition, voice-activity (VAD) tuning
-- **Tools** — voice file transcription and future utilities
+- **Advanced audio** — preprocessing before recognition, VAD engine and threshold
+- **Weak PC** — optional segment queue spill to disk when the pipeline is busy
+- **Tools** — voice files, SRT export, and stem separation
 
-The **Status** tab shows an activity log and diagnostics (mic, API, models, queue).
+The **Status** tab shows live diagnostics (CPU/RAM, capability chips), an **input level** graph with VAD threshold, and a collapsible activity log.
 
 ---
 
 ## Privacy
 
 - OpenAI API keys are stored in the **OS secure store** (Windows Credential Manager, macOS Keychain, Linux Secret Service), not in plain text.
-- With **local speech models** (Whisper, Parakeet TDT, Qwen3-ASR via sherpa-onnx) and **local LLM**, speech and text stay on your computer.
+- With **local speech models** (Whisper, Parakeet TDT, Qwen3-ASR via sherpa-onnx), **local LLM**, and **Silero TE**, speech and text stay on your computer.
+- Stem separation also runs **on device** (ONNX); audio is not uploaded for that tool.
 - Settings live in your user profile (`AppData\Veyro` on Windows, equivalent paths on macOS and Linux).
 
 ---

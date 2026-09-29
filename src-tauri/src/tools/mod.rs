@@ -2,6 +2,7 @@ pub mod audio_to_srt;
 pub mod audio_to_srt_timing;
 pub mod shared;
 pub mod voice_file;
+pub mod voice_watch;
 #[cfg(feature = "local-separation")]
 pub mod vocal_separator;
 

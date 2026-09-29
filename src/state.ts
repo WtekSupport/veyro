@@ -29,6 +29,8 @@ export interface UiState {
   status: StatusSnapshot | null;
   settings: AppSettings | null;
   devices: string[];
+  loopbackApps: import("./api").LoopbackAppInfo[];
+  loopbackSupported: boolean;
   diagnostics: DiagnosticsSnapshot | null;
   hasApiKey: boolean;
   lastError: ErrorPayload | null;
@@ -65,6 +67,8 @@ const initialState: UiState = {
   status: null,
   settings: null,
   devices: [],
+  loopbackApps: [],
+  loopbackSupported: false,
   diagnostics: null,
   hasApiKey: false,
   lastError: null,

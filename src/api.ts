@@ -77,6 +77,19 @@ export interface StatusSnapshot {
   injection_backend: string;
 }
 
+export type CaptureSourceKind = "microphone" | "microphone_and_loopback" | "app_loopback";
+
+export interface LoopbackAppInfo {
+  processId: number;
+  name: string;
+  peak: number;
+}
+
+export interface LoopbackAppsResponse {
+  supported: boolean;
+  apps: LoopbackAppInfo[];
+}
+
 export interface AppSettings {
   enabled: boolean;
   global_hotkey: string;
@@ -89,6 +102,9 @@ export interface AppSettings {
   hotkey_game_mode: boolean;
   hotkey_block_system: boolean;
   microphone_device: string | null;
+  capture_source?: CaptureSourceKind;
+  loopback_app_pid?: number | null;
+  loopback_app_name?: string | null;
   language: string | null;
   transcription_provider: string;
   transcription_model: string;
@@ -145,6 +161,45 @@ export interface AppSettings {
   vocal_separator_output_format?: "wav" | "flac" | "match_source";
   vocal_separator_output_dir?: string | null;
   vocal_separator_normalize?: boolean;
+  voice_watch?: VoiceWatchSettings;
+}
+
+export type VoiceWatchNotifyMode = "off" | "result" | "result_and_copy";
+
+export interface VoiceWatchSettings {
+  enabled: boolean;
+  folders: string[];
+  recursive: boolean;
+  extensions: string[];
+  stable_ms: number;
+  max_size_mb: number;
+  max_duration_min: number;
+  name_filter: string;
+  only_local_providers: boolean;
+  text_mode_override: string;
+  notify: VoiceWatchNotifyMode;
+  delete_source_after: boolean;
+  move_source_after: boolean;
+  history_retention_days: number;
+}
+
+export function defaultVoiceWatchSettings(): VoiceWatchSettings {
+  return {
+    enabled: false,
+    folders: [],
+    recursive: false,
+    extensions: ["ogg", "oga", "opus"],
+    stable_ms: 1500,
+    max_size_mb: 50,
+    max_duration_min: 30,
+    name_filter: "",
+    only_local_providers: true,
+    text_mode_override: "inherit",
+    notify: "result",
+    delete_source_after: false,
+    move_source_after: false,
+    history_retention_days: 30,
+  };
 }
 
 export interface SettingsPatch {
@@ -158,6 +213,9 @@ export interface SettingsPatch {
   hotkey_game_mode?: boolean;
   hotkey_block_system?: boolean;
   microphone_device?: string | null;
+  capture_source?: CaptureSourceKind;
+  loopback_app_pid?: number | null;
+  loopback_app_name?: string | null;
   language?: string | null;
   transcription_provider?: string;
   transcription_model?: string;
@@ -215,6 +273,7 @@ export interface SettingsPatch {
   vocal_separator_output_format?: "wav" | "flac" | "match_source";
   vocal_separator_output_dir?: string | null;
   vocal_separator_normalize?: boolean;
+  voice_watch?: VoiceWatchSettings;
 }
 
 export interface HomemakerLocalSetup {
@@ -314,6 +373,9 @@ export const EVENTS = {
   appStats: "app-stats",
   voiceFileProgress: "app://voice-file-progress",
   voiceFilesWindowReady: "app://voice-files-window-ready",
+  voiceQueueChanged: "app://voice-queue-changed",
+  voiceHistoryChanged: "app://voice-history-changed",
+  voiceHistoryOpen: "app://voice-history-open",
   audioSrtProgress: "app://audio-srt-progress",
   audioSrtWindowReady: "app://audio-srt-window-ready",
   vocalSeparatorProgress: "app://vocal-separator-progress",
@@ -449,6 +511,10 @@ export async function getHomemakerHotkeyPresets(): Promise<string[]> {
 
 export async function getDevices(): Promise<string[]> {
   return invoke<string[]>("get_devices");
+}
+
+export async function getLoopbackApps(): Promise<LoopbackAppsResponse> {
+  return invoke<LoopbackAppsResponse>("get_loopback_apps");
 }
 
 export async function prewarmMicrophone(deviceId: string | null): Promise<void> {
@@ -850,6 +916,149 @@ export async function pickVoiceFiles(): Promise<string[]> {
   return invoke<string[]>("pick_voice_files");
 }
 
+export interface VoiceJobMeta {
+  source: "manual" | "auto_watch" | "auto-watch";
+  messenger?: string | null;
+  appearedAtMs?: number | null;
+  contentSha256?: string | null;
+  sttLanguageOverride?: string | null;
+}
+
+export interface VoiceJob {
+  id: string;
+  path: string;
+  fileName: string;
+  status:
+    | "pending"
+    | "processing"
+    | "done"
+    | "error"
+    | "speech_unrecognized"
+    | "too_long"
+    | "not_audio";
+  meta: VoiceJobMeta;
+  text: string;
+  errorKey?: string | null;
+  durationSecs?: number | null;
+}
+
+export interface VoiceQueueSnapshot {
+  jobs: VoiceJob[];
+}
+
+export type HistoryStatus =
+  | "pending"
+  | "processing"
+  | "done"
+  | "error"
+  | "speech_unrecognized"
+  | "too_long"
+  | "not_audio"
+  | "skipped";
+
+export interface VoiceHistoryEntry {
+  id: string;
+  path: string;
+  fileName: string;
+  source: string;
+  messenger?: string | null;
+  appearedAtMs: number;
+  updatedAtMs: number;
+  durationSecs?: number | null;
+  status: HistoryStatus;
+  text: string;
+  errorKey?: string | null;
+  contentSha256?: string | null;
+}
+
+export interface VoiceWatchPreset {
+  id: string;
+  labelKey: string;
+  path: string | null;
+  exists: boolean;
+}
+
+export interface VoiceWatchStatus {
+  enabled: boolean;
+  running: boolean;
+  pausedForCloud: boolean;
+  folderCount: number;
+  foldersExisting: number;
+}
+
+export async function enqueueVoiceFiles(
+  paths: string[],
+  source: "manual" | "auto-watch" = "manual",
+  sttLanguageOverride?: string | null,
+): Promise<VoiceJob[]> {
+  return invoke<VoiceJob[]>("enqueue_voice_file", {
+    paths,
+    source,
+    stt_language_override: sttLanguageOverride ?? null,
+  });
+}
+
+export async function getVoiceQueue(): Promise<VoiceQueueSnapshot> {
+  return invoke<VoiceQueueSnapshot>("get_voice_queue");
+}
+
+export async function listVoiceHistory(): Promise<VoiceHistoryEntry[]> {
+  return invoke<VoiceHistoryEntry[]>("list_voice_history");
+}
+
+export async function clearVoiceHistory(): Promise<void> {
+  return invoke<void>("clear_voice_history");
+}
+
+export async function deleteVoiceHistoryEntry(
+  id: string,
+): Promise<VoiceHistoryEntry[]> {
+  return invoke<VoiceHistoryEntry[]>("delete_voice_history_entry", { id });
+}
+
+/** Remove from index/queue UI only — does not delete the audio file on disk. */
+export async function removeVoiceIndexEntry(
+  id: string,
+): Promise<VoiceHistoryEntry[]> {
+  return invoke<VoiceHistoryEntry[]>("remove_voice_index_entry", { id });
+}
+
+export async function retryVoiceHistoryEntry(
+  id: string,
+  language?: string | null,
+): Promise<VoiceJob> {
+  return invoke<VoiceJob>("retry_voice_history_entry", {
+    id,
+    language: language ?? null,
+  });
+}
+
+export async function getVoiceWatchPresets(): Promise<VoiceWatchPreset[]> {
+  return invoke<VoiceWatchPreset[]>("get_voice_watch_presets");
+}
+
+export async function getVoiceWatchStatus(): Promise<VoiceWatchStatus> {
+  return invoke<VoiceWatchStatus>("get_voice_watch_status");
+}
+
+export async function voiceWatchSetEnabled(
+  enabled: boolean,
+): Promise<AppSettings> {
+  return invoke<AppSettings>("voice_watch_set_enabled", { enabled });
+}
+
+export async function pickVoiceWatchFolder(): Promise<string | null> {
+  return invoke<string | null>("pick_voice_watch_folder");
+}
+
+export async function revealVoiceSource(path: string): Promise<void> {
+  return invoke<void>("reveal_voice_source", { path });
+}
+
+export async function voiceWatchUsesCloud(): Promise<boolean> {
+  return invoke<boolean>("voice_watch_uses_cloud");
+}
+
 export interface VoiceFileTranscriptionResult {
   fileName: string;
   text: string;
@@ -862,6 +1071,8 @@ export interface VoiceFileTranscriptionResult {
 
 export interface VoiceFileOptions {
   sttLanguageOverride?: string | null;
+  textModeOverride?: string | null;
+  skipLanguagePrompt?: boolean;
 }
 
 export async function transcribeVoiceFile(
@@ -872,6 +1083,8 @@ export async function transcribeVoiceFile(
     path,
     options: {
       stt_language_override: options.sttLanguageOverride ?? null,
+      text_mode_override: options.textModeOverride ?? null,
+      skip_language_prompt: options.skipLanguagePrompt ?? false,
     },
   });
 }
