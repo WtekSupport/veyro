@@ -349,6 +349,15 @@ pub struct AppSettings {
     #[serde(default = "default_hotkey_block_system")]
     pub hotkey_block_system: bool,
     pub microphone_device: Option<String>,
+    /// Microphone vs Windows app-output (process loopback) capture.
+    #[serde(default)]
+    pub capture_source: crate::audio::CaptureSourceKind,
+    /// Target process for [`CaptureSourceKind::MicrophoneAndLoopback`].
+    #[serde(default)]
+    pub loopback_app_pid: Option<u32>,
+    /// Display / re-resolve name for the loopback app (e.g. `chrome.exe`).
+    #[serde(default)]
+    pub loopback_app_name: Option<String>,
     pub language: Option<String>,
     pub transcription_provider: String,
     pub transcription_model: String,
@@ -438,6 +447,8 @@ pub struct AppSettings {
     pub vocal_separator_output_dir: Option<String>,
     #[serde(default = "default_vocal_separator_normalize")]
     pub vocal_separator_normalize: bool,
+    #[serde(default)]
+    pub voice_watch: crate::settings::VoiceWatchSettings,
 }
 
 fn default_weak_pc_spill_to_disk() -> bool {
@@ -525,6 +536,9 @@ impl Default for AppSettings {
             hotkey_game_mode: default_hotkey_game_mode(),
             hotkey_block_system: default_hotkey_block_system(),
             microphone_device: None,
+            capture_source: crate::audio::CaptureSourceKind::default(),
+            loopback_app_pid: None,
+            loopback_app_name: None,
             language: None,
             transcription_provider: "local".to_string(),
             transcription_model: "whisper-1".to_string(),
@@ -580,6 +594,7 @@ impl Default for AppSettings {
             vocal_separator_output_format: crate::settings::VocalSeparatorOutputFormat::default(),
             vocal_separator_output_dir: None,
             vocal_separator_normalize: default_vocal_separator_normalize(),
+            voice_watch: crate::settings::VoiceWatchSettings::default(),
         }
     }
 }
@@ -935,6 +950,21 @@ pub struct SettingsPatch {
         deserialize_with = "crate::settings::patch_nullable::deserialize"
     )]
     pub microphone_device: Option<Option<String>>,
+    pub capture_source: Option<crate::audio::CaptureSourceKind>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
+    pub loopback_app_pid: Option<Option<u32>>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::settings::patch_nullable::is_absent",
+        serialize_with = "crate::settings::patch_nullable::serialize",
+        deserialize_with = "crate::settings::patch_nullable::deserialize"
+    )]
+    pub loopback_app_name: Option<Option<String>>,
     #[serde(
         default,
         skip_serializing_if = "crate::settings::patch_nullable::is_absent",
@@ -1034,6 +1064,7 @@ pub struct SettingsPatch {
     )]
     pub vocal_separator_output_dir: Option<Option<String>>,
     pub vocal_separator_normalize: Option<bool>,
+    pub voice_watch: Option<crate::settings::VoiceWatchSettings>,
 }
 
 impl SettingsPatch {
@@ -1067,6 +1098,15 @@ impl SettingsPatch {
         }
         if let Some(microphone_device) = self.microphone_device {
             settings.microphone_device = microphone_device;
+        }
+        if let Some(capture_source) = self.capture_source {
+            settings.capture_source = capture_source;
+        }
+        if let Some(loopback_app_pid) = self.loopback_app_pid {
+            settings.loopback_app_pid = loopback_app_pid;
+        }
+        if let Some(loopback_app_name) = self.loopback_app_name {
+            settings.loopback_app_name = loopback_app_name;
         }
         if let Some(language) = self.language {
             settings.language = language;
@@ -1253,6 +1293,9 @@ impl SettingsPatch {
         }
         if let Some(vocal_separator_normalize) = self.vocal_separator_normalize {
             settings.vocal_separator_normalize = vocal_separator_normalize;
+        }
+        if let Some(voice_watch) = self.voice_watch {
+            settings.voice_watch = voice_watch;
         }
     }
 }

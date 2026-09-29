@@ -8,6 +8,7 @@ pub mod secrets;
 pub mod stt_catalog;
 pub mod storage;
 pub mod vocal_separator;
+pub mod voice_watch;
 
 pub use config::{
     local_llm_compiled, local_llm_gpu_backend_label, local_llm_gpu_compiled,
@@ -34,4 +35,7 @@ pub use data_storage::{
     SUBDIR_LLM_MODELS, SUBDIR_STT_MODELS,
 };
 pub use vocal_separator::{VocalSeparatorOutputFormat, VocalSeparatorProfile};
+pub use voice_watch::{
+    VoiceWatchNotifyMode, VoiceWatchSettings, VoiceWatchTextMode, VoiceWatchTextModeOverride,
+};
 pub use storage::{load_settings, normalize_locale_dependent_settings, save_settings};

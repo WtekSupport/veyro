@@ -24,6 +24,12 @@ use super::shared::{
 pub struct VoiceFileOptions {
     #[serde(default)]
     pub stt_language_override: Option<String>,
+    /// Override text processing for this job (`inherit` / `original` / `basic` / `skill:…`).
+    #[serde(default)]
+    pub text_mode_override: Option<String>,
+    /// When true, empty STT in Auto language returns a soft status instead of `STT_SELECT_LANGUAGE_ERROR`.
+    #[serde(default)]
+    pub skip_language_prompt: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +102,14 @@ pub async fn transcribe_voice_file(
     {
         settings.language = Some(language.to_string());
     }
+    if let Some(mode_override) = options
+        .text_mode_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        crate::tools::voice_watch::apply_text_mode_override(&mut settings, mode_override);
+    }
     let stt_auto_mode =
         stt_failed_in_auto_mode(&base_settings, options.stt_language_override.as_deref());
 
@@ -155,6 +169,18 @@ pub async fn transcribe_voice_file(
     .map_err(|error| error.user_message(settings.ui_locale))?;
 
     if transcription.text.trim().is_empty() && stt_auto_mode {
+        if options.skip_language_prompt {
+            emit_phase(&app, &path_key, VoiceFileProgressPhase::Done);
+            return Ok(VoiceFileTranscriptionResult {
+                file_name,
+                text: String::new(),
+                rewrite_fallback: false,
+                rewrite_fallback_reason: None,
+                ai_rewrite_applied: false,
+                gec_grammar_only: false,
+                info_message_key: Some(STT_SELECT_LANGUAGE_ERROR.to_string()),
+            });
+        }
         return Err(STT_SELECT_LANGUAGE_ERROR.to_string());
     }
 

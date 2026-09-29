@@ -7,6 +7,7 @@ import {
   type AppSettings,
   type DiagnosticsSnapshot,
   type InjectionMode,
+  type LoopbackAppInfo,
   type LlmModelDownloadProgress,
   type LlmModelInfo,
   type LlmModelKind,
@@ -48,6 +49,9 @@ export interface SettingsFormValues {
   recording_indicator: boolean;
   abort_on_focus_loss: boolean;
   microphone_device: string;
+  capture_source: "microphone" | "microphone_and_loopback";
+  loopback_app_pid: string;
+  loopback_app_name: string;
   language: string;
   injection_mode: InjectionMode;
   text_processing_mode: TextProcessingMode;
@@ -258,6 +262,16 @@ export function settingsToForm(
       true,
     abort_on_focus_loss: settings.abort_on_focus_loss ?? false,
     microphone_device: settings.microphone_device ?? "",
+    capture_source:
+      settings.capture_source === "app_loopback" ||
+      settings.capture_source === "microphone_and_loopback"
+        ? "microphone_and_loopback"
+        : "microphone",
+    loopback_app_pid:
+      settings.loopback_app_pid != null && settings.loopback_app_pid > 0
+        ? String(settings.loopback_app_pid)
+        : "",
+    loopback_app_name: settings.loopback_app_name ?? "",
     language: settings.language ?? "auto",
     injection_mode: settings.injection_mode,
     text_processing_mode: settings.text_processing_mode,
@@ -789,6 +803,8 @@ export function renderStatusQuickSettingsPopover(
 export function renderSettingsForm(
   values: SettingsFormValues,
   devices: string[],
+  loopbackApps: LoopbackAppInfo[],
+  loopbackSupported: boolean,
   activeTab: SettingsTab,
   activityLog: ActivityLogEntry[],
   whisperModelDownload: WhisperModelDownloadProgress | null = null,
@@ -837,6 +853,31 @@ export function renderSettingsForm(
             }>${escapeHtml(label)}</option>`;
           })
           .join("");
+  const captureSourceIncludesLoopback =
+    loopbackSupported && values.capture_source === "microphone_and_loopback";
+  const loopbackAppOptions =
+    loopbackApps.length === 0
+      ? `<option value="">${escapeHtml(t("settings.loopbackAppEmpty"))}</option>`
+      : loopbackApps
+          .map((app) => {
+            const selected =
+              values.loopback_app_pid === String(app.processId) ||
+              (!values.loopback_app_pid &&
+                values.loopback_app_name.length > 0 &&
+                values.loopback_app_name === app.name);
+            return `<option value="${app.processId}" data-name="${escapeHtml(app.name)}" ${
+              selected ? "selected" : ""
+            }>${escapeHtml(app.name)}</option>`;
+          })
+          .join("");
+  const captureSourceOptions = `
+    <option value="microphone" ${values.capture_source === "microphone" ? "selected" : ""}>${escapeHtml(t("settings.captureSource.microphone"))}</option>
+    ${
+      loopbackSupported
+        ? `<option value="microphone_and_loopback" ${values.capture_source === "microphone_and_loopback" ? "selected" : ""}>${escapeHtml(t("settings.captureSource.microphoneAndLoopback"))}</option>`
+        : ""
+    }
+  `;
 
   const textModeHint = t(textModeHintKey(values.text_processing_mode));
   const systemNotificationsAvailable = diagnostics?.system_notifications_available ?? true;
@@ -911,6 +952,12 @@ export function renderSettingsForm(
         <section class="settings-section settings-section--capture-device">
           <h3 class="settings-section-title">${escapeHtml(t("tabs.section.captureDevice"))}</h3>
         <div class="field-grid voice-fields">
+          <label class="field">
+            <span class="field-label">${escapeHtml(t("settings.captureSource"))}</span>
+            <select name="capture_source" class="device-select" aria-label="${escapeHtml(t("settings.captureSource"))}">
+              ${captureSourceOptions}
+            </select>
+          </label>
           <div class="field mic-device-field">
             <select
               name="microphone_device"
@@ -919,6 +966,21 @@ export function renderSettingsForm(
               title="${escapeHtml(values.microphone_device || t("settings.defaultMic"))}"
             >${deviceOptions}</select>
             ${renderMicMeter(true)}
+          </div>
+          <div class="field loopback-app-field" ${captureSourceIncludesLoopback ? "" : "hidden"}>
+            <div class="loopback-app-row">
+              <select
+                name="loopback_app_pid"
+                class="device-select"
+                aria-label="${escapeHtml(t("settings.loopbackApp"))}"
+                title="${escapeHtml(values.loopback_app_name || t("settings.loopbackApp"))}"
+              >${loopbackAppOptions}</select>
+              <input type="hidden" name="loopback_app_name" value="${escapeHtml(values.loopback_app_name)}" />
+              <button type="button" class="btn btn-secondary btn-compact" data-refresh-loopback-apps>
+                ${escapeHtml(t("settings.loopbackAppRefresh"))}
+              </button>
+            </div>
+            <p class="field-hint">${escapeHtml(t("settings.loopbackAppHint"))}</p>
           </div>
         </div>
 
@@ -1192,6 +1254,12 @@ export function readSettingsForm(form: HTMLFormElement): SettingsFormValues {
     recording_indicator: data.get("recording_indicator") === "on",
     abort_on_focus_loss: data.get("abort_on_focus_loss") === "on",
     microphone_device: String(data.get("microphone_device") ?? ""),
+    capture_source: (String(data.get("capture_source") ?? "microphone") === "microphone_and_loopback"
+      || String(data.get("capture_source") ?? "") === "app_loopback"
+      ? "microphone_and_loopback"
+      : "microphone"),
+    loopback_app_pid: String(data.get("loopback_app_pid") ?? ""),
+    loopback_app_name: String(data.get("loopback_app_name") ?? ""),
     language: String(data.get("language") ?? "auto"),
     injection_mode: String(data.get("injection_mode") ?? "auto") as InjectionMode,
     text_processing_mode: String(

@@ -36,7 +36,7 @@ const SKILL_IMPORT_WINDOW_HEIGHT: f64 = 300.0;
 const SKILL_IMPORT_WINDOW_HEIGHT_PREVIEW: f64 = 420.0;
 const TOOLS_WINDOW_WIDTH: f64 = 400.0;
 const TOOLS_WINDOW_HEIGHT: f64 = 360.0;
-const TOOL_VOICE_FILES_WINDOW_WIDTH: f64 = 440.0;
+const TOOL_VOICE_FILES_WINDOW_WIDTH: f64 = 880.0;
 const TOOL_VOICE_FILES_WINDOW_HEIGHT: f64 = 520.0;
 const TOOL_AUDIO_SRT_WINDOW_WIDTH: f64 = 480.0;
 const TOOL_AUDIO_SRT_WINDOW_HEIGHT: f64 = 640.0;
@@ -182,7 +182,7 @@ pub fn configure_about_window(window: &WebviewWindow) {
 pub fn configure_tools_window(window: &WebviewWindow) {
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
     enforce_window_size(window, TOOLS_WINDOW_WIDTH, TOOLS_WINDOW_HEIGHT);
 }
 
@@ -190,7 +190,7 @@ pub fn configure_voice_files_tool_window(window: &WebviewWindow) {
     configure_settings_window_chrome(window);
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
     enforce_window_size(
         window,
         TOOL_VOICE_FILES_WINDOW_WIDTH,
@@ -202,7 +202,7 @@ pub fn configure_audio_srt_tool_window(window: &WebviewWindow) {
     configure_settings_window_chrome(window);
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
     enforce_window_size(
         window,
         TOOL_AUDIO_SRT_WINDOW_WIDTH,
@@ -214,7 +214,7 @@ pub fn configure_vocal_separator_tool_window(window: &WebviewWindow) {
     configure_settings_window_chrome(window);
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
     enforce_window_size(
         window,
         TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH,
@@ -682,7 +682,6 @@ pub fn show_tools_window(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     activate_window(&window);
 
-    let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
     Ok(())
 }
@@ -705,7 +704,6 @@ pub fn show_voice_files_tool_window(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     activate_window(&window);
 
-    let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
 
     if !created {
@@ -772,7 +770,6 @@ pub fn show_audio_srt_tool_window(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     activate_window(&window);
 
-    let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
 
     if !created {
@@ -842,7 +839,6 @@ pub fn show_vocal_separator_tool_window(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     activate_window(&window);
 
-    let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
 
     if !created {

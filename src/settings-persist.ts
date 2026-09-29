@@ -50,6 +50,13 @@ export function formValuesToPatch(values: SettingsFormValues): SettingsPatch {
     abort_on_focus_loss: values.abort_on_focus_loss,
     microphone_device:
       values.microphone_device.length > 0 ? values.microphone_device : null,
+    capture_source: values.capture_source,
+    loopback_app_pid: (() => {
+      const parsed = Number(values.loopback_app_pid);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    })(),
+    loopback_app_name:
+      values.loopback_app_name.trim().length > 0 ? values.loopback_app_name.trim() : null,
     language: values.language === "auto" ? null : values.language,
     transcription_provider: transcriptionProvider,
     local_stt_family: values.local_stt_family,
@@ -107,6 +114,9 @@ function settingsChanged(values: SettingsFormValues, current: AppSettings): bool
       (current.recording_indicator ?? current.live_dictation_field_indicator) ||
     patch.abort_on_focus_loss !== (current.abort_on_focus_loss ?? false) ||
     patch.microphone_device !== current.microphone_device ||
+    (patch.capture_source ?? "microphone") !== (current.capture_source ?? "microphone") ||
+    (patch.loopback_app_pid ?? null) !== (current.loopback_app_pid ?? null) ||
+    (patch.loopback_app_name ?? null) !== (current.loopback_app_name ?? null) ||
     (patch.language ?? null) !== (current.language ?? null) ||
     patch.transcription_provider !== current.transcription_provider ||
     patch.local_stt_family !== current.local_stt_family ||
@@ -201,7 +211,9 @@ export async function flushPersistSettings(options?: {
 
     const patch = formValuesToPatch(values);
     const micChanged =
-      patch.microphone_device !== compareWith.microphone_device;
+      patch.microphone_device !== compareWith.microphone_device ||
+      (patch.capture_source ?? "microphone") !== (compareWith.capture_source ?? "microphone") ||
+      (patch.loopback_app_pid ?? null) !== (compareWith.loopback_app_pid ?? null);
     const nextSettings = await updateSettings(patch);
     setSettings(nextSettings);
     if (micChanged) {

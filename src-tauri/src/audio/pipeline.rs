@@ -7,7 +7,9 @@ use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
 use tracing::{info, warn};
 
 use crate::audio::capture::{CaptureMode, SegmentCallback};
+use crate::audio::capture_source::CaptureSource;
 use crate::audio::level::decay_mic_level;
+use crate::audio::loopback::start_app_loopback_stream;
 use crate::audio::monitor::MicMonitor;
 use crate::audio::segment::AudioSegment;
 use crate::audio::stream::start_input_stream;
@@ -20,7 +22,7 @@ pub const PTT_FLUSH_WAIT: std::time::Duration = std::time::Duration::from_millis
 
 enum AudioCommand {
     StartCapture {
-        device_id: Option<String>,
+        source: CaptureSource,
         audio_tx: Sender<Vec<f32>>,
         mic_level: Arc<AtomicU32>,
         mic_monitor: MicMonitor,
@@ -43,7 +45,7 @@ enum AudioCommand {
 pub struct AudioPipeline {
     mode: CaptureMode,
     vad_config: VadConfig,
-    device_id: Option<String>,
+    capture_source: CaptureSource,
     running: Arc<AtomicBool>,
     ptt_active: Arc<AtomicBool>,
     ptt_gate: Arc<AtomicBool>,
@@ -90,7 +92,7 @@ impl AudioPipeline {
         Self {
             mode: CaptureMode::Continuous,
             vad_config,
-            device_id: None,
+            capture_source: CaptureSource::Microphone { device_id: None },
             running: Arc::new(AtomicBool::new(false)),
             ptt_active: Arc::new(AtomicBool::new(false)),
             ptt_gate: Arc::new(AtomicBool::new(false)),
@@ -140,7 +142,7 @@ impl AudioPipeline {
 
     pub fn start(
         &mut self,
-        device_id: Option<String>,
+        source: CaptureSource,
         mode: CaptureMode,
     ) -> Result<(), AudioError> {
         if self.running.load(Ordering::SeqCst) {
@@ -149,7 +151,7 @@ impl AudioPipeline {
             }
         }
 
-        self.device_id = device_id;
+        self.capture_source = source;
         self.mode = mode;
         self.running.store(true, Ordering::SeqCst);
 
@@ -167,10 +169,14 @@ impl AudioPipeline {
         Ok(())
     }
 
-    pub fn prewarm(&mut self, device_id: Option<String>) -> Result<(), AudioError> {
-        self.device_id = device_id;
-        let (sample_rate, channels) =
-            crate::audio::warmup::query_device_format(self.device_id.as_deref())?;
+    pub fn prewarm(&mut self, source: CaptureSource) -> Result<(), AudioError> {
+        self.capture_source = source;
+        let (sample_rate, channels) = match &self.capture_source {
+            CaptureSource::Microphone { device_id } => {
+                crate::audio::warmup::query_device_format(device_id.as_deref())?
+            }
+            CaptureSource::MicrophoneAndLoopback { .. } => (16_000, 1),
+        };
 
         crate::audio::warmup::warm_vad_detector(self.vad_config.clone(), sample_rate, channels);
 
@@ -182,24 +188,29 @@ impl AudioPipeline {
         if pipeline_armed {
             info!(
                 "microphone prewarmed in memory (capture stream kept alive): {} ({sample_rate} Hz, {channels} ch)",
-                self.device_id.as_deref().unwrap_or("default")
+                self.capture_source.display_name()
             );
             return Ok(());
         }
 
         if !stream_active {
-            self.cmd_tx
-                .send(AudioCommand::WarmDevice {
-                    device_id: self.device_id.clone(),
-                    mic_level: Arc::clone(&self.mic_level),
-                    mic_monitor: self.mic_monitor.clone(),
-                })
-                .map_err(|error| AudioError::Stream(error.to_string()))?;
+            match &self.capture_source {
+                CaptureSource::Microphone { device_id }
+                | CaptureSource::MicrophoneAndLoopback { device_id, .. } => {
+                    self.cmd_tx
+                        .send(AudioCommand::WarmDevice {
+                            device_id: device_id.clone(),
+                            mic_level: Arc::clone(&self.mic_level),
+                            mic_monitor: self.mic_monitor.clone(),
+                        })
+                        .map_err(|error| AudioError::Stream(error.to_string()))?;
+                }
+            }
         }
 
         info!(
-            "microphone prewarmed: {} ({sample_rate} Hz, {channels} ch)",
-            self.device_id.as_deref().unwrap_or("default")
+            "capture source prewarmed: {} ({sample_rate} Hz, {channels} ch)",
+            self.capture_source.display_name()
         );
         Ok(())
     }
@@ -370,7 +381,9 @@ impl AudioPipeline {
             return Ok(());
         }
 
-        self.device_id = device_id.clone();
+        self.capture_source = CaptureSource::Microphone {
+            device_id: device_id.clone(),
+        };
         self.cmd_tx
             .send(AudioCommand::StartLevelMonitor {
                 device_id,
@@ -412,8 +425,12 @@ impl AudioPipeline {
         self.ptt_flush_rx = Some(ptt_flush_rx);
         self.ptt_flush_req_tx = Some(ptt_flush_req_tx);
 
-        let (sample_rate, channels) =
-            crate::audio::warmup::query_device_format(self.device_id.as_deref())?;
+        let (sample_rate, channels) = match &self.capture_source {
+            CaptureSource::Microphone { device_id } => {
+                crate::audio::warmup::query_device_format(device_id.as_deref())?
+            }
+            CaptureSource::MicrophoneAndLoopback { .. } => (16_000, 1),
+        };
         crate::audio::warmup::warm_vad_detector(self.vad_config.clone(), sample_rate, channels);
         let ptt_gate = Arc::clone(&self.ptt_gate);
         let ptt_vad_segments_on_silence = Arc::clone(&self.ptt_vad_segments_on_silence);
@@ -421,7 +438,7 @@ impl AudioPipeline {
 
         self.cmd_tx
             .send(AudioCommand::StartCapture {
-                device_id: self.device_id.clone(),
+                source: self.capture_source.clone(),
                 audio_tx,
                 mic_level: Arc::clone(&self.mic_level),
                 mic_monitor: self.mic_monitor.clone(),
@@ -620,20 +637,193 @@ fn start_input_stream_resilient(
     }
 }
 
+enum ActiveStreamHandle {
+    Microphone(crate::audio::stream::AudioStreamHandle),
+    Mixed {
+        mic: crate::audio::stream::AudioStreamHandle,
+        loopback: crate::audio::loopback::LoopbackStreamHandle,
+        mixer_stop: Arc<AtomicBool>,
+        _mixer: Option<std::thread::JoinHandle<()>>,
+    },
+}
+
+fn stop_input_stream(
+    handle: Option<ActiveStreamHandle>,
+    input_stream_active: &AtomicBool,
+    active_mic_level: &mut Option<Arc<AtomicU32>>,
+    active_input_name: &Mutex<Option<String>>,
+) {
+    if let Some(handle) = handle {
+        match handle {
+            ActiveStreamHandle::Microphone(h) => h.stop(),
+            ActiveStreamHandle::Mixed {
+                mic,
+                loopback,
+                mixer_stop,
+                _mixer,
+            } => {
+                mixer_stop.store(true, Ordering::SeqCst);
+                mic.stop();
+                loopback.stop();
+                if let Some(thread) = _mixer {
+                    let _ = thread.join();
+                }
+            }
+        }
+    }
+    input_stream_active.store(false, Ordering::Relaxed);
+    *active_mic_level = None;
+    set_active_input_name(active_input_name, None);
+}
+
+fn start_mic_and_loopback_mixed(
+    device_id: Option<&str>,
+    process_id: u32,
+    label: &str,
+    sample_tx: Sender<Vec<f32>>,
+    mic_level: Arc<AtomicU32>,
+    mic_monitor: MicMonitor,
+    after_restart: bool,
+) -> Result<(ActiveStreamHandle, u32, u16, String), AudioError> {
+    let (mic_tx, mic_rx) = bounded::<Vec<f32>>(32);
+    let (lb_tx, lb_rx) = bounded::<Vec<f32>>(32);
+    let mixer_stop = Arc::new(AtomicBool::new(false));
+    let mixer_stop_thread = mixer_stop.clone();
+    let mix_level = mic_level.clone();
+    let mix_monitor = mic_monitor.clone();
+
+    let (mic_handle, mic_rate, mic_channels, mic_name) = start_input_stream_resilient(
+        device_id,
+        mic_tx,
+        mic_level.clone(),
+        mic_monitor.clone(),
+        after_restart,
+    )?;
+
+    if after_restart {
+        #[cfg(windows)]
+        std::thread::sleep(std::time::Duration::from_millis(80));
+    }
+
+    let (lb_handle, lb_rate, lb_channels, lb_name) = start_app_loopback_stream(
+        process_id,
+        label,
+        lb_tx,
+        mic_level,
+        Some(mic_monitor),
+    )?;
+
+    let mixer = std::thread::Builder::new()
+        .name("capture-mix".into())
+        .spawn(move || {
+            mix_capture_streams(
+                mic_rx,
+                mic_rate,
+                mic_channels,
+                lb_rx,
+                lb_rate,
+                lb_channels,
+                sample_tx,
+                mix_level,
+                mix_monitor,
+                mixer_stop_thread,
+            );
+        })
+        .map_err(|error| AudioError::Stream(error.to_string()))?;
+
+    let name = format!("{mic_name} + {lb_name}");
+    Ok((
+        ActiveStreamHandle::Mixed {
+            mic: mic_handle,
+            loopback: lb_handle,
+            mixer_stop,
+            _mixer: Some(mixer),
+        },
+        16_000,
+        1,
+        name,
+    ))
+}
+
+fn mix_capture_streams(
+    mic_rx: Receiver<Vec<f32>>,
+    mic_rate: u32,
+    mic_channels: u16,
+    lb_rx: Receiver<Vec<f32>>,
+    lb_rate: u32,
+    lb_channels: u16,
+    sample_tx: Sender<Vec<f32>>,
+    mic_level: Arc<AtomicU32>,
+    mic_monitor: MicMonitor,
+    stop_flag: Arc<AtomicBool>,
+) {
+    use crate::audio::level::{peak_level_percent, update_mic_level};
+    use crate::audio::resampler::MonoResampler;
+    use std::collections::VecDeque;
+
+    let Ok(mut mic_resampler) = MonoResampler::new(mic_rate, 16_000) else {
+        warn!("mic mix resampler init failed");
+        return;
+    };
+    let Ok(mut lb_resampler) = MonoResampler::new(lb_rate, 16_000) else {
+        warn!("loopback mix resampler init failed");
+        return;
+    };
+
+    let mut mic_q: VecDeque<f32> = VecDeque::new();
+    let mut lb_q: VecDeque<f32> = VecDeque::new();
+
+    while !stop_flag.load(Ordering::Relaxed) {
+        let mut progressed = false;
+        while let Ok(chunk) = mic_rx.try_recv() {
+            progressed = true;
+            if let Ok(mono) = mic_resampler.push(&chunk, mic_channels) {
+                mic_q.extend(mono);
+            }
+        }
+        while let Ok(chunk) = lb_rx.try_recv() {
+            progressed = true;
+            if let Ok(mono) = lb_resampler.push(&chunk, lb_channels) {
+                lb_q.extend(mono);
+            }
+        }
+
+        // Mix available mono 16 kHz samples; missing side contributes silence.
+        let n = mic_q.len().max(lb_q.len());
+        if n >= 320 {
+            let take = n.min(1600);
+            let mut mixed = Vec::with_capacity(take);
+            for _ in 0..take {
+                let a = mic_q.pop_front().unwrap_or(0.0);
+                let b = lb_q.pop_front().unwrap_or(0.0);
+                mixed.push((a + b).clamp(-1.0, 1.0));
+            }
+            update_mic_level(&mic_level, &mixed);
+            mic_monitor.push_level(peak_level_percent(&mixed));
+            let _ = sample_tx.try_send(mixed);
+            progressed = true;
+        }
+
+        if !progressed {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+}
+
 fn audio_thread_main(
     cmd_rx: Receiver<AudioCommand>,
     shutdown: Arc<AtomicBool>,
     input_stream_active: Arc<AtomicBool>,
     active_input_name: Arc<Mutex<Option<String>>>,
 ) {
-    let mut stream_handle: Option<crate::audio::stream::AudioStreamHandle> = None;
+    let mut stream_handle: Option<ActiveStreamHandle> = None;
     let mut active_mic_level: Option<Arc<AtomicU32>> = None;
     let mut stream_kind = StreamKind::None;
 
     while !shutdown.load(Ordering::SeqCst) {
         match cmd_rx.recv_timeout(std::time::Duration::from_millis(50)) {
             Ok(AudioCommand::StartCapture {
-                device_id,
+                source,
                 audio_tx,
                 mic_level,
                 mic_monitor,
@@ -646,16 +836,45 @@ fn audio_thread_main(
                     &active_input_name,
                 );
                 stream_kind = StreamKind::None;
-                match start_input_stream_resilient(
-                    device_id.as_deref(),
-                    audio_tx,
-                    mic_level.clone(),
-                    mic_monitor,
-                    after_restart,
-                ) {
+
+                let source_label = source.display_name();
+                let start_result = match source {
+                    CaptureSource::Microphone { device_id } => {
+                        start_input_stream_resilient(
+                            device_id.as_deref(),
+                            audio_tx,
+                            mic_level.clone(),
+                            mic_monitor,
+                            after_restart,
+                        )
+                        .map(|(handle, rate, channels, name)| {
+                            (
+                                ActiveStreamHandle::Microphone(handle),
+                                rate,
+                                channels,
+                                name,
+                            )
+                        })
+                    }
+                    CaptureSource::MicrophoneAndLoopback {
+                        device_id,
+                        process_id,
+                        label,
+                    } => start_mic_and_loopback_mixed(
+                        device_id.as_deref(),
+                        process_id,
+                        &label,
+                        audio_tx,
+                        mic_level.clone(),
+                        mic_monitor,
+                        after_restart,
+                    ),
+                };
+
+                match start_result {
                     Ok((handle, rate, channels, device_name)) => {
                         info!(
-                            "audio input stream started: {device_name} ({rate} Hz, {channels} ch)"
+                            "audio capture stream started: {device_name} ({rate} Hz, {channels} ch)"
                         );
                         stream_handle = Some(handle);
                         active_mic_level = Some(mic_level);
@@ -665,10 +884,7 @@ fn audio_thread_main(
                     }
                     Err(error) => {
                         input_stream_active.store(false, Ordering::Relaxed);
-                        warn!(
-                            "failed to start input stream for {}: {error}",
-                            device_id.as_deref().unwrap_or("default")
-                        );
+                        warn!("failed to start capture stream for {source_label}: {error}");
                     }
                 }
             }
@@ -699,7 +915,7 @@ fn audio_thread_main(
                         info!(
                             "mic level monitor started: {device_name} ({rate} Hz, {channels} ch)"
                         );
-                        stream_handle = Some(handle);
+                        stream_handle = Some(ActiveStreamHandle::Microphone(handle));
                         active_mic_level = Some(mic_level);
                         stream_kind = StreamKind::Monitor;
                         set_active_input_name(&active_input_name, Some(device_name));
@@ -763,18 +979,4 @@ fn audio_thread_main(
         &mut active_mic_level,
         &active_input_name,
     );
-}
-
-fn stop_input_stream(
-    handle: Option<crate::audio::stream::AudioStreamHandle>,
-    input_stream_active: &AtomicBool,
-    active_mic_level: &mut Option<Arc<AtomicU32>>,
-    active_input_name: &Mutex<Option<String>>,
-) {
-    if let Some(handle) = handle {
-        handle.stop();
-    }
-    input_stream_active.store(false, Ordering::Relaxed);
-    *active_mic_level = None;
-    set_active_input_name(active_input_name, None);
 }

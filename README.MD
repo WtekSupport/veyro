@@ -97,7 +97,8 @@ Transcribe audio files to text — queue multiple files, read the result, and co
 
 - **Input:** drag-and-drop or file picker — common formats such as WAV, MP3, OGG/Opus, FLAC, M4A, AAC, WMA.
 - **Progress:** decoding and recognition show stage labels and a percentage for long files.
-- **Safety:** file transcription is paused while PTT dictation is active; one file runs at a time.
+- **Safety:** file transcription waits while PTT dictation is active; one file runs at a time.
+- **Auto transcription:** optional watch of Download / Telegram Desktop (and custom) folders. When enabled, new `.ogg` / `.oga` / `.opus` files are enqueued automatically. Results appear in **Voice history** and can be opened from the tray (**Recent transcripts**). Default: off; local models only; source files are not deleted.
 
 ### Audio to Subtitles (SRT)
 

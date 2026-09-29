@@ -1,9 +1,19 @@
-use tauri::{image::Image, menu::MenuItem, AppHandle};
+use tauri::{
+    image::Image,
+    menu::{CheckMenuItem, MenuItem, Submenu},
+    AppHandle,
+};
 
 pub struct TrayState {
     pub icons: TrayIconSet,
     settings_item: MenuItem<tauri::Wry>,
     quit_item: MenuItem<tauri::Wry>,
+    voice_watch_item: CheckMenuItem<tauri::Wry>,
+    recent_submenu: Submenu<tauri::Wry>,
+    recent_items: Vec<MenuItem<tauri::Wry>>,
+    recent_empty: MenuItem<tauri::Wry>,
+    /// Maps recent slot index → history entry id (for click handling).
+    pub recent_ids: std::sync::Mutex<Vec<Option<String>>>,
 }
 
 pub struct TrayIconSet {
@@ -50,11 +60,21 @@ impl TrayState {
         app: &AppHandle,
         settings_item: MenuItem<tauri::Wry>,
         quit_item: MenuItem<tauri::Wry>,
+        voice_watch_item: CheckMenuItem<tauri::Wry>,
+        recent_submenu: Submenu<tauri::Wry>,
+        recent_items: Vec<MenuItem<tauri::Wry>>,
+        recent_empty: MenuItem<tauri::Wry>,
     ) -> Self {
+        let _ = app;
         Self {
             icons: TrayIconSet::from_app(app),
             settings_item,
             quit_item,
+            voice_watch_item,
+            recent_submenu,
+            recent_items,
+            recent_empty,
+            recent_ids: std::sync::Mutex::new(vec![None; 5]),
         }
     }
 
@@ -64,6 +84,22 @@ impl TrayState {
 
     pub fn quit_item(&self) -> &MenuItem<tauri::Wry> {
         &self.quit_item
+    }
+
+    pub fn voice_watch_item(&self) -> &CheckMenuItem<tauri::Wry> {
+        &self.voice_watch_item
+    }
+
+    pub fn recent_submenu(&self) -> &Submenu<tauri::Wry> {
+        &self.recent_submenu
+    }
+
+    pub fn recent_items(&self) -> &[MenuItem<tauri::Wry>] {
+        &self.recent_items
+    }
+
+    pub fn recent_empty(&self) -> &MenuItem<tauri::Wry> {
+        &self.recent_empty
     }
 }
 

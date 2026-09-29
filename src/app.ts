@@ -8,6 +8,7 @@ import {
   EVENTS,
   getActivityLog,
   getDevices,
+  getLoopbackApps,
   forceUnloadLocalModels,
   getDiagnostics,
   getHomemakerHotkeyPresets,
@@ -365,7 +366,7 @@ function render(): void {
             : formValues
               ? `<section class="panel">
               ${renderTabBar(activeTab)}
-              ${renderSettingsForm(formValues, devices, activeTab, activityLog, whisperModelDownload, localSttFamilies, sttVariantInfo, aiSkills, diagnostics, llmModelDownload, llmModels, getState().transcriptionLanguages, sileroTeModel, sileroVadModel, sileroTeModelDownload, sileroVadModelDownload)}
+              ${renderSettingsForm(formValues, devices, getState().loopbackApps, getState().loopbackSupported, activeTab, activityLog, whisperModelDownload, localSttFamilies, sttVariantInfo, aiSkills, diagnostics, llmModelDownload, llmModels, getState().transcriptionLanguages, sileroTeModel, sileroVadModel, sileroTeModelDownload, sileroVadModelDownload)}
             </section>`
               : settings
                 ? `<section class="panel"><p class="hint">${escapeHtml(t("status.loading"))}</p></section>`
@@ -929,6 +930,22 @@ function bindEvents(): void {
     return;
   }
 
+  form.querySelectorAll<HTMLButtonElement>("[data-refresh-loopback-apps]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void getLoopbackApps()
+        .then((response) => {
+          patchState({
+            loopbackApps: response.apps,
+            loopbackSupported: response.supported,
+          });
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          setError({ code: "loopback_apps", message });
+        });
+    });
+  });
+
   const onSettingsChange = (): void => {
     schedulePersistSettings();
   };
@@ -1369,6 +1386,43 @@ function bindEvents(): void {
         }
         if (
           element instanceof HTMLSelectElement &&
+          element.name === "capture_source"
+        ) {
+          const current = getState().settings;
+          if (current) {
+            const baseline = current;
+            const capture_source =
+              element.value === "microphone_and_loopback" || element.value === "app_loopback"
+                ? "microphone_and_loopback"
+                : "microphone";
+            setSettings({ ...current, capture_source });
+            void flushPersistSettings({ compareWith: baseline });
+          }
+          return;
+        }
+        if (
+          element instanceof HTMLSelectElement &&
+          element.name === "loopback_app_pid"
+        ) {
+          const current = getState().settings;
+          if (current) {
+            const baseline = current;
+            const selected = element.selectedOptions[0];
+            const pid = Number(element.value);
+            const name = selected?.dataset.name ?? selected?.textContent ?? "";
+            const hidden = form.querySelector<HTMLInputElement>('input[name="loopback_app_name"]');
+            if (hidden) hidden.value = name;
+            setSettings({
+              ...current,
+              loopback_app_pid: Number.isFinite(pid) && pid > 0 ? pid : null,
+              loopback_app_name: name.trim().length > 0 ? name.trim() : null,
+            });
+            void flushPersistSettings({ compareWith: baseline });
+          }
+          return;
+        }
+        if (
+          element instanceof HTMLSelectElement &&
           element.name === "language"
         ) {
           const current = getState().settings;
@@ -1449,9 +1503,13 @@ async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise
   try {
     const apiKeyConfigured = await invokeWithRetry(() => hasApiKey());
 
-    const [devices, transcriptionLanguages, whisperModels, localSttFamilies, diagnostics] =
+    const [devices, loopback, transcriptionLanguages, whisperModels, localSttFamilies, diagnostics] =
       await Promise.all([
       invokeWithRetry(() => getDevices()),
+      invokeWithRetry(() => getLoopbackApps()).catch(() => ({
+        supported: false,
+        apps: [],
+      })),
       invokeWithRetry(() => listTranscriptionLanguages()),
       invokeWithRetry(() => listLocalSttModels()),
       invokeWithRetry(() => listLocalSttFamilies()),
@@ -1460,6 +1518,8 @@ async function loadBootstrapSecondaryData(initialSettings: AppSettings): Promise
 
     patchState({
       devices,
+      loopbackApps: loopback.apps,
+      loopbackSupported: loopback.supported,
       transcriptionLanguages,
       whisperModels,
       localSttFamilies,

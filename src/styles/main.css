@@ -2422,6 +2422,21 @@ input[type="range"]::-moz-range-thumb {
   min-width: 0;
 }
 
+.loopback-app-field {
+  min-width: 0;
+}
+
+.loopback-app-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.loopback-app-row .device-select {
+  flex: 1;
+  min-width: 0;
+}
+
 .mic-meter--inline {
   margin-top: 6px;
   gap: 6px;
@@ -3148,7 +3163,15 @@ body.tool-window {
   overflow: hidden;
 }
 
-#tool-voice-files-app,
+#tool-voice-files-app {
+  box-sizing: border-box;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg-deep);
+  color: var(--parchment);
+}
+
 #tool-audio-srt-app,
 #tool-vocal-separator-app {
   box-sizing: border-box;
@@ -3478,14 +3501,312 @@ body.tool-window {
   gap: 14px;
 }
 
+/* Shared vertical shell for audio-srt / vocal-separator (and base for voice-files). */
 .voice-files-tool {
   box-sizing: border-box;
   min-height: 100%;
-  height: auto;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Voice-files only: sidebar + main pane. */
+.voice-files-tool--with-browser {
+  height: 100%;
+  padding: 0;
+  flex-direction: row;
+  gap: 0;
+  overflow: hidden;
+}
+
+.voice-files-dropzone--sidebar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
+  margin: 0;
+  padding: 6px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  min-height: 0;
+}
+
+.voice-files-dropzone--sidebar .btn {
+  width: 100%;
+}
+
+.voice-files-dropzone--sidebar.voice-files-dropzone--hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.voice-files-sidebar {
+  flex: 0 0 200px;
+  width: 200px;
+  min-width: 0;
+  border-right: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+
+.voice-files-sidebar--collapsed {
+  flex-basis: 36px;
+  width: 36px;
+  align-items: center;
+  padding-top: 6px;
+}
+
+.voice-files-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 6px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.voice-files-sidebar-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.voice-files-browser {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.voice-files-browser-empty {
+  padding: 8px 6px;
+  font-size: 0.68rem;
+}
+
+.voice-files-browser-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 2px;
+  transition: transform 0.12s ease, background 0.12s ease;
+  touch-action: pan-y;
+  min-height: 22px;
+}
+
+.voice-files-browser-row--selected {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.voice-files-browser-row--swipe {
+  background: rgba(180, 70, 70, 0.18);
+}
+
+.voice-files-browser-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 3px 4px 3px 6px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.voice-files-browser-main:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.voice-files-browser-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-files-browser-status {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  line-height: 1.2;
+  color: var(--parchment-dim);
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-files-browser-row--processing .voice-files-browser-status {
+  color: var(--brass-bright);
+}
+
+.voice-files-browser-row--error .voice-files-browser-status {
+  color: #e08a8a;
+}
+
+.voice-files-browser-remove {
+  flex-shrink: 0;
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--parchment-dim);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.voice-files-browser-row:hover .voice-files-browser-remove,
+.voice-files-browser-row--selected .voice-files-browser-remove {
+  opacity: 0.75;
+}
+
+.voice-files-browser-remove:hover:not(:disabled) {
+  opacity: 1;
+  color: #e08a8a;
+}
+
+.voice-files-browser-remove:disabled {
+  opacity: 0;
+  cursor: default;
+}
+
+.voice-files-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.voice-watch-panel {
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-watch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.voice-watch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.voice-watch-folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.voice-watch-folder-actions .icon-btn--active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.voice-watch-hint,
+.voice-watch-warn {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--parchment-dim);
+}
+
+.voice-watch-warn {
+  color: #d4a574;
+}
+
+.voice-watch-folders {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.voice-watch-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.voice-watch-folder-path {
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.voice-watch-folder-remove {
+  flex-shrink: 0;
+}
+
+.voice-watch-expert {
+  margin-top: 4px;
+}
+
+.voice-watch-expert .field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0;
+  font-size: 0.8rem;
+}
+
+.voice-watch-expert input[type="text"],
+.voice-watch-expert input[type="number"],
+.voice-watch-expert select,
+.voice-watch-panel select {
+  max-width: 220px;
+}
+
+.voice-history-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.muted {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--parchment-dim);
 }
 
 .vocal-sep-models {

@@ -7,6 +7,9 @@ import {
   Download,
   FolderOpen,
   KeyRound,
+  List,
+  PanelLeftClose,
+  PanelLeftOpen,
   Mic,
   MicAudioLines,
   Plus,
@@ -28,6 +31,18 @@ function icon(node: IconNode): string {
 
 export function iconFolder(): string {
   return icon(FolderOpen);
+}
+
+export function iconList(): string {
+  return icon(List);
+}
+
+export function iconSidebarCollapse(): string {
+  return icon(PanelLeftClose);
+}
+
+export function iconSidebarExpand(): string {
+  return icon(PanelLeftOpen);
 }
 
 export function iconImport(): string {
