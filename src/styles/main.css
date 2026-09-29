@@ -1047,9 +1047,15 @@ body {
   flex: 1;
   min-height: 120px;
   position: relative;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 193, 69, 0.16);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 193, 69, 0.06), transparent 55%),
+    rgba(0, 0, 0, 0.38);
+  box-shadow:
+    inset 0 0 24px rgba(255, 193, 69, 0.04),
+    0 0 18px rgba(255, 193, 69, 0.08);
 }
 
 .status-capture-graph {
