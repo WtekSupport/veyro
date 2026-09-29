@@ -12,9 +12,18 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.9.27] — 2026-09-30
+
 ### Added
 
 - **Injection:** Soft line breaks (Shift+Enter) so paragraph newlines in chats do not send the message; toggle in settings (on by default). Hard Enter remains available for Word-like editors and for the Enter trigger phrase.
+- **Tools — Voice files:** Save transcript as DOCX; auto-watch controls moved to a compact sidebar footer with expert options in a popup.
+- **About:** Collapsible **Models** list of local downloadable models; third-party list curated to key technologies only.
+- **README:** Promo screenshot banner before Quick start.
+
+### Changed
+
+- **Capture:** Microphone / Microphone + app output are icon toggles beside the mic device picker; the app picker hides in mic-only mode.
 
 ### Fixed
 
