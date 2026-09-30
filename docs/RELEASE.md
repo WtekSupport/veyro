@@ -28,6 +28,30 @@ NSIS is also built under `%CARGO_TARGET_DIR%\release\bundle\nsis\` (default `C:\
 
 Signed builds and the in-app updater: [docs/UPDATER.md](UPDATER.md).
 
+## Linux (`.deb`)
+
+Build the base package on Linux:
+
+```bash
+npm ci
+npm run tauri build -- --bundles deb
+```
+
+For local Whisper and LLM acceleration, install a current Vulkan SDK first and build with the optional features:
+
+```bash
+npm run tauri build -- --bundles deb --features local-whisper-vulkan,local-llm-vulkan
+```
+
+The package is written to `src-tauri/target/release/bundle/deb/Veyro_<ver>_amd64.deb`. Verify its metadata and checksum before uploading it to the matching GitHub Release:
+
+```bash
+dpkg-deb --info src-tauri/target/release/bundle/deb/Veyro_<ver>_amd64.deb
+sha256sum src-tauri/target/release/bundle/deb/Veyro_<ver>_amd64.deb
+```
+
+The updater signing key is not required for a manually installed `.deb`; without `TAURI_SIGNING_PRIVATE_KEY`, Tauri can create the package and then report an error while attempting to create signed updater artifacts.
+
 After adding or renaming a **key** third-party technology shown in About, refresh the curated list:
 
 ```powershell
