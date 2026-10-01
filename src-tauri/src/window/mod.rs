@@ -639,7 +639,7 @@ fn ensure_voice_files_tool_window(app: &AppHandle) -> Result<(WebviewWindow, boo
         return Ok((window, false));
     }
 
-    let mut builder = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         TOOL_VOICE_FILES_WINDOW_LABEL,
         WebviewUrl::App("tool-voice-files.html".into()),
@@ -656,9 +656,7 @@ fn ensure_voice_files_tool_window(app: &AppHandle) -> Result<(WebviewWindow, boo
     .background_color(SETTINGS_WINDOW_BG);
 
     #[cfg(windows)]
-    {
-        builder = builder.drag_and_drop(true);
-    }
+    let builder = builder.drag_and_drop(true);
 
     // Independent of settings: must not minimize/hide when main goes to tray.
     let window = builder
@@ -783,7 +781,7 @@ fn ensure_audio_srt_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool)
         return Ok((window, false));
     }
 
-    let mut builder = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         TOOL_AUDIO_SRT_WINDOW_LABEL,
         WebviewUrl::App("tool-audio-srt.html".into()),
@@ -800,9 +798,7 @@ fn ensure_audio_srt_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool)
     .background_color(SETTINGS_WINDOW_BG);
 
     #[cfg(windows)]
-    {
-        builder = builder.drag_and_drop(true);
-    }
+    let builder = builder.drag_and_drop(true);
 
     // Independent of settings: must not minimize/hide when main goes to tray.
     let window = builder
@@ -845,7 +841,7 @@ fn ensure_vocal_separator_tool_window(app: &AppHandle) -> Result<(WebviewWindow,
         return Ok((window, false));
     }
 
-    let mut builder = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         TOOL_VOCAL_SEPARATOR_WINDOW_LABEL,
         WebviewUrl::App("tool-vocal-separator.html".into()),
@@ -865,9 +861,7 @@ fn ensure_vocal_separator_tool_window(app: &AppHandle) -> Result<(WebviewWindow,
     .background_color(SETTINGS_WINDOW_BG);
 
     #[cfg(windows)]
-    {
-        builder = builder.drag_and_drop(true);
-    }
+    let builder = builder.drag_and_drop(true);
 
     // Independent of settings: must not minimize/hide when main goes to tray.
     let window = builder

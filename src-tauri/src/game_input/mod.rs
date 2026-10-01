@@ -145,7 +145,7 @@ pub fn confirm_toggle_start() {
 pub fn begin_toggle_stop() -> bool {
     let from = toggle_capture_state();
     let ok = TOGGLE_CAPTURE
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |raw| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |raw| {
             (ToggleCapture::from_raw(raw) != ToggleCapture::Stopping)
                 .then_some(ToggleCapture::Stopping as u8)
         })
