@@ -5,7 +5,7 @@ import {
   openVocalSeparatorToolWindowAndWaitReady,
   openVoiceFilesToolWindowAndWaitReady,
 } from "../api";
-import { escapeHtml } from "../lib/tool-file-queue";
+import { escapeHtml } from "../lib/html";
 import { iconTools } from "./icons";
 import { t } from "../i18n";
 

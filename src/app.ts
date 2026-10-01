@@ -123,7 +123,8 @@ import {
 import { APP_VERSION_DISPLAY } from "./generated/version";
 import { bindToolsList, renderToolsPanelEmbedded } from "./components/tools-list";
 import { bindUiModeSwitch, renderUiModeLink } from "./components/ui-mode-switch";
-import { getLocale, setLocale, subscribeLocale, t } from "./i18n";
+import { formatAppError, getLocale, setLocale, subscribeLocale, t } from "./i18n";
+import { escapeHtml } from "./lib/html";
 import { skillCatalogUrl } from "./lib/skill-catalog-url";
 import {
   flushPersistSettings,
@@ -371,7 +372,7 @@ function render(): void {
               : settings
                 ? `<section class="panel"><p class="hint">${escapeHtml(t("status.loading"))}</p></section>`
                 : !getState().loading
-                  ? `<section class="panel"><p class="hint">${escapeHtml(lastError?.message ?? t("errors.bootstrap"))}</p></section>`
+                  ? `<section class="panel"><p class="hint">${escapeHtml(lastError ? formatAppError(lastError.code, lastError.message).primary : t("errors.bootstrap"))}</p></section>`
                   : ""
       }
     </main>
@@ -1829,14 +1830,6 @@ async function bootstrap(): Promise<void> {
       void refreshDiagnostics();
     }
   });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 export function startApp(): void {

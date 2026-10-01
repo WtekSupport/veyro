@@ -2,14 +2,7 @@ import logoUrl from "../assets/logo.png";
 
 import type { AppInfo, ThirdPartyLicense } from "../api";
 import { t } from "../i18n";
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
+import { escapeHtml } from "../lib/html";
 
 /** Local / downloadable models shown in About (collapsed, like third-party). */
 const LOCAL_MODELS: ReadonlyArray<{ name: string; detail: string }> = [

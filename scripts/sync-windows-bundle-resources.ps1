@@ -22,9 +22,7 @@ $destMap = [ordered]@{
     "onnxruntime_providers_shared-$triple.dll" = "onnxruntime_providers_shared.dll"
 }
 
-$resources = [ordered]@{
-    "resources/sounds/*" = "sounds/"
-}
+$resources = [ordered]@{}
 
 foreach ($entry in $destMap.GetEnumerator()) {
     $source = Join-Path $binariesDir $entry.Key
@@ -58,7 +56,7 @@ if (-not $skipLibtorch) {
     }
 }
 
-if ($resources.Count -le 1) {
+if ($resources.Count -eq 0) {
     Write-Error "No native DLLs staged in $binariesDir. Run stage-llm-dlls.ps1 and/or stage-sherpa-dlls.ps1 first."
 }
 
@@ -73,5 +71,5 @@ $json = ($config | ConvertTo-Json -Depth 6 -Compress:$false)
 $outPath = Join-Path (Join-Path $RepoRoot "src-tauri") "tauri.windows.conf.json"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($outPath, $json, $utf8NoBom)
-$dllCount = $resources.Count - 1
+$dllCount = $resources.Count
 Write-Host "Updated $outPath with $dllCount bundled DLL resource entries."

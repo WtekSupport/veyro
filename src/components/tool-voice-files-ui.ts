@@ -34,7 +34,8 @@ import {
 } from "./icons";
 import { ToolDecodeProgressSmoother } from "../lib/tool-decode-progress";
 import { formatToolErrorForResultField } from "../lib/tool-error-display";
-import { escapeHtml, pathsMatch } from "../lib/tool-file-queue";
+import { escapeHtml } from "../lib/html";
+import { pathsMatch } from "../lib/tool-file-queue";
 import { promptSttLanguageSelection } from "./stt-language-dialog";
 import { t } from "../i18n";
 

@@ -1,4 +1,6 @@
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
+import { presentOverlayDialog } from "../lib/overlay-dialog";
 
 export interface ConfirmDialogOptions {
   message: string;
@@ -7,10 +9,10 @@ export interface ConfirmDialogOptions {
 }
 
 export function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "confirm-overlay";
-    overlay.innerHTML = `
+  return presentOverlayDialog({
+    dismissValue: false,
+    focusSelector: "[data-confirm-ok]",
+    innerHtml: `
       <div class="confirm-dialog" role="dialog" aria-modal="true">
         <p class="confirm-dialog-message">${escapeHtml(options.message)}</p>
         <div class="confirm-dialog-actions">
@@ -22,43 +24,14 @@ export function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolea
           </button>
         </div>
       </div>
-    `;
-
-    const cleanup = (result: boolean): void => {
-      document.removeEventListener("keydown", onKeyDown);
-      overlay.remove();
-      resolve(result);
-    };
-
-    overlay.querySelector<HTMLButtonElement>("[data-confirm-cancel]")?.addEventListener("click", () => {
-      cleanup(false);
-    });
-    overlay.querySelector<HTMLButtonElement>("[data-confirm-ok]")?.addEventListener("click", () => {
-      cleanup(true);
-    });
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        cleanup(false);
-      }
-    });
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        cleanup(false);
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-
-    document.body.appendChild(overlay);
-    overlay.querySelector<HTMLButtonElement>("[data-confirm-ok]")?.focus();
+    `,
+    bind: (overlay, finish) => {
+      overlay.querySelector<HTMLButtonElement>("[data-confirm-cancel]")?.addEventListener("click", () => {
+        finish(false);
+      });
+      overlay.querySelector<HTMLButtonElement>("[data-confirm-ok]")?.addEventListener("click", () => {
+        finish(true);
+      });
+    },
   });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

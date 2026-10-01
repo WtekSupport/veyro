@@ -13,7 +13,7 @@ if ($IsWindows -or $env:OS -like "*Windows*") {
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Error @"
 Veyro dev requires administrator privileges (UAC) so dictation can type into elevated applications.
-If you run from Git Bash, accept the UAC prompt (it may appear on another desktop — check the taskbar).
+If you run from Git Bash, accept the UAC prompt (it may appear on another desktop - check the taskbar).
 Or open PowerShell as Administrator, cd to the repo, and run: npm run tauri:dev
 "@
         exit 1

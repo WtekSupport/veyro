@@ -7,7 +7,7 @@ import {
   type DictationTranscriptEntry,
 } from "../api";
 import { iconCopy, iconSidebarCollapse, iconSidebarExpand } from "./icons";
-import { escapeHtml } from "../lib/tool-file-queue";
+import { escapeHtml } from "../lib/html";
 import { t } from "../i18n";
 
 function formatSessionLabel(entry: DictationTranscriptEntry): string {

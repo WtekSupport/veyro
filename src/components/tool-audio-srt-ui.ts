@@ -31,6 +31,7 @@ import {
 } from "../lib/tool-error-display";
 import { runToolWithSttLanguageRecovery } from "../lib/tool-stt-auto-recovery";
 import { t, type MessageKey } from "../i18n";
+import { escapeHtml } from "../lib/html";
 
 export type AudioSrtJobStatus = "pending" | "processing" | "done" | "error";
 
@@ -97,14 +98,6 @@ const DEFAULT_UI_OPTIONS: AudioSrtUiOptions = {
   diarizationSensitivity: 0.45,
   diarizationExpertOpen: false,
 };
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

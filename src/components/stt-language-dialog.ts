@@ -1,17 +1,11 @@
 import { listTranscriptionLanguages, type TranscriptionLanguageInfo } from "../api";
 import { getLocale, t } from "../i18n";
+import { escapeHtml } from "../lib/html";
+import { presentOverlayDialog } from "../lib/overlay-dialog";
 import {
   formatTranscriptionLanguageLabel,
   sortTranscriptionLanguagesForDisplay,
 } from "../lib/transcription-language-display";
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function renderLanguageOptions(languages: TranscriptionLanguageInfo[]): string {
   if (languages.length === 0) {
@@ -35,10 +29,10 @@ export async function promptSttLanguageSelection(): Promise<string | null> {
     languages = [];
   }
 
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "confirm-overlay";
-    overlay.innerHTML = `
+  return presentOverlayDialog<string | null>({
+    dismissValue: null,
+    focusSelector: "[data-stt-language-select]",
+    innerHtml: `
       <div class="confirm-dialog confirm-dialog--stt-language" role="dialog" aria-modal="true">
         <h2 class="confirm-dialog-title">${escapeHtml(t("tools.stt.selectLanguage.title"))}</h2>
         <p class="confirm-dialog-message">${escapeHtml(t("tools.stt.selectLanguage.message"))}</p>
@@ -57,49 +51,24 @@ export async function promptSttLanguageSelection(): Promise<string | null> {
           </button>
         </div>
       </div>
-    `;
-
-    const cleanup = (language: string | null): void => {
-      document.removeEventListener("keydown", onKeyDown);
-      overlay.remove();
-      resolve(language);
-    };
-
-    const select = overlay.querySelector<HTMLSelectElement>("[data-stt-language-select]");
-    if (select && languages.length > 0) {
-      select.value = languages[0]?.code ?? "";
-    }
-
-    overlay.querySelector<HTMLButtonElement>("[data-stt-language-cancel]")?.addEventListener(
-      "click",
-      () => cleanup(null),
-    );
-    overlay.querySelector<HTMLButtonElement>("[data-stt-language-ok]")?.addEventListener(
-      "click",
-      () => {
-        const code = select?.value.trim() ?? "";
-        if (!code) {
-          cleanup(null);
-          return;
-        }
-        cleanup(code);
-      },
-    );
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        cleanup(null);
+    `,
+    bind: (overlay, finish) => {
+      const select = overlay.querySelector<HTMLSelectElement>("[data-stt-language-select]");
+      if (select && languages.length > 0) {
+        select.value = languages[0]?.code ?? "";
       }
-    });
 
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        cleanup(null);
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-
-    document.body.appendChild(overlay);
-    select?.focus();
+      overlay.querySelector<HTMLButtonElement>("[data-stt-language-cancel]")?.addEventListener(
+        "click",
+        () => finish(null),
+      );
+      overlay.querySelector<HTMLButtonElement>("[data-stt-language-ok]")?.addEventListener(
+        "click",
+        () => {
+          const code = select?.value.trim() ?? "";
+          finish(code ? code : null);
+        },
+      );
+    },
   });
 }

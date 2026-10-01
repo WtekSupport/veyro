@@ -10,7 +10,8 @@ import type {
 
 } from "../api";
 
-import { t, translateActivity, translateState, translateError } from "../i18n";
+import { t, translateActivity, translateState, formatAppError } from "../i18n";
+import { escapeHtml } from "../lib/html";
 import { renderToolsBadgeButton } from "./tools-list";
 import { getState } from "../state";
 import { renderStatusBarGearButton } from "./status-quick-settings";
@@ -73,23 +74,27 @@ export function renderErrorBanner(
 
 
 
-  const message =
-
-    status?.last_error ??
-
-    (lastError
-
-      ? translateError(lastError.code, lastError.message)
-
-      : t("errors.engineStuck"));
-
-
+  const formatted = lastError
+    ? formatAppError(lastError.code, lastError.message)
+    : {
+        primary: status?.last_error ?? t("errors.engineStuck"),
+        detail: null as string | null,
+      };
+  const detail = formatted.detail
+    ? `<p class="error-detail">${escapeHtml(t("tools.error.technicalDetail"))}: ${escapeHtml(formatted.detail)}</p>`
+    : "";
 
   return `
 
     <div class="error-banner">
 
-      <p class="error-text">${escapeHtml(message)}</p>
+      <div class="error-copy">
+
+        <p class="error-text">${escapeHtml(formatted.primary)}</p>
+
+        ${detail}
+
+      </div>
 
       <button type="button" class="error-dismiss" data-recover-engine>${escapeHtml(t("errors.recoverAction"))}</button>
 
@@ -355,18 +360,5 @@ function formatLogTime(timestampMs: number): string {
 
 
 
-function escapeHtml(value: string): string {
-
-  return value
-
-    .replaceAll("&", "&amp;")
-
-    .replaceAll("<", "&lt;")
-
-    .replaceAll(">", "&gt;")
-
-    .replaceAll('"', "&quot;");
-
-}
 
 

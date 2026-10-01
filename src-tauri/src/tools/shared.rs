@@ -80,6 +80,9 @@ fn map_decode_error(error: String, prefix: &str) -> String {
     if error == "empty_audio" {
         return format!("{prefix}.emptyAudio");
     }
+    if error == "unsupported_format" {
+        return format!("{prefix}.unsupportedFormat");
+    }
     if error.contains("unsupported codec") || error.contains("unsupported feature") {
         return format!("{prefix}.unsupportedFormat|{error}");
     }

@@ -5,6 +5,7 @@ import {
   type VadThresholdMode,
 } from "../api";
 import { t, vadEngineShortLabel } from "../i18n";
+import { escapeHtml } from "../lib/html";
 import { getState, setSettings } from "../state";
 import { notifyVadMicDeviceChanged } from "./vad-monitor";
 
@@ -417,12 +418,4 @@ function updateVadActiveChip(panel: HTMLElement, engine: string): void {
   chip.textContent = short;
   chip.title = title;
   chip.setAttribute("aria-label", title);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

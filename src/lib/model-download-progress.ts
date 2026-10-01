@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { escapeHtml } from "./html";
 
 /** Progress payload shared by Whisper, LLM, Silero, and separation model downloads. */
 export interface ModelDownloadProgressLike {
@@ -79,12 +80,4 @@ export function patchModelDownloadProgressDom(
   bar.classList.remove("is-indeterminate");
   bar.style.width = `${percent}%`;
   progressRoot.setAttribute("aria-valuenow", String(percent));
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

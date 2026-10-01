@@ -1,5 +1,6 @@
 import { ensureMicMonitor, getMicLevel } from "../api";
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 const POLL_MS = 80;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let monitorArmed = false;
@@ -91,12 +92,4 @@ async function refreshMicLevel(): Promise<void> {
       value.textContent = `${level}%`;
     }
   }
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

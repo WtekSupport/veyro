@@ -14,6 +14,7 @@ import { renderStatusEventsTrigger } from "./status-events";
 import { lucideIcon } from "./lucide-icon";
 import { Activity, Cpu, MemoryStick, PackageMinus } from "lucide";
 import { t, vadEngineDiagLabel, vadEngineShortLabel, whisperBackendLabel } from "../i18n";
+import { escapeHtml } from "../lib/html";
 import { bindVadGraphResize, resizeVadGraphCanvas } from "./vad-level-graph";
 import { refreshVadGraphsFromSnapshot } from "./vad-monitor";
 
@@ -232,14 +233,6 @@ function injectionPlateValue(
     active: true,
     title: diagnostics.injection_backend,
   };
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 function formatCpu(value: number): string {

@@ -8,6 +8,24 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+function Read-Utf8File {
+    param([Parameter(Mandatory)][string]$Path)
+    return [System.IO.File]::ReadAllText($Path, $utf8NoBom)
+}
+
+function Write-Utf8File {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Value
+    )
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path $parent)) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
+    [System.IO.File]::WriteAllText($Path, $Value, $utf8NoBom)
+}
 $tag = "v$Semver"
 $dir = Join-Path $repoRoot "release\$Semver"
 
@@ -24,24 +42,21 @@ foreach ($f in $files) {
 }
 
 $notes = Join-Path $dir "RELEASE_NOTES.md"
-if (-not (Test-Path $notes)) {
-    $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
-    $changelog = Get-Content $changelogPath -Raw
-    $pattern = "(?s)## \[$([regex]::Escape($Semver))\][^\r\n]*\r?\n(.*?)(?=\r?\n## \[|\z)"
-    if ($changelog -match $pattern) {
-        $section = "## [$Semver]" + [Environment]::NewLine + $Matches[1].TrimEnd()
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
-        Set-Content -Path $notes -Value $section -Encoding UTF8
-        Write-Host "Wrote $notes from CHANGELOG.md"
-    } else {
-        Write-Error "Missing: $notes (no ## [$Semver] section in CHANGELOG.md)"
-    }
+$changelogPath = Join-Path $repoRoot "CHANGELOG.md"
+$changelog = Read-Utf8File -Path $changelogPath
+$pattern = "(?s)## \[$([regex]::Escape($Semver))\][^\r\n]*\r?\n(.*?)(?=\r?\n## \[|\z)"
+if ($changelog -match $pattern) {
+    $section = "## [$Semver]" + [Environment]::NewLine + $Matches[1].TrimEnd()
+    Write-Utf8File -Path $notes -Value $section
+    Write-Host "Wrote $notes from CHANGELOG.md"
+} elseif (-not (Test-Path $notes)) {
+    Write-Error "Missing: $notes (no ## [$Semver] section in CHANGELOG.md)"
 }
 
 function Publish-ViaGitHubApi {
     . (Join-Path $PSScriptRoot "github-api.ps1")
     $repo = "WtekSupport/veyro"
-    $notesBody = (Get-Content $notes -Raw).Trim()
+    $notesBody = (Read-Utf8File -Path $notes).Trim()
     $release = $null
     try {
         $release = Invoke-GitHubApi -Method Get -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"

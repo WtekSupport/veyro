@@ -5,14 +5,7 @@ import type {
   SileroVadModelStatus,
 } from "../api";
 import { t } from "../i18n";
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
+import { escapeHtml } from "../lib/html";
 
 function downloadPercent(progress: SileroModelDownloadProgress | null): number | null {
   return progress?.percent ?? null;

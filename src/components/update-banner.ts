@@ -6,6 +6,7 @@ import {
   type UpdateProgress,
 } from "../updater";
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 
 let mountedHost: HTMLElement | null = null;
 let pendingUpdate: Update | null = null;
@@ -66,14 +67,6 @@ function renderBanner(host: HTMLElement, progress: UpdateProgress | null): void 
     pendingUpdate = null;
     renderBanner(host, null);
   });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 async function runInstall(host: HTMLElement): Promise<void> {

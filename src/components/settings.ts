@@ -32,6 +32,7 @@ import {
 } from "../lib/transcription-language-display";
 import { getState, type SettingsTab } from "../state";
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 import type { MessageKey } from "../i18n/locales/en";
 import { iconCaptureMic, iconCaptureMicApp, iconImport, iconPlus, iconTrash } from "./icons";
 import { renderMicMeter } from "./mic-meter";
@@ -1728,12 +1729,4 @@ function shortenDeviceLabel(value: string): string {
     return value;
   }
   return `${value.slice(0, DEVICE_LABEL_MAX - 1)}…`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

@@ -7,6 +7,7 @@ import {
   type ParsedSrtCue,
 } from "../lib/parse-srt";
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 
 export const AUDIO_SRT_SPEAKER_COLOR_COUNT = 8;
 
@@ -34,13 +35,6 @@ export interface AudioSrtPreviewController {
 
 function escapeAttr(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 export function createAudioSrtPreview(): AudioSrtPreviewController & {

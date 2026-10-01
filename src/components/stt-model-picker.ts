@@ -10,6 +10,7 @@ import {
   type WhisperModelDownloadProgress,
 } from "../api";
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 import type { MessageKey } from "../i18n/locales/en";
 import {
   CircuitBoard,
@@ -78,14 +79,6 @@ const FALLBACK_FAMILIES: LocalSttFamily[] = [
   "canary_qwen_2_5b",
   "granite_speech_3_3_8b",
 ];
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function tierLabel(tier: number): string {
   const clamped = Math.max(1, Math.min(5, Math.round(tier)));
