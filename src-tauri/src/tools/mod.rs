@@ -28,6 +28,7 @@ mod vocal_separator_stub {
 
     #[derive(Debug, Clone, Default, Deserialize)]
     #[serde(rename_all = "camelCase")]
+    #[allow(dead_code)]
     pub struct VocalSeparatorInvokeOptions {
         #[serde(default)]
         pub profile: Option<crate::settings::VocalSeparatorProfile>,

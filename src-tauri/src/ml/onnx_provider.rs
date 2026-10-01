@@ -1,6 +1,10 @@
 use crate::settings::AppSettings;
 
 /// ONNX Runtime execution provider for Veyro-local models (Sherpa STT, separation, etc.).
+#[cfg_attr(
+    not(any(feature = "local-separation", feature = "local-sherpa-stt")),
+    allow(dead_code)
+)]
 pub fn execution_provider(settings: &AppSettings) -> &'static str {
     if let Ok(raw) = std::env::var("VEYRO_SHERPA_PROVIDER") {
         return match raw.to_ascii_lowercase().as_str() {

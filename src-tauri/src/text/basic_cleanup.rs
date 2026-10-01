@@ -327,6 +327,12 @@ fn soften_one_incomplete_sentence(sentence: &str) -> String {
 }
 
 fn is_incomplete_clause(clause: &str) -> bool {
+    // Softening is tuned for Russian Whisper fillers / lone nouns — do not rewrite
+    // Latin-script sentences (e.g. German "Hallo." from spoken punctuation).
+    if !clause.chars().any(|c| matches!(c, '\u{0400}'..='\u{04FF}')) {
+        return false;
+    }
+
     let lower = clause
         .chars()
         .flat_map(char::to_lowercase)
@@ -808,6 +814,12 @@ mod tests {
         assert!(out.contains("давай съездим сегодня."), "out: {out}");
         assert!(out.contains("предложить..."), "out: {out}");
         assert!(out.contains("город..."), "out: {out}");
+    }
+
+    #[test]
+    fn does_not_soften_latin_short_sentences() {
+        let out = soften_incomplete_sentence_periods("Hallo. Welt");
+        assert_eq!(out, "Hallo. Welt");
     }
 
     #[test]
