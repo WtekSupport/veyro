@@ -36,11 +36,15 @@ export type WhisperModelKind =
 export type SherpaSttModelKind =
   | "parakeet_tdt_0_6b_v3"
   | "qwen3_asr_0_6b"
-  | "qwen3_asr_1_7b";
+  | "qwen3_asr_1_7b"
+  | "giga_am_v3_e2e_rnnt"
+  | "giga_am_v3_e2e_ctc";
 
-export type LocalSttModelKind = WhisperModelKind | SherpaSttModelKind;
+export type SidecarSttModelKind = "canary_qwen_2_5b" | "granite_speech_3_3_8b";
 
-export type LocalSttEngine = "whisper" | "sherpa";
+export type LocalSttModelKind = WhisperModelKind | SherpaSttModelKind | SidecarSttModelKind;
+
+export type LocalSttEngine = "whisper" | "sherpa" | "sidecar";
 
 export type LocalSttFamily =
   | "whisper_base"
@@ -50,7 +54,11 @@ export type LocalSttFamily =
   | "whisper_large_v3"
   | "parakeet_tdt_0_6b_v3"
   | "qwen3_asr_0_6b"
-  | "qwen3_asr_1_7b";
+  | "qwen3_asr_1_7b"
+  | "giga_am_v3_e2e_rnnt"
+  | "giga_am_v3_e2e_ctc"
+  | "canary_qwen_2_5b"
+  | "granite_speech_3_3_8b";
 
 export type LocalSttQuant =
   | "legacy"
@@ -375,6 +383,8 @@ export const EVENTS = {
   appStats: "app-stats",
   voiceFileProgress: "app://voice-file-progress",
   voiceFilesWindowReady: "app://voice-files-window-ready",
+  dictationTranscriptUpdated: "app://dictation-transcript-updated",
+  dictationTranscriptsWindowReady: "app://dictation-transcripts-window-ready",
   voiceQueueChanged: "app://voice-queue-changed",
   voiceHistoryChanged: "app://voice-history-changed",
   voiceHistoryOpen: "app://voice-history-open",
@@ -558,6 +568,8 @@ export async function getMicLevel(): Promise<number> {
 export interface MicMonitorSnapshot {
   level_percent: number;
   speech_active: boolean;
+  /** Capture/VAD consuming mic (continuous capturing, or PTT gate open). */
+  vad_active: boolean;
   effective_threshold_percent: number;
   history: number[];
 }
@@ -650,6 +662,10 @@ const LOCAL_STT_FAMILY_ALIASES: Record<string, LocalSttFamily> = {
   qwen3_asr06b: "qwen3_asr_0_6b",
   qwen3_asr17b: "qwen3_asr_1_7b",
   parakeet_tdt06b_v3: "parakeet_tdt_0_6b_v3",
+  gigaam_v3_e2e_rnnt: "giga_am_v3_e2e_rnnt",
+  gigaam_v3_e2e_ctc: "giga_am_v3_e2e_ctc",
+  canary_qwen_25b: "canary_qwen_2_5b",
+  granite_speech_338b: "granite_speech_3_3_8b",
 };
 
 export function normalizeLocalSttFamily(family: string): LocalSttFamily {
@@ -660,8 +676,13 @@ export function isWhisperSttFamily(family: LocalSttFamily | string): boolean {
   return normalizeLocalSttFamily(String(family)).startsWith("whisper_");
 }
 
+export function isSidecarSttFamily(family: LocalSttFamily | string): boolean {
+  const normalized = normalizeLocalSttFamily(String(family));
+  return normalized === "canary_qwen_2_5b" || normalized === "granite_speech_3_3_8b";
+}
+
 export function isSherpaSttFamily(family: LocalSttFamily | string): boolean {
-  return !isWhisperSttFamily(family);
+  return !isWhisperSttFamily(family) && !isSidecarSttFamily(family);
 }
 
 export type LocalWhisperBeamSizeContext = Pick<
@@ -708,13 +729,31 @@ export function localSttModelKindForFamily(family: LocalSttFamily): LocalSttMode
       return "qwen3_asr_0_6b";
     case "qwen3_asr_1_7b":
       return "qwen3_asr_1_7b";
+    case "giga_am_v3_e2e_rnnt":
+      return "giga_am_v3_e2e_rnnt";
+    case "giga_am_v3_e2e_ctc":
+      return "giga_am_v3_e2e_ctc";
+    case "canary_qwen_2_5b":
+      return "canary_qwen_2_5b";
+    case "granite_speech_3_3_8b":
+      return "granite_speech_3_3_8b";
     default:
       return "base";
   }
 }
 
 export function isSherpaSttModel(model: LocalSttModelKind): boolean {
-  return !isWhisperSttModel(model);
+  return (
+    model === "parakeet_tdt_0_6b_v3" ||
+    model === "qwen3_asr_0_6b" ||
+    model === "qwen3_asr_1_7b" ||
+    model === "giga_am_v3_e2e_rnnt" ||
+    model === "giga_am_v3_e2e_ctc"
+  );
+}
+
+export function isSidecarSttModel(model: LocalSttModelKind): boolean {
+  return model === "canary_qwen_2_5b" || model === "granite_speech_3_3_8b";
 }
 
 export function localSttFamilyFromModel(model: LocalSttModelKind): LocalSttFamily {
@@ -730,6 +769,18 @@ export function localSttFamilyFromModel(model: LocalSttModelKind): LocalSttFamil
   if (model === "qwen3_asr_1_7b") {
     return "qwen3_asr_1_7b";
   }
+  if (model === "giga_am_v3_e2e_rnnt") {
+    return "giga_am_v3_e2e_rnnt";
+  }
+  if (model === "giga_am_v3_e2e_ctc") {
+    return "giga_am_v3_e2e_ctc";
+  }
+  if (model === "canary_qwen_2_5b") {
+    return "canary_qwen_2_5b";
+  }
+  if (model === "granite_speech_3_3_8b") {
+    return "granite_speech_3_3_8b";
+  }
   return "whisper_base";
 }
 
@@ -743,10 +794,13 @@ export function effectiveLocalSttFamily(settings: LocalSttFamilyResolution): Loc
   const family = normalizeLocalSttFamily(settings.local_stt_family ?? "whisper_base");
   const model = settings.local_stt_model;
 
-  if (isSherpaSttModel(model) && isWhisperSttFamily(family)) {
+  if (
+    (isSherpaSttModel(model) || isSidecarSttModel(model)) &&
+    isWhisperSttFamily(family)
+  ) {
     return localSttFamilyFromModel(model);
   }
-  if (isWhisperSttModel(model) && isSherpaSttFamily(family)) {
+  if (isWhisperSttModel(model) && (isSherpaSttFamily(family) || isSidecarSttFamily(family))) {
     return WHISPER_MODEL_TO_FAMILY[model];
   }
 
@@ -759,6 +813,9 @@ export function defaultQuantsForFamily(family: LocalSttFamily): LocalSttQuant[] 
   }
   if (family === "parakeet_tdt_0_6b_v3") {
     return ["int8", "fp16", "fp32"];
+  }
+  if (family === "granite_speech_3_3_8b") {
+    return ["q4_0", "q8_0"];
   }
   return ["int8"];
 }
@@ -912,6 +969,64 @@ export async function openVoiceFilesToolWindowAndWaitReady(): Promise<void> {
     window.clearTimeout(timer);
     void unlisten();
   }
+}
+
+export async function openDictationTranscriptsToolWindow(): Promise<void> {
+  return invoke<void>("open_dictation_transcripts_tool_window");
+}
+
+export async function openDictationTranscriptsToolWindowAndWaitReady(): Promise<void> {
+  const timeoutMs = 20_000;
+  let settled = false;
+  let finishReady: () => void = () => {};
+  const readyPromise = new Promise<void>((resolve) => {
+    finishReady = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+  });
+  const timer = window.setTimeout(finishReady, timeoutMs);
+  const unlisten = await listen(EVENTS.dictationTranscriptsWindowReady, () => {
+    window.clearTimeout(timer);
+    finishReady();
+  });
+
+  try {
+    await openDictationTranscriptsToolWindow();
+    await readyPromise;
+  } finally {
+    window.clearTimeout(timer);
+    void unlisten();
+  }
+}
+
+export type DictationTranscriptStatus = "active" | "done";
+
+export interface DictationTranscriptEntry {
+  id: string;
+  sessionId: number;
+  startedAtMs: number;
+  updatedAtMs: number;
+  status: DictationTranscriptStatus;
+  text: string;
+}
+
+export async function listDictationTranscripts(): Promise<DictationTranscriptEntry[]> {
+  return invoke<DictationTranscriptEntry[]>("list_dictation_transcripts");
+}
+
+export async function getDictationTranscript(
+  id: string,
+): Promise<DictationTranscriptEntry | null> {
+  return invoke<DictationTranscriptEntry | null>("get_dictation_transcript", { id });
+}
+
+export async function removeDictationTranscript(
+  id: string,
+): Promise<DictationTranscriptEntry[]> {
+  return invoke<DictationTranscriptEntry[]>("remove_dictation_transcript", { id });
 }
 
 export async function pickVoiceFiles(): Promise<string[]> {
@@ -1104,6 +1219,7 @@ export type AudioSrtProgressPhase =
   | "transcribing"
   | "text_cleanup"
   | "word_alignment"
+  | "diarizing"
   | "generating_subtitles"
   | "ai_rewrite"
   | "done";
@@ -1115,6 +1231,8 @@ export interface AudioSrtProgressPayload {
 }
 
 export type SubtitleSttCapability = "supported" | "unsupportedProvider";
+
+export type AudioSrtSpeakerCountMode = "auto" | "exact" | "range";
 
 export interface AudioSrtOptions {
   maxLineLength?: number;
@@ -1131,14 +1249,38 @@ export interface AudioSrtOptions {
   readingTailMs?: number;
   /** Fixed STT language for this request only (after user picks in tools UI). */
   sttLanguageOverride?: string | null;
+  speakerDiarization?: boolean;
+  speakerCountMode?: AudioSrtSpeakerCountMode;
+  speakerExactCount?: number;
+  speakerMinCount?: number;
+  speakerMaxCount?: number;
+  includeSpeakerNames?: boolean;
+  diarizationMinSpeechSecs?: number;
+  diarizationSensitivity?: number;
+}
+
+export interface AudioSrtSpeakerInfo {
+  id: number;
+  label: string;
 }
 
 export interface AudioSrtTranscriptionResult {
   fileName: string;
   srt: string;
+  /** WebVTT; uses `<v Name>` when speakers are assigned. */
+  vtt?: string;
   rewriteFallback: boolean;
   rewriteFallbackReason?: string | null;
   aiRewriteApplied: boolean;
+  speakers?: AudioSrtSpeakerInfo[];
+  cueSpeakerIds?: Array<number | null>;
+}
+
+export interface DiarizationModelStatus {
+  path: string;
+  exists: boolean;
+  sizeMb: number;
+  available: boolean;
 }
 
 export async function openAudioSrtToolWindow(): Promise<void> {
@@ -1181,6 +1323,14 @@ export async function transcribeAudioToSrt(
   options: AudioSrtOptions,
 ): Promise<AudioSrtTranscriptionResult> {
   return invoke<AudioSrtTranscriptionResult>("transcribe_audio_to_srt", { path, options });
+}
+
+export async function getDiarizationModelStatus(): Promise<DiarizationModelStatus> {
+  return invoke<DiarizationModelStatus>("get_diarization_model_status");
+}
+
+export async function downloadDiarizationModel(): Promise<string> {
+  return invoke<string>("download_diarization_model");
 }
 
 export async function saveSubtitleFile(
@@ -1242,7 +1392,13 @@ export type VocalSeparatorProgressPhase =
   | "decoding"
   | "separating"
   | "writing"
+  | "splitting_instruments"
   | "done";
+
+export interface VocalSeparatorInstrumentStem {
+  name: string;
+  path: string;
+}
 
 export interface VocalSeparatorProgressPayload {
   path: string;
@@ -1250,6 +1406,7 @@ export interface VocalSeparatorProgressPayload {
   percent?: number;
   vocalsPath?: string;
   instrumentalPath?: string;
+  instrumentStems?: VocalSeparatorInstrumentStem[];
 }
 
 export interface VocalSeparatorResult {
@@ -1259,8 +1416,14 @@ export interface VocalSeparatorResult {
   warnings: string[];
 }
 
+export interface SplitInstrumentalResult {
+  fileName: string;
+  stems: VocalSeparatorInstrumentStem[];
+  warnings: string[];
+}
+
 export interface VocalSeparatorOptions {
-  profile?: "quality" | "fast" | "legacy";
+  profile?: "quality" | "fast" | "legacy" | "multi-stem";
   outputFormat?: "wav" | "flac" | "matchSource";
   outputDir?: string | null;
   normalize?: boolean;
@@ -1281,15 +1444,31 @@ export async function separateVocalFile(
   });
 }
 
+/** Second pass on the original mix → drums/bass/guitar/piano/other (not on instrumental.wav). */
+export async function splitInstrumentalFurther(
+  path: string,
+  options: VocalSeparatorOptions = {},
+): Promise<SplitInstrumentalResult> {
+  return invoke<SplitInstrumentalResult>("split_instrumental_further", {
+    path,
+    options: {
+      profile: null,
+      output_format: options.outputFormat ?? null,
+      output_dir: options.outputDir ?? null,
+      normalize: options.normalize ?? null,
+    },
+  });
+}
+
 export interface SeparationModelDownloadProgress {
-  profile: "quality" | "fast" | "legacy";
+  profile: "quality" | "fast" | "legacy" | "multi-stem";
   downloaded: number;
   total: number | null;
   percent: number | null;
 }
 
 export interface SeparationModelStatus {
-  profile: "quality" | "fast" | "legacy";
+  profile: "quality" | "fast" | "legacy" | "multi-stem";
   path: string;
   exists: boolean;
   downloadSizeMb: number;

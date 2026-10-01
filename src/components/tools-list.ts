@@ -1,6 +1,7 @@
 import {
   getVocalSeparatorCapability,
   openAudioSrtToolWindowAndWaitReady,
+  openDictationTranscriptsToolWindowAndWaitReady,
   openVocalSeparatorToolWindowAndWaitReady,
   openVoiceFilesToolWindowAndWaitReady,
 } from "../api";
@@ -10,6 +11,7 @@ import { t } from "../i18n";
 
 function renderToolsCards(
   voiceFilesOpening: boolean,
+  dictationBuffersOpening: boolean,
   audioSrtOpening: boolean,
   vocalSepOpening: boolean,
   showVocalSep: boolean,
@@ -31,6 +33,23 @@ function renderToolsCards(
           }
           <span class="tools-card-title">${escapeHtml(t("tools.voiceFiles.title"))}</span>
           <span class="tools-card-desc">${escapeHtml(t("tools.voiceFiles.description"))}</span>
+        </button>
+      </li>
+      <li>
+        <button
+          type="button"
+          class="tools-card${dictationBuffersOpening ? " tools-card--loading" : ""}"
+          data-open-dictation-transcripts-tool
+          ${dictationBuffersOpening ? "disabled" : ""}
+          aria-busy="${dictationBuffersOpening ? "true" : "false"}"
+        >
+          ${
+            dictationBuffersOpening
+              ? `<span class="tools-card-loading-badge">${escapeHtml(t("tools.dictationTranscripts.windowLoading"))}</span>`
+              : ""
+          }
+          <span class="tools-card-title">${escapeHtml(t("tools.dictationTranscripts.title"))}</span>
+          <span class="tools-card-desc">${escapeHtml(t("tools.dictationTranscripts.description"))}</span>
         </button>
       </li>
       <li>
@@ -80,6 +99,7 @@ function renderToolsCards(
 /** Embedded tools panel — same chrome as status quick settings (НАСТРОЙКИ). */
 export function renderToolsPanelEmbedded(
   voiceFilesOpening = false,
+  dictationBuffersOpening = false,
   audioSrtOpening = false,
   vocalSepOpening = false,
   showVocalSep = false,
@@ -99,7 +119,7 @@ export function renderToolsPanelEmbedded(
         >×</button>
       </header>
       <div class="status-quick-settings-body tools-in-main-body" data-tools-cards-host>
-        ${renderToolsCards(voiceFilesOpening, audioSrtOpening, vocalSepOpening, showVocalSep)}
+        ${renderToolsCards(voiceFilesOpening, dictationBuffersOpening, audioSrtOpening, vocalSepOpening, showVocalSep)}
       </div>
     </div>
   `;
@@ -122,11 +142,18 @@ export function renderToolsBadgeButton(active: boolean): string {
 /** @deprecated Standalone tools window — use embedded panel in main UI. */
 export function renderToolsList(
   voiceFilesOpening = false,
+  dictationBuffersOpening = false,
   audioSrtOpening = false,
   vocalSepOpening = false,
   showVocalSep = false,
 ): string {
-  return renderToolsPanelEmbedded(voiceFilesOpening, audioSrtOpening, vocalSepOpening, showVocalSep);
+  return renderToolsPanelEmbedded(
+    voiceFilesOpening,
+    dictationBuffersOpening,
+    audioSrtOpening,
+    vocalSepOpening,
+    showVocalSep,
+  );
 }
 
 function refreshToolsCards(host: HTMLElement): void {
@@ -134,23 +161,27 @@ function refreshToolsCards(host: HTMLElement): void {
   const showVocalSep = host.dataset.vocalSepAvailable === "true";
   host.innerHTML = renderToolsCards(
     flags.voice,
+    flags.dictation,
     flags.srt,
     flags.vocalSep,
     showVocalSep,
   );
   const panel = host.closest("[data-tools-panel-root]") ?? host;
   bindVoiceFilesOpen(panel);
+  bindDictationTranscriptsOpen(panel);
   bindAudioSrtOpen(panel);
   bindVocalSepOpen(panel);
 }
 
 function readOpeningFlags(host: HTMLElement): {
   voice: boolean;
+  dictation: boolean;
   srt: boolean;
   vocalSep: boolean;
 } {
   return {
     voice: host.dataset.voiceFilesOpening === "true",
+    dictation: host.dataset.dictationTranscriptsOpening === "true",
     srt: host.dataset.audioSrtOpening === "true",
     vocalSep: host.dataset.vocalSepOpening === "true",
   };
@@ -188,6 +219,35 @@ async function openVoiceFilesFromCard(root: ParentNode): Promise<void> {
     console.error("open voice files tool", error);
   } finally {
     host.dataset.voiceFilesOpening = "false";
+    refreshToolsCards(host);
+  }
+}
+
+function bindDictationTranscriptsOpen(root: ParentNode): void {
+  root
+    .querySelector<HTMLButtonElement>("[data-open-dictation-transcripts-tool]")
+    ?.addEventListener("click", () => {
+      void openDictationTranscriptsFromCard(root);
+    });
+}
+
+async function openDictationTranscriptsFromCard(root: ParentNode): Promise<void> {
+  const panel = toolsPanelFromRoot(root);
+  const host = panel.querySelector<HTMLElement>("[data-tools-cards-host]");
+  if (!host) {
+    return;
+  }
+  if (host.dataset.dictationTranscriptsOpening === "true") {
+    return;
+  }
+  host.dataset.dictationTranscriptsOpening = "true";
+  refreshToolsCards(host);
+  try {
+    await openDictationTranscriptsToolWindowAndWaitReady();
+  } catch (error) {
+    console.error("open dictation transcripts tool", error);
+  } finally {
+    host.dataset.dictationTranscriptsOpening = "false";
     refreshToolsCards(host);
   }
 }
@@ -265,6 +325,7 @@ export function bindToolsList(root: ParentNode): void {
       });
   }
   bindVoiceFilesOpen(root);
+  bindDictationTranscriptsOpen(root);
   bindAudioSrtOpen(root);
   bindVocalSepOpen(root);
 }

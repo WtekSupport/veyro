@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 /// Tracks dictation session ids so aborted sessions skip queued pipeline work.
@@ -7,6 +7,8 @@ pub struct DictationSession {
     aborted_id: AtomicU64,
     /// Successful text injections in the active session (multi-segment / continuous).
     injection_count: AtomicU64,
+    /// Whether the last injected/normalized segment ended a sentence (chunk capital polish).
+    last_injection_ends_sentence: AtomicBool,
     /// Last Whisper language hint in auto mode (post-process / prompt context only; not STT lock).
     stt_language: Mutex<Option<String>>,
 }
@@ -23,6 +25,7 @@ impl DictationSession {
             current_id: AtomicU64::new(0),
             aborted_id: AtomicU64::new(0),
             injection_count: AtomicU64::new(0),
+            last_injection_ends_sentence: AtomicBool::new(false),
             stt_language: Mutex::new(None),
         }
     }
@@ -33,6 +36,8 @@ impl DictationSession {
 
     pub fn begin_session(&self) -> u64 {
         self.injection_count.store(0, Ordering::SeqCst);
+        self.last_injection_ends_sentence
+            .store(false, Ordering::SeqCst);
         if let Ok(mut guard) = self.stt_language.lock() {
             *guard = None;
         }
@@ -70,8 +75,18 @@ impl DictationSession {
         self.injection_count.load(Ordering::SeqCst)
     }
 
+    pub fn last_injection_ends_sentence(&self) -> bool {
+        self.last_injection_ends_sentence.load(Ordering::SeqCst)
+    }
+
     pub fn record_injection(&self) {
+        self.record_injection_with_ending(false);
+    }
+
+    pub fn record_injection_with_ending(&self, ends_sentence: bool) {
         self.injection_count.fetch_add(1, Ordering::SeqCst);
+        self.last_injection_ends_sentence
+            .store(ends_sentence, Ordering::SeqCst);
     }
 
     /// Marks the active session aborted. Returns the session id if one was active.

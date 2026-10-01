@@ -25,6 +25,8 @@ pub const SKILL_IMPORT_FLOW: &str = "app://skill-import-flow";
 pub const SKILLS_CHANGED: &str = "app://skills-changed";
 pub const VOICE_FILE_PROGRESS: &str = "app://voice-file-progress";
 pub const VOICE_FILES_WINDOW_READY: &str = "app://voice-files-window-ready";
+pub const DICTATION_TRANSCRIPT_UPDATED: &str = "app://dictation-transcript-updated";
+pub const DICTATION_TRANSCRIPTS_WINDOW_READY: &str = "app://dictation-transcripts-window-ready";
 pub const AUDIO_SRT_PROGRESS: &str = "app://audio-srt-progress";
 pub const AUDIO_SRT_WINDOW_READY: &str = "app://audio-srt-window-ready";
 pub const VOCAL_SEPARATOR_PROGRESS: &str = "app://vocal-separator-progress";
@@ -151,6 +153,17 @@ pub fn emit_voice_files_window_ready(app: &AppHandle) {
     let _ = app.emit(VOICE_FILES_WINDOW_READY, ());
 }
 
+pub fn emit_dictation_transcript_updated(
+    app: &AppHandle,
+    entry: crate::tools::dictation_transcripts::TranscriptEntry,
+) {
+    let _ = app.emit(DICTATION_TRANSCRIPT_UPDATED, entry);
+}
+
+pub fn emit_dictation_transcripts_window_ready(app: &AppHandle) {
+    let _ = app.emit(DICTATION_TRANSCRIPTS_WINDOW_READY, ());
+}
+
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioSrtProgressPhase {
@@ -158,6 +171,7 @@ pub enum AudioSrtProgressPhase {
     Transcribing,
     TextCleanup,
     WordAlignment,
+    Diarizing,
     GeneratingSubtitles,
     AiRewrite,
     Done,
@@ -186,6 +200,8 @@ pub enum VocalSeparatorProgressPhase {
     Decoding,
     Separating,
     Writing,
+    /// Second independent multi-stem pass on the original mix.
+    SplittingInstruments,
     Done,
 }
 
@@ -200,6 +216,15 @@ pub struct VocalSeparatorProgressPayload {
     pub vocals_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instrumental_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instrument_stems: Vec<VocalSeparatorInstrumentStem>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VocalSeparatorInstrumentStem {
+    pub name: String,
+    pub path: String,
 }
 
 pub fn emit_vocal_separator_progress(app: &AppHandle, payload: VocalSeparatorProgressPayload) {

@@ -45,6 +45,11 @@ impl TranscriptionError {
 
 #[async_trait]
 pub trait TranscriptionProvider: Send + Sync {
+    /// Transcribe one finalized audio segment to a single result string.
+    ///
+    /// The dictation pipeline is segment/batch based (no live hypothesis/committed
+    /// callbacks). When the injection field is unavailable and abort-on-focus-loss is
+    /// off, that finalized text is appended to `FocusDeferBuffer` until flush.
     async fn transcribe(
         &self,
         audio: AudioSegment,

@@ -24,6 +24,7 @@ pub mod subtitles;
 pub mod timed_text;
 pub mod transcription;
 pub mod word_align;
+pub mod diarization;
 mod tools;
 mod tray;
 mod window;
@@ -139,7 +140,7 @@ pub(crate) fn apply_audio_action(
             result
         }
         AudioAction::Disable => {
-            ctx.cancel_pending();
+            ctx.cancel_pending(Some(app));
             ctx.runtime.reset_cancel();
             ctx.set_audio_callbacks_enabled(false);
             let vad_join = {
@@ -715,7 +716,7 @@ async fn recover_engine(
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<StatusSnapshot, String> {
     let ctx = ctx.inner().clone();
-    ctx.cancel_pending();
+    ctx.cancel_pending(Some(&app));
     ctx.runtime.reset_cancel();
 
     let action = {
@@ -870,6 +871,9 @@ fn get_mic_level(ctx: tauri::State<'_, Arc<AppContext>>) -> u32 {
 struct MicMonitorSnapshot {
     level_percent: u8,
     speech_active: bool,
+    /// True while the capture/VAD pipeline is actually consuming mic audio
+    /// (continuous: capturing; PTT: gate open). Idle Status must not show levels.
+    vad_active: bool,
     effective_threshold_percent: u8,
     history: Vec<u8>,
 }
@@ -879,23 +883,35 @@ fn get_mic_monitor_snapshot(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<Mi
     use crate::audio::level::mic_level_percent;
 
     let ctx = ctx.inner();
-    let (speech_active, effective_threshold) = {
+    let (speech_active, vad_active, effective_threshold) = {
         let controller = ctx
             .controller
             .lock()
             .map_err(|_| "application controller lock poisoned".to_string())?;
+        let settings = controller.settings();
+        let push_to_talk = settings.push_to_talk;
+        let effective_threshold = settings.effective_vad_threshold_percent();
+        let audio = ctx
+            .audio
+            .lock()
+            .map_err(|_| "application is busy, try again".to_string())?;
+        let capturing = audio.is_capturing();
+        let vad_active = if push_to_talk {
+            capturing && audio.is_ptt_gate_open()
+        } else {
+            capturing
+        };
         (
-            ctx.audio
-                .lock()
-                .map(|audio| audio.is_speech_active())
-                .unwrap_or(false),
-            controller.settings().effective_vad_threshold_percent(),
+            audio.is_speech_active(),
+            vad_active,
+            effective_threshold,
         )
     };
 
     Ok(MicMonitorSnapshot {
         level_percent: mic_level_percent(&ctx.mic_level).min(100) as u8,
         speech_active,
+        vad_active,
         effective_threshold_percent: effective_threshold,
         history: ctx.mic_monitor.history(),
     })
@@ -1432,6 +1448,55 @@ struct SileroVadModelStatus {
 }
 
 #[tauri::command]
+fn get_diarization_model_status(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<diarization::DiarizationModelStatus, String> {
+    let settings = settings_for_models_dir(ctx.inner())?;
+    diarization::status(&settings).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn download_diarization_model(
+    app: AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<String, String> {
+    let settings = settings_for_models_dir(ctx.inner())?;
+    let app_ctx = Arc::clone(ctx.inner());
+    app_ctx.record_activity(
+        Some(&app),
+        ActivityLevel::Info,
+        "activity.model.download_started",
+        json!({ "model": "diarization/balanced" }),
+    );
+    let settings_for_work = settings.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        diarization::ensure_models(&settings_for_work)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    match result {
+        Ok(path) => {
+            app_ctx.record_activity(
+                Some(&app),
+                ActivityLevel::Info,
+                "activity.model.download_done",
+                json!({ "path": path.display().to_string() }),
+            );
+            Ok(path.display().to_string())
+        }
+        Err(error) => {
+            app_ctx.record_activity(
+                Some(&app),
+                ActivityLevel::Error,
+                "activity.model.download_failed",
+                json!({ "error": error.clone() }),
+            );
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
 fn get_silero_vad_model_status(
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<SileroVadModelStatus, String> {
@@ -1610,6 +1675,39 @@ async fn open_voice_files_tool_window(app: AppHandle) -> Result<(), String> {
     let handle = app.clone();
     window::await_on_main_thread(&app, move || window::show_voice_files_tool_window(&handle))
         .await?
+}
+
+#[tauri::command]
+async fn open_dictation_transcripts_tool_window(app: AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    window::await_on_main_thread(&app, move || {
+        window::show_dictation_transcripts_tool_window(&handle)
+    })
+    .await?
+}
+
+#[tauri::command]
+fn list_dictation_transcripts(
+    app: AppHandle,
+) -> Vec<crate::tools::dictation_transcripts::TranscriptEntry> {
+    if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
+        ctx.reconcile_dictation_transcripts(&app);
+    }
+    crate::tools::dictation_transcripts::list()
+}
+
+#[tauri::command]
+fn get_dictation_transcript(
+    id: String,
+) -> Option<crate::tools::dictation_transcripts::TranscriptEntry> {
+    crate::tools::dictation_transcripts::get(&id)
+}
+
+#[tauri::command]
+fn remove_dictation_transcript(
+    id: String,
+) -> Result<Vec<crate::tools::dictation_transcripts::TranscriptEntry>, String> {
+    crate::tools::dictation_transcripts::remove(&id)
 }
 
 #[tauri::command]
@@ -1890,6 +1988,40 @@ async fn separate_vocal_file(
 
 #[cfg(feature = "local-separation")]
 #[tauri::command]
+async fn split_instrumental_further(
+    app: tauri::AppHandle,
+    path: String,
+    options: Option<tools::VocalSeparatorInvokeOptions>,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::SplitInstrumentalResult, String> {
+    tools::split_instrumental_further(
+        app,
+        Arc::clone(ctx.inner()),
+        path,
+        options.unwrap_or_default(),
+    )
+    .await
+}
+
+#[cfg(not(feature = "local-separation"))]
+#[tauri::command]
+async fn split_instrumental_further(
+    app: tauri::AppHandle,
+    path: String,
+    options: Option<tools::VocalSeparatorInvokeOptions>,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::SplitInstrumentalResult, String> {
+    tools::split_instrumental_further(
+        app,
+        Arc::clone(ctx.inner()),
+        path,
+        options.unwrap_or_default(),
+    )
+    .await
+}
+
+#[cfg(feature = "local-separation")]
+#[tauri::command]
 fn get_separation_models_status(
     ctx: tauri::State<'_, Arc<AppContext>>,
 ) -> Result<Vec<separation::model_store::SeparationModelStatus>, String> {
@@ -1995,6 +2127,7 @@ fn pick_subtitle_save_path(default_name: String) -> Result<Option<String>, Strin
     Ok(rfd::FileDialog::new()
         .set_file_name(&default_name)
         .add_filter("SubRip subtitles", &["srt"])
+        .add_filter("WebVTT subtitles", &["vtt"])
         .save_file()
         .map(|path| path.to_string_lossy().into_owned()))
 }
@@ -2195,6 +2328,8 @@ pub fn run() {
             download_silero_te_model,
             get_silero_vad_model_status,
             download_silero_vad_model,
+            get_diarization_model_status,
+            download_diarization_model,
             list_ai_skills,
             open_ai_skills_folder,
             import_ai_skill,
@@ -2215,6 +2350,10 @@ pub fn run() {
             open_about_window,
             open_tools_window,
             open_voice_files_tool_window,
+            open_dictation_transcripts_tool_window,
+            list_dictation_transcripts,
+            get_dictation_transcript,
+            remove_dictation_transcript,
             open_audio_srt_tool_window,
             open_vocal_separator_tool_window,
             pick_voice_files,
@@ -2237,6 +2376,7 @@ pub fn run() {
             get_subtitle_stt_capability,
             get_vocal_separator_capability,
             separate_vocal_file,
+            split_instrumental_further,
             get_separation_models_status,
             download_separation_model,
             pick_vocal_separator_output_dir,
@@ -2377,6 +2517,7 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     if window.label() == window::TOOL_VOICE_FILES_WINDOW_LABEL
+                        || window.label() == window::TOOL_DICTATION_TRANSCRIPTS_WINDOW_LABEL
                         || window.label() == window::TOOL_AUDIO_SRT_WINDOW_LABEL
                         || window.label() == window::TOOL_VOCAL_SEPARATOR_WINDOW_LABEL
                         || window.label() == window::TOOLS_WINDOW_LABEL

@@ -270,10 +270,185 @@ fn apply_basic_speech_cleanup_block(text: &str) -> String {
     text = normalize_whisper_guillemet_chunks(&text);
     text = dedupe_consecutive_sentences(&text);
     text = collapse_russian_fillers(&text);
+    text = soften_incomplete_sentence_periods(&text);
     collapse_orphan_dot_artifacts(&text)
 }
 
+/// Replace trailing `.` with `...` for unfinished / hesitation-style clauses.
+pub fn soften_incomplete_sentence_periods(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    text.split("\n\n")
+        .map(|block| {
+            let sentences = split_sentences(block);
+            if sentences.is_empty() {
+                return block.to_string();
+            }
+            let softened: Vec<String> = sentences
+                .into_iter()
+                .map(|sentence| soften_one_incomplete_sentence(&sentence))
+                .collect();
+            join_sentences(&softened)
+        })
+        .filter(|block| !block.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn soften_one_incomplete_sentence(sentence: &str) -> String {
+    let trimmed = sentence.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if !trimmed.ends_with('.') || trimmed.ends_with("...") || trimmed.ends_with('…') {
+        return trimmed.to_string();
+    }
+    if trimmed.ends_with('!') || trimmed.ends_with('?') {
+        return trimmed.to_string();
+    }
+    // Abbreviation / decimal last token — leave alone.
+    if let Some(last_word) = trimmed.split_whitespace().last() {
+        if !word_ends_sentence(last_word) {
+            return trimmed.to_string();
+        }
+    }
+
+    let without_dot = trimmed.trim_end_matches('.').trim_end();
+    if without_dot.is_empty() {
+        return trimmed.to_string();
+    }
+    if is_incomplete_clause(without_dot) {
+        return format!("{without_dot}...");
+    }
+    trimmed.to_string()
+}
+
+fn is_incomplete_clause(clause: &str) -> bool {
+    let lower = clause
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    let lower = lower.trim();
+    if lower.is_empty() {
+        return false;
+    }
+
+    const DISCOURSE_ENDINGS: &[&str] = &[
+        "короче говоря",
+        "в общем-то",
+        "в общем",
+        "так сказать",
+        "как сказать",
+        "в смысле",
+        "я даже не знаю",
+        "я не знаю",
+        "не знаю",
+        "слушай",
+        "смотри",
+        "как бы",
+        "ну типа",
+        "типа",
+    ];
+    for ending in DISCOURSE_ENDINGS {
+        if lower == *ending || lower.ends_with(&format!(" {ending}")) {
+            return true;
+        }
+    }
+
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    if words.is_empty() {
+        return false;
+    }
+
+    if words.len() == 1 {
+        let word = strip_clause_punct(words[0]);
+        if is_closed_short_utterance(word) {
+            return false;
+        }
+        if looks_like_russian_infinitive(word) {
+            return true;
+        }
+        // Lone noun / fragment like "город".
+        return true;
+    }
+
+    if words.len() == 2 {
+        let first = strip_clause_punct(words[0]);
+        let second = strip_clause_punct(words[1]);
+        let joined = format!("{first} {second}");
+        if is_closed_short_utterance(&joined) {
+            return false;
+        }
+        if is_closed_short_utterance(first) && is_closed_short_utterance(second) {
+            return false;
+        }
+        // "ну слушай", "вот смотри", hanging infinitive after filler.
+        const LEAD_FILLERS: &[&str] = &["ну", "вот", "это", "так", "э", "а"];
+        if LEAD_FILLERS.contains(&first) {
+            return true;
+        }
+        if looks_like_russian_infinitive(second) {
+            return true;
+        }
+        if matches!(first, "слушай" | "смотри") {
+            return true;
+        }
+        return false;
+    }
+
+    false
+}
+
+fn strip_clause_punct(word: &str) -> &str {
+    word.trim_matches(|c: char| {
+        matches!(
+            c,
+            ',' | ';' | ':' | '"' | '\'' | '«' | '»' | '(' | ')' | '[' | ']' | '!' | '?' | '.'
+        )
+    })
+}
+
+fn is_closed_short_utterance(text: &str) -> bool {
+    const CLOSED: &[&str] = &[
+        "да",
+        "нет",
+        "ок",
+        "окей",
+        "ага",
+        "угу",
+        "привет",
+        "пока",
+        "спасибо",
+        "пожалуйста",
+        "хорошо",
+        "ладно",
+        "понятно",
+        "ясно",
+        "точно",
+        "конечно",
+        "давай",
+        "го",
+        "стоп",
+        "всё",
+        "все",
+    ];
+    CLOSED.contains(&text)
+}
+
+fn looks_like_russian_infinitive(word: &str) -> bool {
+    let w = word;
+    w.ends_with("ться")
+        || w.ends_with("тись")
+        || w.ends_with("ть")
+        || w.ends_with("ти")
+        || w.ends_with("чь")
+}
+
 /// Lowercase spurious mid-sentence capitals from STT / Silero TE (keep abbrevs & sentence starts).
+/// Also uppercase the first letter after a sentence boundary when it was left lowercase.
 pub fn fix_spurious_mid_sentence_capitals(text: &str) -> String {
     fix_spurious_mid_sentence_capitals_from(text, true)
 }
@@ -313,7 +488,9 @@ pub fn fix_spurious_mid_sentence_capitals_from(text: &str, mut allow_capital: bo
         }
 
         let (leading, core, trailing) = split_word_affixes(&word);
-        let fixed_core = if !allow_capital && should_downcase_spurious_word_core(&core) {
+        let fixed_core = if allow_capital && should_upcase_sentence_start_core(&core) {
+            upcase_first_char(&core)
+        } else if !allow_capital && should_downcase_spurious_word_core(&core) {
             downcase_first_char(&core)
         } else {
             core
@@ -331,12 +508,16 @@ pub fn fix_spurious_mid_sentence_capitals_from(text: &str, mut allow_capital: bo
     out
 }
 
-/// Polish text injected after an earlier block in the same dictation session (no leading capital).
-pub fn polish_continuation_injection(text: &str) -> String {
-    fix_spurious_mid_sentence_capitals_from(text, false)
+/// Polish text injected after an earlier block in the same dictation session.
+///
+/// `previous_ends_sentence` should be true when the already-injected buffer ends with
+/// sentence-terminating punctuation (so the new chunk may start with a capital).
+pub fn polish_continuation_injection(text: &str, previous_ends_sentence: bool) -> String {
+    fix_spurious_mid_sentence_capitals_from(text, previous_ends_sentence)
 }
 
-fn trailing_text_ends_sentence(text: &str) -> bool {
+/// Whether `text` ends with sentence-terminating punctuation (for chunk boundaries).
+pub fn trailing_text_ends_sentence(text: &str) -> bool {
     let trimmed = text.trim_end();
     if trimmed.is_empty() {
         return true;
@@ -372,6 +553,27 @@ fn downcase_first_char(word: &str) -> String {
     let mut out: String = first.to_lowercase().collect();
     out.push_str(chars.as_str());
     out
+}
+
+fn upcase_first_char(word: &str) -> String {
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return word.to_string();
+    };
+    let mut out: String = first.to_uppercase().collect();
+    out.push_str(chars.as_str());
+    out
+}
+
+fn should_upcase_sentence_start_core(core: &str) -> bool {
+    if core.is_empty() {
+        return false;
+    }
+    let mut chars = core.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_lowercase() && first.is_alphabetic()
 }
 
 fn should_downcase_spurious_word_core(core: &str) -> bool {
@@ -532,11 +734,15 @@ mod tests {
     fn fixes_spurious_mid_sentence_capitals() {
         assert_eq!(
             fix_spurious_mid_sentence_capitals("я пошёл В магазин за хлебом"),
-            "я пошёл в магазин за хлебом"
+            "Я пошёл в магазин за хлебом"
         );
         assert_eq!(
             fix_spurious_mid_sentence_capitals("Первое предложение. Второе началось."),
             "Первое предложение. Второе началось."
+        );
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals("знаю. предложить."),
+            "Знаю. Предложить."
         );
     }
 
@@ -544,11 +750,11 @@ mod tests {
     fn keeps_abbreviations_and_acronyms() {
         assert_eq!(
             fix_spurious_mid_sentence_capitals("работает API и JSON хорошо"),
-            "работает API и JSON хорошо"
+            "Работает API и JSON хорошо"
         );
         assert_eq!(
             fix_spurious_mid_sentence_capitals("согласно т.д. продолжаем"),
-            "согласно т.д. продолжаем"
+            "Согласно т.д. продолжаем"
         );
     }
 
@@ -556,7 +762,7 @@ mod tests {
     fn fixes_after_paragraph_break() {
         assert_eq!(
             fix_spurious_mid_sentence_capitals("конец.\n\nНовый абзац"),
-            "конец.\n\nНовый абзац"
+            "Конец.\n\nНовый абзац"
         );
     }
 
@@ -565,16 +771,56 @@ mod tests {
         let wrapped = "один два три\n\nчетыре пять";
         assert_eq!(
             fix_spurious_mid_sentence_capitals(wrapped),
-            "один два три\n\nчетыре пять"
+            "Один два три\n\nчетыре пять"
         );
     }
 
     #[test]
     fn continuation_chunk_lowercases_leading_word() {
         assert_eq!(
-            polish_continuation_injection("Так это оно по идее"),
+            polish_continuation_injection("Так это оно по идее", false),
             "так это оно по идее"
         );
+    }
+
+    #[test]
+    fn continuation_chunk_capitalizes_after_previous_sentence() {
+        assert_eq!(
+            polish_continuation_injection("давай съездим сегодня.", true),
+            "Давай съездим сегодня."
+        );
+    }
+
+    #[test]
+    fn capitalizes_lowercase_after_period() {
+        assert_eq!(
+            fix_spurious_mid_sentence_capitals("знаю. предложить. ну короче"),
+            "Знаю. Предложить. Ну короче"
+        );
+    }
+
+    #[test]
+    fn softens_incomplete_discourse_and_infinitive() {
+        let out = soften_incomplete_sentence_periods(
+            "ну короче говоря. давай съездим сегодня. предложить. город.",
+        );
+        assert!(out.contains("короче говоря..."), "out: {out}");
+        assert!(out.contains("давай съездим сегодня."), "out: {out}");
+        assert!(out.contains("предложить..."), "out: {out}");
+        assert!(out.contains("город..."), "out: {out}");
+    }
+
+    #[test]
+    fn basic_speech_cleanup_user_style_example() {
+        let raw =
+            "Это слушай, я даже не знаю. предложить. ну короче говоря. давай съездим сегодня. город.";
+        let out = apply_basic_speech_cleanup(raw);
+        let capped = fix_spurious_mid_sentence_capitals(&out);
+        assert!(capped.contains("не знаю..."), "out: {capped}");
+        assert!(capped.contains("Предложить...") || capped.contains("предложить..."), "out: {capped}");
+        assert!(capped.contains("короче говоря..."), "out: {capped}");
+        assert!(capped.contains("Давай съездим сегодня."), "out: {capped}");
+        assert!(capped.contains("Город..."), "out: {capped}");
     }
 
     #[test]
@@ -585,5 +831,13 @@ mod tests {
         assert!(!out.contains(" попроще Все "), "out: {out}");
         assert!(!out.contains(" такое Ну "), "out: {out}");
         assert!(out.starts_with("Это"), "out: {out}");
+    }
+
+    #[test]
+    fn trailing_ends_sentence_helper() {
+        assert!(trailing_text_ends_sentence("конец."));
+        assert!(trailing_text_ends_sentence("конец..."));
+        assert!(!trailing_text_ends_sentence("середина фразы"));
+        assert!(!trailing_text_ends_sentence("т.д."));
     }
 }

@@ -1,3 +1,9 @@
+//! Local sherpa-onnx STT (Parakeet, Qwen3-ASR, GigaAM, …).
+//!
+//! Uses **offline** `OfflineRecognizer` only — one final transcript per VAD/PTT segment.
+//! sherpa-onnx online/streaming recognizers and partial hypothesis updates are not
+//! integrated; defer-on-focus-loss buffering applies to finalized segment text.
+
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};

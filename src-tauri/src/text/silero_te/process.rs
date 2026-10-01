@@ -11,19 +11,37 @@ pub fn build_uni_symbols(uni_vocab: &[String]) -> HashSet<char> {
 }
 
 pub fn process_unicode(text: &str, uni_symbols: &HashSet<char>) -> String {
-    let mut processed = String::with_capacity(text.len());
+    let mut processed = String::with_capacity(text.len() * 2);
     for c in text.chars() {
         if (c as u32) < 127 {
             processed.push(c);
-        } else if !uni_symbols.contains(&c) {
+            continue;
+        }
+        if uni_symbols.contains(&c) {
+            push_uni_escaped(&mut processed, c);
+            continue;
+        }
+        // meta.json vocab is lowercase-only; Whisper often capitalizes word starts.
+        // Map missing uppercase (etc.) via lowercase before falling back to '&'.
+        let mut encoded = false;
+        for lower in c.to_lowercase() {
+            if uni_symbols.contains(&lower) {
+                push_uni_escaped(&mut processed, lower);
+                encoded = true;
+                break;
+            }
+        }
+        if !encoded {
             processed.push('&');
-        } else {
-            processed.push('{');
-            processed.push_str(&format!("{}", c as u32));
-            processed.push('}');
         }
     }
     processed
+}
+
+fn push_uni_escaped(out: &mut String, c: char) {
+    out.push('{');
+    out.push_str(&format!("{}", c as u32));
+    out.push('}');
 }
 
 pub fn unitoken_into_token(unitoken: &str) -> String {
@@ -145,5 +163,33 @@ pub fn language_index(code: &str) -> i64 {
         "es" => 2,
         "ru" => 3,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_unicode_maps_uppercase_cyrillic_via_lowercase() {
+        let vocab = [
+            "{1074}".to_string(), // в
+            "{1086}".to_string(), // о
+            "{1090}".to_string(), // т
+        ];
+        let symbols = build_uni_symbols(&vocab);
+        let out = process_unicode("Вот", &symbols);
+        assert!(
+            !out.contains('&'),
+            "uppercase Cyrillic must not become '&': {out}"
+        );
+        assert!(out.contains("{1074}"), "expected lowercase в escape: {out}");
+    }
+
+    #[test]
+    fn process_unicode_keeps_unknown_as_amp_only_when_no_lower_match() {
+        let symbols = build_uni_symbols(&[]);
+        let out = process_unicode("Ж", &symbols);
+        assert_eq!(out, "&");
     }
 }

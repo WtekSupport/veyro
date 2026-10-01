@@ -85,6 +85,10 @@ function Resolve-LocalFeatures {
         }
     }
 
+    if ($env:VEYRO_DISABLE_DIARIZATION -ne "1") {
+        $parts += "local-diarization"
+    }
+
     if ($parts.Count -eq 0) {
         Write-Warning "All local features disabled - building cloud-only (OpenAI) stack."
         return ""

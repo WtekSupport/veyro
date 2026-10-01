@@ -3,6 +3,8 @@ export interface ParsedSrtCue {
   startMs: number;
   endMs: number;
   lines: string[];
+  /** Optional speaker id from diarization (`cueSpeakerIds` alignment). */
+  speakerId?: number | null;
 }
 
 const TIMESTAMP =

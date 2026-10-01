@@ -8,9 +8,11 @@ import {
   pickVoiceFiles,
   pickVocalSeparatorOutputDir,
   separateVocalFile,
+  splitInstrumentalFurther,
   updateSettings,
   type SeparationModelDownloadProgress,
   type SeparationModelStatus,
+  type VocalSeparatorInstrumentStem,
   type VocalSeparatorProgressPayload,
   type VocalSeparatorProgressPhase,
   type VocalSeparatorResult,
@@ -33,6 +35,7 @@ import {
   patchModelDownloadProgressDom,
   renderModelDownloadProgressBlock,
 } from "../lib/model-download-progress";
+import { showConfirmDialog } from "./confirm-dialog";
 import { t, type MessageKey } from "../i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -51,9 +54,22 @@ export interface VocalSepJob {
   processingPercent: number | null;
   vocalsPath: string;
   instrumentalPath: string;
+  instrumentStems: VocalSeparatorInstrumentStem[];
+  instrumentSplitBusy: boolean;
   warnings: string[];
   errorKey: string | null;
   errorRaw: string | null;
+}
+
+function isBaseProfile(
+  profile: SeparationModelStatus["profile"],
+): profile is "quality" | "fast" | "legacy" {
+  return profile === "quality" || profile === "fast" || profile === "legacy";
+}
+
+function stemLabel(name: string): string {
+  const key = `tools.vocalSeparator.stem.${name}` as MessageKey;
+  return t(key);
 }
 
 function stageLabel(phase: VocalSeparatorProgressPhase | null): string {
@@ -64,28 +80,40 @@ function stageLabel(phase: VocalSeparatorProgressPhase | null): string {
       return t("tools.vocalSeparator.stage.separating");
     case "writing":
       return t("tools.vocalSeparator.stage.writing");
+    case "splitting_instruments":
+      return t("tools.vocalSeparator.stage.splittingInstruments", { count: "5" });
     case "done":
     case null:
       return t("tools.vocalSeparator.status.processing");
   }
 }
 
+function jobShowsProgress(job: VocalSepJob): boolean {
+  return job.status === "processing" || job.instrumentSplitBusy;
+}
+
+function progressStatusText(job: VocalSepJob, visiblePercent: number | null): string {
+  const stage = stageLabel(job.processingPhase);
+  const percent =
+    visiblePercent !== null && job.processingPhase === "decoding"
+      ? visiblePercent
+      : job.processingPercent;
+  if (percent !== null && percent >= 0) {
+    return `${stage} ${percent}%`;
+  }
+  return stage;
+}
+
 function statusLabel(job: VocalSepJob, visiblePercent: number | null): string {
   switch (job.status) {
     case "pending":
       return t("tools.vocalSeparator.status.pending");
-    case "processing": {
-      const stage = stageLabel(job.processingPhase);
-      const percent =
-        visiblePercent !== null && job.processingPhase === "decoding"
-          ? visiblePercent
-          : job.processingPercent;
-      if (percent !== null && percent >= 0) {
-        return `${stage} ${percent}%`;
-      }
-      return stage;
-    }
+    case "processing":
+      return progressStatusText(job, visiblePercent);
     case "done":
+      if (job.instrumentSplitBusy) {
+        return progressStatusText(job, visiblePercent);
+      }
       return t("tools.vocalSeparator.status.done");
     case "error":
       return t("tools.vocalSeparator.status.error");
@@ -170,10 +198,21 @@ function renderModelsPanel(
   if (!active) {
     return "";
   }
-  const isDownloading = downloadingProfile === active.profile && modelDownload !== null;
+  const downloadingMultiStem =
+    downloadingProfile === "multi-stem" && modelDownload !== null;
+  const isDownloadingActive =
+    downloadingProfile === active.profile && modelDownload !== null;
+  const isDownloading = isDownloadingActive || downloadingMultiStem;
   const downloadPercent = isDownloading ? modelDownloadProgressPercent(modelDownload) : null;
+  const progressProfile = downloadingMultiStem
+    ? "multi-stem"
+    : active.profile;
+  const multiStemModel = models.find((model) => model.profile === "multi-stem");
+  const specModel =
+    downloadingMultiStem && multiStemModel ? multiStemModel : active;
 
   const profileOptions = models
+    .filter((model) => isBaseProfile(model.profile))
     .map((model) => {
       const key = `tools.vocalSeparator.profile.${model.profile}` as MessageKey;
       return `<option value="${escapeHtml(model.profile)}" ${
@@ -184,11 +223,20 @@ function renderModelsPanel(
 
   let downloadBlock = "";
   if (isDownloading && modelDownload) {
-    downloadBlock = renderModelDownloadProgressBlock(
-      modelDownload,
-      downloadPercent,
-      `data-separation-model-download="${escapeHtml(active.profile)}"`,
-    );
+    downloadBlock = `
+      ${
+        downloadingMultiStem
+          ? `<p class="field-hint vocal-sep-download-label">${escapeHtml(
+              t("tools.vocalSeparator.profile.multi-stem"),
+            )}</p>`
+          : ""
+      }
+      ${renderModelDownloadProgressBlock(
+        modelDownload,
+        downloadPercent,
+        `data-separation-model-download="${escapeHtml(progressProfile)}"`,
+      )}
+    `;
   } else if (!active.exists) {
     downloadBlock = `<button
         type="button"
@@ -208,7 +256,7 @@ function renderModelsPanel(
           ${profileOptions}
         </select>
       </label>
-      <p class="vocal-sep-model-spec">${escapeHtml(separationModelSpecLine(active))}</p>
+      <p class="vocal-sep-model-spec">${escapeHtml(separationModelSpecLine(specModel))}</p>
       <div class="vocal-sep-model-actions">
         ${downloadBlock}
       </div>
@@ -230,11 +278,12 @@ function renderQueue(jobs: VocalSepJob[], selectedId: string | null, visiblePerc
       ${jobs
         .map((job) => {
           const selected = job.id === selectedId;
+          const chipStatus = jobShowsProgress(job) ? "processing" : job.status;
           return `
             <li>
               <button
                 type="button"
-                class="voice-files-queue-chip voice-files-queue-chip--${job.status}${selected ? " voice-files-queue-chip--selected" : ""}"
+                class="voice-files-queue-chip voice-files-queue-chip--${chipStatus}${selected ? " voice-files-queue-chip--selected" : ""}"
                 data-vocal-sep-id="${escapeHtml(job.id)}"
                 aria-pressed="${selected}"
               >
@@ -275,7 +324,13 @@ function renderStemPlayerRow(path: string, label: string): string {
   `;
 }
 
-function renderResultPanel(selected: VocalSepJob | null, resultText: string): string {
+function renderResultPanel(
+  selected: VocalSepJob | null,
+  resultText: string,
+  downloadingProfile: string | null,
+  modelDownload: SeparationModelDownloadProgress | null,
+  visiblePercent: number | null,
+): string {
   if (selected?.status === "done") {
     const warnings =
       selected.warnings.length > 0
@@ -286,10 +341,64 @@ function renderResultPanel(selected: VocalSepJob | null, resultText: string): st
             )
             .join("")}</ul>`
         : "";
+    const multiStem = modelsStatusFindMultiStem();
+    const instrumentRows =
+      selected.instrumentStems.length > 0
+        ? `<details class="vocal-sep-instruments" open>
+            <summary>${escapeHtml(t("tools.vocalSeparator.instrumentsTitle"))}</summary>
+            <div class="vocal-sep-instruments-list">
+              ${selected.instrumentStems
+                .map((stem) => renderStemPlayerRow(stem.path, stemLabel(stem.name)))
+                .join("")}
+            </div>
+          </details>`
+        : "";
+    const downloadingMultiStem =
+      downloadingProfile === "multi-stem" && modelDownload !== null;
+    const splitBusy = selected.instrumentSplitBusy;
+    let splitBlock = "";
+    if (selected.instrumentStems.length === 0) {
+      if (downloadingMultiStem) {
+        splitBlock = `
+          <p class="field-hint vocal-sep-multi-stem-hint" role="status">${escapeHtml(
+            t("tools.vocalSeparator.downloading"),
+          )}</p>
+        `;
+      } else if (splitBusy) {
+        splitBlock = `
+          <p class="field-hint vocal-sep-multi-stem-hint" role="status">${escapeHtml(
+            progressStatusText(selected, visiblePercent),
+          )}</p>
+        `;
+      } else {
+        splitBlock = `
+          <button
+            type="button"
+            class="btn btn-secondary btn-compact"
+            data-split-instrumental
+            data-job-id="${escapeHtml(selected.id)}"
+            ${downloadingProfile !== null ? "disabled" : ""}
+          >${escapeHtml(t("tools.vocalSeparator.splitInstrumentalFurther"))}</button>
+          ${
+            multiStem && !multiStem.exists
+              ? `<p class="field-hint vocal-sep-multi-stem-hint">${escapeHtml(
+                  t("tools.vocalSeparator.multiStemDownloadHint", {
+                    size: String(multiStem.downloadSizeMb),
+                  }),
+                )}</p>`
+              : `<p class="field-hint vocal-sep-multi-stem-hint">${escapeHtml(
+                  t("tools.vocalSeparator.multiStemTimeHint"),
+                )}</p>`
+          }
+        `;
+      }
+    }
     return `
       <div class="vocal-sep-result-panel" data-vocal-sep-result>
         ${renderStemPlayerRow(selected.vocalsPath, t("tools.vocalSeparator.outputVocals"))}
         ${renderStemPlayerRow(selected.instrumentalPath, t("tools.vocalSeparator.outputInstrumental"))}
+        ${splitBlock}
+        ${instrumentRows}
         ${warnings}
       </div>
     `;
@@ -302,6 +411,13 @@ function renderResultPanel(selected: VocalSepJob | null, resultText: string): st
       <p class="vocal-sep-result-message">${escapeHtml(resultText)}</p>
     </div>
   `;
+}
+
+/** Filled by controller paint — avoids threading models through every render call. */
+let latestModelsForResult: SeparationModelStatus[] = [];
+
+function modelsStatusFindMultiStem(): SeparationModelStatus | undefined {
+  return latestModelsForResult.find((model) => model.profile === "multi-stem");
 }
 
 function renderTool(
@@ -324,9 +440,11 @@ function renderTool(
     resultText = stageLabel(selected.processingPhase);
   }
 
-  const processing = jobs.some((job) => job.status === "processing");
+  const processing = jobs.some((job) => jobShowsProgress(job));
   const progressPercent =
-    selected?.status === "processing" && selected.processingPhase !== "done"
+    selected &&
+    jobShowsProgress(selected) &&
+    selected.processingPhase !== "done"
       ? (visiblePercent ?? selected.processingPercent)
       : null;
 
@@ -357,7 +475,13 @@ function renderTool(
             </div>`
           : ""
       }
-      ${renderResultPanel(selected, resultText)}
+      ${renderResultPanel(
+        selected,
+        resultText,
+        downloadingProfile,
+        modelDownload,
+        visiblePercent,
+      )}
     </main>
   `;
 }
@@ -388,6 +512,9 @@ export function createVocalSeparatorController(root: HTMLElement): {
   const persistProfile = async (
     profile: SeparationModelStatus["profile"],
   ): Promise<void> => {
+    if (!isBaseProfile(profile)) {
+      return;
+    }
     try {
       await updateSettings({ vocal_separator_profile: profile });
     } catch {
@@ -396,26 +523,30 @@ export function createVocalSeparatorController(root: HTMLElement): {
   };
 
   const reconcileActiveProfile = (): void => {
-    if (activeSeparationModel(models, activeProfile)?.exists) {
+    if (isBaseProfile(activeProfile) && activeSeparationModel(models, activeProfile)?.exists) {
       return;
     }
-    const ready = models.find((model) => model.exists);
-    if (ready) {
+    const ready = models.find((model) => isBaseProfile(model.profile) && model.exists);
+    if (ready && isBaseProfile(ready.profile)) {
       activeProfile = ready.profile;
       void persistProfile(activeProfile);
+    } else if (!isBaseProfile(activeProfile)) {
+      activeProfile = "quality";
     }
   };
 
   const refreshModels = async (): Promise<void> => {
     try {
       models = await getSeparationModelsStatus();
-      const selected = models.find((model) => model.selected);
-      if (selected) {
+      latestModelsForResult = models;
+      const selected = models.find((model) => model.selected && isBaseProfile(model.profile));
+      if (selected && isBaseProfile(selected.profile)) {
         activeProfile = selected.profile;
       }
       reconcileActiveProfile();
     } catch {
       models = [];
+      latestModelsForResult = [];
     }
     paint();
   };
@@ -425,7 +556,8 @@ export function createVocalSeparatorController(root: HTMLElement): {
       if (!pathsMatch(job.path, payload.path)) {
         return job;
       }
-      if (job.status !== "processing" && payload.phase !== "done") {
+      const tracking = jobShowsProgress(job);
+      if (!tracking && payload.phase !== "done") {
         return job;
       }
       if (payload.phase === "done" && payload.vocalsPath && payload.instrumentalPath) {
@@ -438,8 +570,28 @@ export function createVocalSeparatorController(root: HTMLElement): {
           instrumentalPath: payload.instrumentalPath,
         };
       }
-      if (job.status !== "processing") {
+      if (
+        payload.phase === "done" &&
+        job.instrumentSplitBusy &&
+        (payload.instrumentStems?.length ?? 0) > 0
+      ) {
+        return {
+          ...job,
+          instrumentSplitBusy: false,
+          processingPhase: "done",
+          processingPercent: 100,
+          instrumentStems: payload.instrumentStems ?? [],
+        };
+      }
+      if (!tracking) {
         return job;
+      }
+      if (payload.phase === "done") {
+        return {
+          ...job,
+          processingPhase: "done",
+          processingPercent: 100,
+        };
       }
       return {
         ...job,
@@ -451,7 +603,7 @@ export function createVocalSeparatorController(root: HTMLElement): {
       };
     });
     const active = jobs.find(
-      (job) => job.status === "processing" && pathsMatch(job.path, payload.path),
+      (job) => jobShowsProgress(job) && pathsMatch(job.path, payload.path),
     );
     if (payload.phase === "done" || !active) {
       decodeProgress.stop();
@@ -462,6 +614,7 @@ export function createVocalSeparatorController(root: HTMLElement): {
   };
 
   const paint = (): void => {
+    latestModelsForResult = models;
     const selected =
       jobs.find((job) => job.id === selectedId) ??
       (jobs.length > 0 ? jobs[jobs.length - 1] : undefined);
@@ -497,7 +650,7 @@ export function createVocalSeparatorController(root: HTMLElement): {
     root.querySelector<HTMLSelectElement>("[data-vocal-sep-profile]")?.addEventListener("change", (event) => {
       const select = event.currentTarget as HTMLSelectElement;
       const profile = select.value as SeparationModelStatus["profile"];
-      if (profile !== "quality" && profile !== "fast" && profile !== "legacy") {
+      if (!isBaseProfile(profile)) {
         return;
       }
       activeProfile = profile;
@@ -512,6 +665,15 @@ export function createVocalSeparatorController(root: HTMLElement): {
           return;
         }
         void downloadModel(profile);
+      });
+    });
+    root.querySelectorAll<HTMLButtonElement>("[data-split-instrumental]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const jobId = button.dataset.jobId;
+        if (!jobId) {
+          return;
+        }
+        void runInstrumentSplit(jobId);
       });
     });
     root.querySelector<HTMLButtonElement>("[data-open-hf-model-page]")?.addEventListener("click", (event) => {
@@ -541,8 +703,10 @@ export function createVocalSeparatorController(root: HTMLElement): {
     paint();
     try {
       await downloadSeparationModel(profile as SeparationModelStatus["profile"]);
-      activeProfile = profile as SeparationModelStatus["profile"];
-      await persistProfile(activeProfile);
+      if (isBaseProfile(profile as SeparationModelStatus["profile"])) {
+        activeProfile = profile as SeparationModelStatus["profile"];
+        await persistProfile(activeProfile);
+      }
       await refreshModels();
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
@@ -564,6 +728,87 @@ export function createVocalSeparatorController(root: HTMLElement): {
       modelDownload = null;
       paint();
     }
+  };
+
+  const runInstrumentSplit = async (jobId: string): Promise<void> => {
+    const job = jobs.find((entry) => entry.id === jobId);
+    if (!job || job.status !== "done" || job.instrumentSplitBusy) {
+      return;
+    }
+    if (downloadingProfile !== null) {
+      return;
+    }
+    const multi = models.find((model) => model.profile === "multi-stem");
+    if (!multi?.exists) {
+      const size = multi?.downloadSizeMb ?? 136;
+      const ok = await showConfirmDialog({
+        message: t("tools.vocalSeparator.multiStemConfirm", { size: String(size) }),
+        confirmLabel: t("tools.vocalSeparator.download"),
+      });
+      if (!ok) {
+        return;
+      }
+      await downloadModel("multi-stem");
+      const refreshed = models.find((model) => model.profile === "multi-stem");
+      if (!refreshed?.exists) {
+        return;
+      }
+    } else {
+      const ok = await showConfirmDialog({
+        message: t("tools.vocalSeparator.multiStemTimeConfirm"),
+      });
+      if (!ok) {
+        return;
+      }
+    }
+
+    jobs = jobs.map((entry) =>
+      entry.id === jobId
+        ? {
+            ...entry,
+            instrumentSplitBusy: true,
+            processingPhase: "decoding",
+            processingPercent: 0,
+          }
+        : entry,
+    );
+    decodeProgress.reset();
+    paint();
+    try {
+      const result = await splitInstrumentalFurther(job.path, {});
+      jobs = jobs.map((entry) =>
+        entry.id === jobId
+          ? {
+              ...entry,
+              instrumentSplitBusy: false,
+              processingPhase: "done",
+              processingPercent: 100,
+              instrumentStems:
+                entry.instrumentStems.length > 0 ? entry.instrumentStems : result.stems,
+              warnings: [...entry.warnings, ...(result.warnings ?? [])],
+            }
+          : entry,
+      );
+      decodeProgress.stop();
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      jobs = jobs.map((entry) =>
+        entry.id === jobId
+          ? {
+              ...entry,
+              instrumentSplitBusy: false,
+              processingPhase: entry.processingPhase === "done" ? "done" : null,
+              warnings: [
+                ...entry.warnings,
+                toolErrorMessageKey(raw, "tools.vocalSeparator.failed"),
+              ],
+            }
+          : entry,
+      );
+      decodeProgress.stop();
+      console.error("split instrumental further", error);
+    }
+    paint();
   };
 
   const processJob = async (job: VocalSepJob): Promise<void> => {
@@ -667,6 +912,8 @@ export function createVocalSeparatorController(root: HTMLElement): {
           processingPercent: null,
           vocalsPath: "",
           instrumentalPath: "",
+          instrumentStems: [],
+          instrumentSplitBusy: false,
           warnings: [],
           errorKey: null,
           errorRaw: null,
@@ -684,6 +931,8 @@ export function createVocalSeparatorController(root: HTMLElement): {
         processingPercent: null,
         vocalsPath: "",
         instrumentalPath: "",
+        instrumentStems: [],
+        instrumentSplitBusy: false,
         warnings: [],
         errorKey: null,
         errorRaw: null,

@@ -583,7 +583,7 @@ impl Default for AppSettings {
             start_on_boot: false,
             check_updates_on_startup: true,
             show_notifications: false,
-            log_level: "info".to_string(),
+            log_level: "warn".to_string(),
             silence_timeout_ms: 700,
             vad_engine: VadEngine::Silero,
             vad_threshold_mode: VadThresholdMode::Auto,

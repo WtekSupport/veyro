@@ -20,6 +20,7 @@ pub const INIT_WINDOW_LABEL: &str = "init";
 pub const SKILL_IMPORT_WINDOW_LABEL: &str = "skill-import";
 pub const TOOLS_WINDOW_LABEL: &str = "tools";
 pub const TOOL_VOICE_FILES_WINDOW_LABEL: &str = "tool-voice-files";
+pub const TOOL_DICTATION_TRANSCRIPTS_WINDOW_LABEL: &str = "tool-dictation-transcripts";
 pub const TOOL_AUDIO_SRT_WINDOW_LABEL: &str = "tool-audio-srt";
 pub const TOOL_VOCAL_SEPARATOR_WINDOW_LABEL: &str = "tool-vocal-separator";
 pub const OVERLAY_WINDOW_LABEL: &str = "overlay";
@@ -38,6 +39,8 @@ const TOOLS_WINDOW_WIDTH: f64 = 400.0;
 const TOOLS_WINDOW_HEIGHT: f64 = 360.0;
 const TOOL_VOICE_FILES_WINDOW_WIDTH: f64 = 880.0;
 const TOOL_VOICE_FILES_WINDOW_HEIGHT: f64 = 520.0;
+const TOOL_DICTATION_TRANSCRIPTS_WINDOW_WIDTH: f64 = 880.0;
+const TOOL_DICTATION_TRANSCRIPTS_WINDOW_HEIGHT: f64 = 520.0;
 const TOOL_AUDIO_SRT_WINDOW_WIDTH: f64 = 480.0;
 const TOOL_AUDIO_SRT_WINDOW_HEIGHT: f64 = 640.0;
 const TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH: f64 = 460.0;
@@ -182,7 +185,7 @@ pub fn configure_about_window(window: &WebviewWindow) {
 pub fn configure_tools_window(window: &WebviewWindow) {
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
     enforce_window_size(window, TOOLS_WINDOW_WIDTH, TOOLS_WINDOW_HEIGHT);
 }
 
@@ -190,7 +193,7 @@ pub fn configure_voice_files_tool_window(window: &WebviewWindow) {
     configure_settings_window_chrome(window);
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
     enforce_window_size(
         window,
         TOOL_VOICE_FILES_WINDOW_WIDTH,
@@ -198,11 +201,23 @@ pub fn configure_voice_files_tool_window(window: &WebviewWindow) {
     );
 }
 
+pub fn configure_dictation_transcripts_tool_window(window: &WebviewWindow) {
+    configure_settings_window_chrome(window);
+    let _ = window.set_resizable(true);
+    let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
+    enforce_window_size(
+        window,
+        TOOL_DICTATION_TRANSCRIPTS_WINDOW_WIDTH,
+        TOOL_DICTATION_TRANSCRIPTS_WINDOW_HEIGHT,
+    );
+}
+
 pub fn configure_audio_srt_tool_window(window: &WebviewWindow) {
     configure_settings_window_chrome(window);
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
     enforce_window_size(
         window,
         TOOL_AUDIO_SRT_WINDOW_WIDTH,
@@ -214,7 +229,7 @@ pub fn configure_vocal_separator_tool_window(window: &WebviewWindow) {
     configure_settings_window_chrome(window);
     let _ = window.set_resizable(true);
     let _ = window.set_maximizable(false);
-    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
     enforce_window_size(
         window,
         TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH,
@@ -599,7 +614,8 @@ fn ensure_tools_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         return Ok(window);
     }
 
-    let mut builder = WebviewWindowBuilder::new(
+    // No parent: tool windows must stay visible when settings hide to tray.
+    let window = WebviewWindowBuilder::new(
         app,
         TOOLS_WINDOW_LABEL,
         WebviewUrl::App("tools.html".into()),
@@ -608,18 +624,11 @@ fn ensure_tools_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .inner_size(TOOLS_WINDOW_WIDTH, TOOLS_WINDOW_HEIGHT)
     .resizable(true)
     .maximizable(false)
+    .always_on_top(true)
     .center()
-    .visible(false);
-
-    if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        builder = builder
-            .parent(&parent)
-            .map_err(|error| format!("failed to attach tools window parent: {error}"))?;
-    }
-
-    let window = builder
-        .build()
-        .map_err(|error| format!("failed to create tools window: {error}"))?;
+    .visible(false)
+    .build()
+    .map_err(|error| format!("failed to create tools window: {error}"))?;
 
     configure_tools_window(&window);
     Ok(window)
@@ -641,6 +650,7 @@ fn ensure_voice_files_tool_window(app: &AppHandle) -> Result<(WebviewWindow, boo
     .resizable(true)
     .maximizable(false)
     .closable(true)
+    .always_on_top(true)
     .center()
     .visible(false)
     .background_color(SETTINGS_WINDOW_BG);
@@ -650,12 +660,7 @@ fn ensure_voice_files_tool_window(app: &AppHandle) -> Result<(WebviewWindow, boo
         builder = builder.drag_and_drop(true);
     }
 
-    if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        builder = builder
-            .parent(&parent)
-            .map_err(|error| format!("failed to attach voice files tool window parent: {error}"))?;
-    }
-
+    // Independent of settings: must not minimize/hide when main goes to tray.
     let window = builder
         .build()
         .map_err(|error| format!("failed to create voice files tool window: {error}"))?;
@@ -713,6 +718,66 @@ pub fn show_voice_files_tool_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn ensure_dictation_transcripts_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool), String> {
+    if let Some(window) = app.get_webview_window(TOOL_DICTATION_TRANSCRIPTS_WINDOW_LABEL) {
+        return Ok((window, false));
+    }
+
+    let builder = WebviewWindowBuilder::new(
+        app,
+        TOOL_DICTATION_TRANSCRIPTS_WINDOW_LABEL,
+        WebviewUrl::App("tool-dictation-transcripts.html".into()),
+    )
+    .title("Veyro")
+    .inner_size(
+        TOOL_DICTATION_TRANSCRIPTS_WINDOW_WIDTH,
+        TOOL_DICTATION_TRANSCRIPTS_WINDOW_HEIGHT,
+    )
+    .decorations(true)
+    .resizable(true)
+    .maximizable(false)
+    .closable(true)
+    .always_on_top(true)
+    .center()
+    .visible(false)
+    .background_color(SETTINGS_WINDOW_BG);
+
+    // Independent of settings: must not minimize/hide when main goes to tray.
+    let window = builder.build().map_err(|error| {
+        format!("failed to create dictation transcripts tool window: {error}")
+    })?;
+
+    configure_dictation_transcripts_tool_window(&window);
+    Ok((window, true))
+}
+
+pub fn show_dictation_transcripts_tool_window(app: &AppHandle) -> Result<(), String> {
+    let (window, created) = ensure_dictation_transcripts_tool_window(app).inspect_err(|error| {
+        warn!("dictation transcripts tool window creation failed: {error}");
+    })?;
+
+    let _ = window.set_title(&crate::i18n::translate(
+        settings_ui_locale(app),
+        "tools.dictation_transcripts.window_title",
+        &[],
+    ));
+    configure_dictation_transcripts_tool_window(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_skip_taskbar(false);
+
+    #[cfg(windows)]
+    activate_window(&window);
+
+    let _ = window.set_focus();
+
+    if !created {
+        crate::app::events::emit_dictation_transcripts_window_ready(app);
+    }
+
+    Ok(())
+}
+
 fn ensure_audio_srt_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool), String> {
     if let Some(window) = app.get_webview_window(TOOL_AUDIO_SRT_WINDOW_LABEL) {
         return Ok((window, false));
@@ -729,6 +794,7 @@ fn ensure_audio_srt_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool)
     .resizable(true)
     .maximizable(false)
     .closable(true)
+    .always_on_top(true)
     .center()
     .visible(false)
     .background_color(SETTINGS_WINDOW_BG);
@@ -738,12 +804,7 @@ fn ensure_audio_srt_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool)
         builder = builder.drag_and_drop(true);
     }
 
-    if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        builder = builder
-            .parent(&parent)
-            .map_err(|error| format!("failed to attach audio srt tool window parent: {error}"))?;
-    }
-
+    // Independent of settings: must not minimize/hide when main goes to tray.
     let window = builder
         .build()
         .map_err(|error| format!("failed to create audio srt tool window: {error}"))?;
@@ -798,6 +859,7 @@ fn ensure_vocal_separator_tool_window(app: &AppHandle) -> Result<(WebviewWindow,
     .resizable(true)
     .maximizable(false)
     .closable(true)
+    .always_on_top(true)
     .center()
     .visible(false)
     .background_color(SETTINGS_WINDOW_BG);
@@ -807,12 +869,7 @@ fn ensure_vocal_separator_tool_window(app: &AppHandle) -> Result<(WebviewWindow,
         builder = builder.drag_and_drop(true);
     }
 
-    if let Some(parent) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-        builder = builder.parent(&parent).map_err(|error| {
-            format!("failed to attach vocal separator tool window parent: {error}")
-        })?;
-    }
-
+    // Independent of settings: must not minimize/hide when main goes to tray.
     let window = builder
         .build()
         .map_err(|error| format!("failed to create vocal separator tool window: {error}"))?;

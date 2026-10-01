@@ -55,7 +55,7 @@ const SILVERDAW_EXTRAS: [ExtraDownload; 1] = [ExtraDownload {
     min_bytes: 700_000_000,
 }];
 
-const MODELS: [ModelSpec; 3] = [
+const MODELS: [ModelSpec; 4] = [
     ModelSpec {
         profile: VocalSeparatorProfile::Quality,
         file_name: SILVERDAW_ONNX,
@@ -92,6 +92,20 @@ const MODELS: [ModelSpec; 3] = [
         min_bytes: 150_000_000,
         expected_sha256: None,
         download_size_mb: 166,
+        ram_mb: 4 * 1024,
+        vram_mb: Some(3 * 1024),
+    },
+    // Practical max open multi-stem model today (not an architectural limit).
+    ModelSpec {
+        profile: VocalSeparatorProfile::MultiStem,
+        file_name: "htdemucs_6s_fp16weights.onnx",
+        url: "https://huggingface.co/StemSplitio/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx",
+        page_url: "https://huggingface.co/StemSplitio/htdemucs-6s-onnx",
+        extras: &[],
+        shared_from: None,
+        min_bytes: 120_000_000,
+        expected_sha256: None,
+        download_size_mb: 136,
         ram_mb: 4 * 1024,
         vram_mb: Some(3 * 1024),
     },

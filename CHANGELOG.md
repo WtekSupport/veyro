@@ -12,6 +12,25 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.9.32] — 2026-10-01
+
+### Added
+
+- **Tools — Audio → SRT:** Optional speaker diarization (local `local-diarization` / polyvoice), rename/merge speakers, and WebVTT export with `<v Name>` voice tags alongside SRT.
+- **Tools — Vocal separator:** Multi-stem instrument split (HT-Demucs 6-stem) with the same model-download confirm + progress UI as other downloads.
+- **Tools — Dictation transcripts:** Dedicated tool window for reviewing / exporting dictation transcript history.
+- **Build:** `local-diarization` feature wired through `resolve-local-features.ps1` (opt out with `VEYRO_DISABLE_DIARIZATION=1`).
+
+### Changed
+
+- **Windows:** Tool windows (catalog and individual tools) stay always-on-top like the main Veyro window.
+- **Tools — Audio → SRT:** Diarization toggle disables immediately when the feature is missing from the build (no on/off flicker).
+- **Tools — Audio → SRT:** Preview seek no longer flashes speaker badges or snaps the scrubber while dragging.
+
+### Fixed
+
+- **Tools — Vocal separator:** Instrument multi-stem pass shows the usual processing progress bar while running.
+
 ## [1.9.27] — 2026-09-30
 
 ### Added

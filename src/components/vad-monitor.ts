@@ -66,7 +66,11 @@ async function armMicMonitor(): Promise<void> {
 function recomputeVadPollTimer(): void {
   const wantPoll = pollStatusTab || pollVoiceTab;
   if (wantPoll && pollTimer === undefined) {
-    void armMicMonitor();
+    // Idle level monitor is only for Voice settings calibration — Status must
+    // not open a mic stream outside an active VAD/capture session.
+    if (pollVoiceTab) {
+      void armMicMonitor();
+    }
     void refreshVadGraphsFromSnapshot();
     pollTimer = setInterval(() => {
       void refreshVadGraphsFromSnapshot();
@@ -89,7 +93,9 @@ export function syncVadGraphPolling(options: {
 
 export function notifyVadMicDeviceChanged(): void {
   monitorArmed = false;
-  void armMicMonitor();
+  if (pollVoiceTab) {
+    void armMicMonitor();
+  }
 }
 
 export async function refreshVadGraphsFromSnapshot(): Promise<void> {
@@ -103,6 +109,10 @@ export async function refreshVadGraphsFromSnapshot(): Promise<void> {
     return;
   }
 
+  if (voiceActive && !monitorArmed) {
+    void armMicMonitor();
+  }
+
   let snapshot;
   try {
     snapshot = await getMicMonitorSnapshot();
@@ -110,19 +120,24 @@ export async function refreshVadGraphsFromSnapshot(): Promise<void> {
     return;
   }
 
+  // Status: live meter only while VAD/capture is consuming audio; otherwise zeros.
+  const statusLevel = snapshot.vad_active ? snapshot.level_percent : 0;
+  const statusHistory = snapshot.vad_active ? snapshot.history : [];
+  const statusSpeech = snapshot.vad_active && snapshot.speech_active;
+
   if (statusActive && statusCanvas) {
     drawVadLevelGraph(
       statusCanvas,
-      snapshot.history,
+      statusHistory,
       snapshot.effective_threshold_percent,
-      snapshot.level_percent,
+      statusLevel,
     );
-    updateStatusLevelDisplay(snapshot.level_percent);
+    updateStatusLevelDisplay(statusLevel);
     const speechIndicator = document.querySelector<HTMLElement>(
       "[data-status-dashboard] [data-vad-speech-indicator]",
     );
     if (speechIndicator) {
-      speechIndicator.hidden = !snapshot.speech_active;
+      speechIndicator.hidden = !statusSpeech;
     }
   }
 
@@ -150,6 +165,16 @@ export async function refreshVadGraphsFromSnapshot(): Promise<void> {
   }
 
   document.querySelectorAll<HTMLCanvasElement>("[data-vad-graph]").forEach((canvas) => {
+    const onStatus = Boolean(canvas.closest("[data-status-dashboard]"));
+    if (onStatus) {
+      drawVadLevelGraph(
+        canvas,
+        statusHistory,
+        snapshot.effective_threshold_percent,
+        statusLevel,
+      );
+      return;
+    }
     drawVadLevelGraph(
       canvas,
       snapshot.history,

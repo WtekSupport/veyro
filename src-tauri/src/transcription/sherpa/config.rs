@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use sherpa_onnx::{
-    OfflineQwen3ASRModelConfig, OfflineRecognizerConfig, OfflineTransducerModelConfig,
+    OfflineNemoEncDecCtcModelConfig, OfflineQwen3ASRModelConfig, OfflineRecognizerConfig,
+    OfflineTransducerModelConfig,
 };
 
 use crate::settings::{AppSettings, SherpaOnnxLayout};
@@ -49,6 +50,23 @@ pub fn build_offline_config(
             };
             config.model_config.tokens = Some(path_string(&bundle_dir, "tokens.txt")?);
             config.model_config.model_type = Some("nemo_transducer".into());
+        }
+        SherpaOnnxLayout::GigaAmTransducerInt8 => {
+            config.feat_config.feature_dim = 64;
+            config.model_config.transducer = OfflineTransducerModelConfig {
+                encoder: Some(path_string(&bundle_dir, "encoder.int8.onnx")?),
+                decoder: Some(path_string(&bundle_dir, "decoder.onnx")?),
+                joiner: Some(path_string(&bundle_dir, "joiner.onnx")?),
+            };
+            config.model_config.tokens = Some(path_string(&bundle_dir, "tokens.txt")?);
+            config.model_config.model_type = Some("nemo_transducer".into());
+        }
+        SherpaOnnxLayout::NemoCtcInt8 => {
+            config.feat_config.feature_dim = 64;
+            config.model_config.nemo_ctc = OfflineNemoEncDecCtcModelConfig {
+                model: Some(path_string(&bundle_dir, "model.int8.onnx")?),
+            };
+            config.model_config.tokens = Some(path_string(&bundle_dir, "tokens.txt")?);
         }
         SherpaOnnxLayout::Qwen3Int8 => {
             let max_new_tokens = 128;

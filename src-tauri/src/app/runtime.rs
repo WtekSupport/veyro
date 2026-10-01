@@ -931,7 +931,20 @@ async fn process_one_segment(
             .map(|ctx| ctx.focus_defer_buffer.segment_count())
             .unwrap_or(0);
     if continuation_outputs > 0 {
-        normalized = crate::text::basic_cleanup::polish_continuation_injection(&normalized);
+        let previous_ends = app
+            .try_state::<Arc<AppContext>>()
+            .map(|ctx| {
+                if ctx.focus_defer_buffer.has_pending() {
+                    ctx.focus_defer_buffer.trailing_ends_sentence()
+                } else {
+                    dictation_session.last_injection_ends_sentence()
+                }
+            })
+            .unwrap_or_else(|| dictation_session.last_injection_ends_sentence());
+        normalized = crate::text::basic_cleanup::polish_continuation_injection(
+            &normalized,
+            previous_ends,
+        );
     }
     normalized = ensure_trailing_block_separator(&normalized);
     let injected_char_count = normalized.chars().count() as u32;
@@ -939,6 +952,7 @@ async fn process_one_segment(
     if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
         if ctx.should_defer_injection() {
             ctx.append_deferred_injection(
+                &app,
                 normalized.clone(),
                 processed.press_enter,
                 defer_ai_postprocess,
@@ -980,7 +994,15 @@ async fn process_one_segment(
         return;
     }
 
-    dictation_session.record_injection();
+    dictation_session.record_injection_with_ending(
+        crate::text::basic_cleanup::trailing_text_ends_sentence(&normalized),
+    );
+
+    crate::tools::dictation_transcripts::append_text(
+        Some(&app),
+        dictation_session.current_id(),
+        &normalized,
+    );
 
     if processed.press_enter && !defer_ai_postprocess {
         if let Err(error) = injector.send_enter().await {
@@ -1501,14 +1523,22 @@ impl From<crate::text::TextProcessingError> for AppError {
 
 pub async fn flush_focus_defer_buffer(app: &AppHandle, ctx: &Arc<AppContext>) {
     #[cfg(windows)]
-    if !crate::injection::focus_target::focus_target_matches() {
-        return;
+    {
+        if crate::injection::focus_target::injection_target_hwnd() == 0 {
+            ctx.maybe_stop_focus_watch(app);
+            return;
+        }
+        if !crate::injection::focus_target::focus_target_matches() {
+            return;
+        }
     }
-    let Some((text, press_enter)) = ctx.focus_defer_buffer.take_for_flush() else {
+    // Snapshot only — consume after successful inject so a failed flush never drops text.
+    let Some((text, press_enter)) = ctx.focus_defer_buffer.snapshot_for_flush() else {
+        ctx.maybe_stop_focus_watch(app);
         return;
     };
     if text.is_empty() {
-        ctx.maybe_stop_focus_watch();
+        ctx.maybe_stop_focus_watch(app);
         return;
     }
 
@@ -1521,7 +1551,6 @@ pub async fn flush_focus_defer_buffer(app: &AppHandle, ctx: &Arc<AppContext>) {
     let settings = match controller.lock() {
         Ok(c) => c.settings().clone(),
         Err(_) => {
-            ctx.focus_defer_buffer.push_prepared(text, press_enter);
             return;
         }
     };
@@ -1543,7 +1572,6 @@ pub async fn flush_focus_defer_buffer(app: &AppHandle, ctx: &Arc<AppContext>) {
 
     if let Err(error) = injection_result {
         warn!("focus defer flush failed: {error}");
-        ctx.focus_defer_buffer.push_prepared(text, press_enter);
         log_activity(
             &activity_log,
             &dictation_activity_ms,
@@ -1558,7 +1586,12 @@ pub async fn flush_focus_defer_buffer(app: &AppHandle, ctx: &Arc<AppContext>) {
         return;
     }
 
-    ctx.dictation_session.record_injection();
+    ctx.focus_defer_buffer
+        .consume_flushed_snapshot(&text, press_enter);
+
+    ctx.dictation_session.record_injection_with_ending(
+        crate::text::basic_cleanup::trailing_text_ends_sentence(&text),
+    );
 
     if press_enter {
         if let Err(error) = injector.send_enter().await {
@@ -1598,14 +1631,16 @@ pub async fn flush_focus_defer_buffer(app: &AppHandle, ctx: &Arc<AppContext>) {
             controller.recover_after_segment(handle)
         });
     }
-    ctx.maybe_stop_focus_watch();
+    // Stop watch only when idle (no pending buffer / listening / queue). Mid-session
+    // successful flush leaves the buffer empty but watch may continue if still Listening.
+    ctx.maybe_stop_focus_watch(app);
 }
 
 fn maybe_stop_focus_watch(app: &AppHandle) {
     let Some(ctx) = app.try_state::<Arc<AppContext>>() else {
         return;
     };
-    ctx.maybe_stop_focus_watch();
+    ctx.maybe_stop_focus_watch(app);
 }
 
 #[cfg(test)]

@@ -23,6 +23,14 @@ pub enum LocalSttFamily {
     Qwen3Asr06b,
     #[serde(rename = "qwen3_asr_1_7b", alias = "qwen3_asr17b")]
     Qwen3Asr17b,
+    #[serde(rename = "giga_am_v3_e2e_rnnt", alias = "gigaam_v3_e2e_rnnt")]
+    GigaAmV3E2eRnnt,
+    #[serde(rename = "giga_am_v3_e2e_ctc", alias = "gigaam_v3_e2e_ctc")]
+    GigaAmV3E2eCtc,
+    #[serde(rename = "canary_qwen_2_5b", alias = "canary_qwen_25b")]
+    CanaryQwen25b,
+    #[serde(rename = "granite_speech_3_3_8b", alias = "granite_speech_338b")]
+    GraniteSpeech338b,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -50,6 +58,16 @@ pub enum SherpaOnnxLayout {
     NemoInt8,
     Qwen3Int8,
     NemoFpOnnx,
+    /// GigaAM RNNT: encoder.int8.onnx + decoder.onnx + joiner.onnx, feature_dim=64.
+    GigaAmTransducerInt8,
+    /// NeMo CTC INT8: model.int8.onnx + tokens.txt, feature_dim=64.
+    NemoCtcInt8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidecarRuntime {
+    CanaryNemo,
+    GraniteCrispAsr,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,10 +85,13 @@ pub struct SttVariantSpec {
     pub sherpa_archive_url: Option<&'static str>,
     pub sherpa_archive_name: Option<&'static str>,
     pub sherpa_layout: Option<SherpaOnnxLayout>,
+    pub sidecar_runtime: Option<SidecarRuntime>,
+    pub sidecar_model_url: Option<&'static str>,
+    pub sidecar_model_file: Option<&'static str>,
 }
 
 impl LocalSttFamily {
-    pub fn all() -> [Self; 8] {
+    pub fn all() -> [Self; 12] {
         [
             Self::WhisperBase,
             Self::WhisperSmall,
@@ -80,12 +101,18 @@ impl LocalSttFamily {
             Self::ParakeetTdt06bV3,
             Self::Qwen3Asr06b,
             Self::Qwen3Asr17b,
+            Self::GigaAmV3E2eRnnt,
+            Self::GigaAmV3E2eCtc,
+            Self::CanaryQwen25b,
+            Self::GraniteSpeech338b,
         ]
     }
 
     pub fn engine(self) -> LocalSttEngine {
         if self.is_whisper() {
             LocalSttEngine::Whisper
+        } else if self.is_sidecar() {
+            LocalSttEngine::Sidecar
         } else {
             LocalSttEngine::Sherpa
         }
@@ -100,6 +127,14 @@ impl LocalSttFamily {
                 | Self::WhisperLargeV3Turbo
                 | Self::WhisperLargeV3
         )
+    }
+
+    pub fn is_sidecar(self) -> bool {
+        matches!(self, Self::CanaryQwen25b | Self::GraniteSpeech338b)
+    }
+
+    pub fn is_sherpa(self) -> bool {
+        !self.is_whisper() && !self.is_sidecar()
     }
 
     pub fn whisper_slug(self) -> Option<&'static str> {
@@ -118,6 +153,16 @@ impl LocalSttFamily {
             Self::ParakeetTdt06bV3 => "parakeet-tdt-0.6b-v3",
             Self::Qwen3Asr06b => "qwen3-asr-0.6b",
             Self::Qwen3Asr17b => "qwen3-asr-1.7b",
+            Self::GigaAmV3E2eRnnt => "giga-am-v3-e2e-rnnt",
+            Self::GigaAmV3E2eCtc => "giga-am-v3-e2e-ctc",
+            _ => return None,
+        })
+    }
+
+    pub fn sidecar_bundle_key(self) -> Option<&'static str> {
+        Some(match self {
+            Self::CanaryQwen25b => "canary-qwen-2.5b",
+            Self::GraniteSpeech338b => "granite-speech-3.3-8b",
             _ => return None,
         })
     }
@@ -132,6 +177,10 @@ impl LocalSttFamily {
             Self::ParakeetTdt06bV3 => "settings.sttFamilyParakeet",
             Self::Qwen3Asr06b => "settings.sttFamilyQwen3Asr06b",
             Self::Qwen3Asr17b => "settings.sttFamilyQwen3Asr17b",
+            Self::GigaAmV3E2eRnnt => "settings.sttFamilyGigaAmV3E2eRnnt",
+            Self::GigaAmV3E2eCtc => "settings.sttFamilyGigaAmV3E2eCtc",
+            Self::CanaryQwen25b => "settings.sttFamilyCanaryQwen25b",
+            Self::GraniteSpeech338b => "settings.sttFamilyGraniteSpeech338b",
         }
     }
 
@@ -145,6 +194,10 @@ impl LocalSttFamily {
             LocalSttModelKind::ParakeetTdt06bV3 => Self::ParakeetTdt06bV3,
             LocalSttModelKind::Qwen3Asr06b => Self::Qwen3Asr06b,
             LocalSttModelKind::Qwen3Asr17b => Self::Qwen3Asr17b,
+            LocalSttModelKind::GigaAmV3E2eRnnt => Self::GigaAmV3E2eRnnt,
+            LocalSttModelKind::GigaAmV3E2eCtc => Self::GigaAmV3E2eCtc,
+            LocalSttModelKind::CanaryQwen25b => Self::CanaryQwen25b,
+            LocalSttModelKind::GraniteSpeech338b => Self::GraniteSpeech338b,
         }
     }
 
@@ -158,6 +211,10 @@ impl LocalSttFamily {
             Self::ParakeetTdt06bV3 => LocalSttModelKind::ParakeetTdt06bV3,
             Self::Qwen3Asr06b => LocalSttModelKind::Qwen3Asr06b,
             Self::Qwen3Asr17b => LocalSttModelKind::Qwen3Asr17b,
+            Self::GigaAmV3E2eRnnt => LocalSttModelKind::GigaAmV3E2eRnnt,
+            Self::GigaAmV3E2eCtc => LocalSttModelKind::GigaAmV3E2eCtc,
+            Self::CanaryQwen25b => LocalSttModelKind::CanaryQwen25b,
+            Self::GraniteSpeech338b => LocalSttModelKind::GraniteSpeech338b,
         })
     }
 }
@@ -179,6 +236,9 @@ impl LocalSttQuant {
         if family.is_whisper() {
             return self == Self::Legacy;
         }
+        if family == LocalSttFamily::GraniteSpeech338b {
+            return self == Self::Q4_0;
+        }
         self == Self::Int8
     }
 }
@@ -191,10 +251,10 @@ impl LocalSttVariant {
     pub fn from_legacy_kind(kind: LocalSttModelKind) -> Self {
         Self {
             family: LocalSttFamily::from_legacy_kind(kind),
-            quant: if kind.is_whisper() {
-                LocalSttQuant::Legacy
-            } else {
-                LocalSttQuant::Int8
+            quant: match kind {
+                LocalSttModelKind::GraniteSpeech338b => LocalSttQuant::Q4_0,
+                k if k.is_whisper() => LocalSttQuant::Legacy,
+                _ => LocalSttQuant::Int8,
             },
         }
     }
@@ -222,6 +282,10 @@ fn family_api_str(family: LocalSttFamily) -> &'static str {
         LocalSttFamily::ParakeetTdt06bV3 => "parakeet_tdt_0_6b_v3",
         LocalSttFamily::Qwen3Asr06b => "qwen3_asr_0_6b",
         LocalSttFamily::Qwen3Asr17b => "qwen3_asr_1_7b",
+        LocalSttFamily::GigaAmV3E2eRnnt => "giga_am_v3_e2e_rnnt",
+        LocalSttFamily::GigaAmV3E2eCtc => "giga_am_v3_e2e_ctc",
+        LocalSttFamily::CanaryQwen25b => "canary_qwen_2_5b",
+        LocalSttFamily::GraniteSpeech338b => "granite_speech_3_3_8b",
     }
 }
 
@@ -290,7 +354,12 @@ pub fn quants_for_family(family: LocalSttFamily) -> &'static [LocalSttQuant] {
         LocalSttFamily::ParakeetTdt06bV3 => {
             &[LocalSttQuant::Int8, LocalSttQuant::Fp16, LocalSttQuant::Fp32]
         }
-        LocalSttFamily::Qwen3Asr06b | LocalSttFamily::Qwen3Asr17b => &[LocalSttQuant::Int8],
+        LocalSttFamily::Qwen3Asr06b
+        | LocalSttFamily::Qwen3Asr17b
+        | LocalSttFamily::GigaAmV3E2eRnnt
+        | LocalSttFamily::GigaAmV3E2eCtc
+        | LocalSttFamily::CanaryQwen25b => &[LocalSttQuant::Int8],
+        LocalSttFamily::GraniteSpeech338b => &[LocalSttQuant::Q4_0, LocalSttQuant::Q8_0],
     }
 }
 
@@ -412,6 +481,9 @@ pub fn variant_spec(variant: LocalSttVariant) -> SttVariantSpec {
     if variant.family.is_whisper() {
         return whisper_spec(variant);
     }
+    if variant.family.is_sidecar() {
+        return sidecar_spec(variant);
+    }
     sherpa_spec(variant)
 }
 
@@ -451,6 +523,9 @@ fn whisper_spec(variant: LocalSttVariant) -> SttVariantSpec {
         sherpa_archive_url: None,
         sherpa_archive_name: None,
         sherpa_layout: None,
+        sidecar_runtime: None,
+        sidecar_model_url: None,
+        sidecar_model_file: None,
     }
 }
 
@@ -507,6 +582,26 @@ fn sherpa_spec(variant: LocalSttVariant) -> SttVariantSpec {
                 Some("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-1.7B-int8-2026-03-25.tar.bz2"),
                 Some("sherpa-onnx-qwen3-asr-1.7B-int8-2026-03-25.tar.bz2"),
             ),
+            (LocalSttFamily::GigaAmV3E2eRnnt, LocalSttQuant::Int8) => (
+                240,
+                2_048,
+                4,
+                5,
+                "settings.sttModelGigaAmRnntFeatures",
+                SherpaOnnxLayout::GigaAmTransducerInt8,
+                Some("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16.tar.bz2"),
+                Some("sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16.tar.bz2"),
+            ),
+            (LocalSttFamily::GigaAmV3E2eCtc, LocalSttQuant::Int8) => (
+                230,
+                2_048,
+                5,
+                4,
+                "settings.sttModelGigaAmCtcFeatures",
+                SherpaOnnxLayout::NemoCtcInt8,
+                Some("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-ctc-punct-giga-am-v3-russian-2025-12-16.tar.bz2"),
+                Some("sherpa-onnx-nemo-ctc-punct-giga-am-v3-russian-2025-12-16.tar.bz2"),
+            ),
             _ => (
                 0,
                 0,
@@ -543,6 +638,86 @@ fn sherpa_spec(variant: LocalSttVariant) -> SttVariantSpec {
         sherpa_archive_url: url,
         sherpa_archive_name: archive,
         sherpa_layout: Some(layout),
+        sidecar_runtime: None,
+        sidecar_model_url: None,
+        sidecar_model_file: None,
+    }
+}
+
+fn sidecar_spec(variant: LocalSttVariant) -> SttVariantSpec {
+    let (base_size, base_ram, base_vram, base_speed, base_accuracy, features, runtime, url, file) =
+        match (variant.family, variant.quant) {
+            (LocalSttFamily::CanaryQwen25b, LocalSttQuant::Int8) => (
+                4_500,
+                12_288,
+                Some(8_192),
+                2,
+                5,
+                "settings.sttModelCanaryQwenFeatures",
+                SidecarRuntime::CanaryNemo,
+                Some("https://huggingface.co/nvidia/canary-qwen-2.5b"),
+                Some("ready.marker"),
+            ),
+            (LocalSttFamily::GraniteSpeech338b, LocalSttQuant::Q4_0) => (
+                5_000,
+                8_192,
+                Some(6_144),
+                3,
+                5,
+                "settings.sttModelGraniteSpeechFeatures",
+                SidecarRuntime::GraniteCrispAsr,
+                Some("https://huggingface.co/cstr/granite-speech-3.3-8b-GGUF/resolve/main/granite-speech-3.3-8b-q4_k.gguf"),
+                Some("granite-speech-3.3-8b-q4_k.gguf"),
+            ),
+            (LocalSttFamily::GraniteSpeech338b, LocalSttQuant::Q8_0) => (
+                8_800,
+                12_288,
+                Some(10_240),
+                2,
+                5,
+                "settings.sttModelGraniteSpeechFeatures",
+                SidecarRuntime::GraniteCrispAsr,
+                Some("https://huggingface.co/cstr/granite-speech-3.3-8b-GGUF/resolve/main/granite-speech-3.3-8b-q8_0.gguf"),
+                Some("granite-speech-3.3-8b-q8_0.gguf"),
+            ),
+            _ => (
+                0,
+                0,
+                None,
+                3,
+                3,
+                "settings.sttModelBaseFeatures",
+                SidecarRuntime::CanaryNemo,
+                None,
+                None,
+            ),
+        };
+
+    let available = url.is_some() && file.is_some();
+    // Sizes already reflect the chosen quant (GGUF Q4/Q8 / Canary qint8); skip whisper-style heuristics.
+    let download_size_mb = if available { base_size } else { 0 };
+    let ram_mb = base_ram;
+    let vram_mb = base_vram;
+    let speed_tier = base_speed;
+    let accuracy_tier = base_accuracy;
+
+    SttVariantSpec {
+        variant,
+        engine: LocalSttEngine::Sidecar,
+        available,
+        download_size_mb,
+        ram_mb,
+        vram_mb,
+        speed_tier,
+        accuracy_tier,
+        features_i18n_key: features,
+        whisper_file_name: None,
+        sherpa_archive_url: None,
+        sherpa_archive_name: None,
+        sherpa_layout: None,
+        sidecar_runtime: Some(runtime),
+        sidecar_model_url: url,
+        sidecar_model_file: file,
     }
 }
 
@@ -604,5 +779,24 @@ mod tests {
         let id = v.as_api_id();
         let parsed = parse_variant_id(&id).expect("parse");
         assert_eq!(parsed, v);
+    }
+
+    #[test]
+    fn gigaam_rnnt_int8_available() {
+        let v = LocalSttVariant::new(LocalSttFamily::GigaAmV3E2eRnnt, LocalSttQuant::Int8);
+        let spec = variant_spec(v);
+        assert!(spec.available);
+        assert_eq!(spec.engine, LocalSttEngine::Sherpa);
+        assert_eq!(spec.sherpa_layout, Some(SherpaOnnxLayout::GigaAmTransducerInt8));
+        assert!(spec.sherpa_archive_url.is_some());
+    }
+
+    #[test]
+    fn granite_sidecar_q4() {
+        let v = LocalSttVariant::new(LocalSttFamily::GraniteSpeech338b, LocalSttQuant::Q4_0);
+        let spec = variant_spec(v);
+        assert!(spec.available);
+        assert_eq!(spec.engine, LocalSttEngine::Sidecar);
+        assert_eq!(spec.sidecar_runtime, Some(SidecarRuntime::GraniteCrispAsr));
     }
 }

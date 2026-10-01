@@ -10,6 +10,10 @@ const LOCAL_STT_MODEL_NAME_KEYS = {
   parakeet_tdt_0_6b_v3: "settings.sttModelNameParakeetTdt06bV3",
   qwen3_asr_0_6b: "settings.sttModelNameQwen3Asr06b",
   qwen3_asr_1_7b: "settings.sttModelNameQwen3Asr17b",
+  giga_am_v3_e2e_rnnt: "settings.sttModelNameGigaAmV3E2eRnnt",
+  giga_am_v3_e2e_ctc: "settings.sttModelNameGigaAmV3E2eCtc",
+  canary_qwen_2_5b: "settings.sttModelNameCanaryQwen25b",
+  granite_speech_3_3_8b: "settings.sttModelNameGraniteSpeech338b",
 } as const satisfies Record<LocalSttModelKind, string>;
 
 /** Concrete product names for Status plates (not short settings labels). */
@@ -22,6 +26,10 @@ const LOCAL_STT_PLATE_NAME_KEYS = {
   parakeet_tdt_0_6b_v3: "settings.sttModelNameParakeetTdt06bV3",
   qwen3_asr_0_6b: "settings.sttModelNameQwen3Asr06b",
   qwen3_asr_1_7b: "settings.sttModelNameQwen3Asr17b",
+  giga_am_v3_e2e_rnnt: "settings.sttModelNameGigaAmV3E2eRnnt",
+  giga_am_v3_e2e_ctc: "settings.sttModelNameGigaAmV3E2eCtc",
+  canary_qwen_2_5b: "settings.sttModelNameCanaryQwen25b",
+  granite_speech_3_3_8b: "settings.sttModelNameGraniteSpeech338b",
 } as const satisfies Record<LocalSttModelKind, string>;
 
 const LLM_MODEL_NAME_KEYS = {
@@ -55,6 +63,10 @@ const LOCAL_STT_FAMILY_PLATE_NAME_KEYS = {
   parakeet_tdt_0_6b_v3: "settings.sttModelNameParakeetTdt06bV3",
   qwen3_asr_0_6b: "settings.sttModelNameQwen3Asr06b",
   qwen3_asr_1_7b: "settings.sttModelNameQwen3Asr17b",
+  giga_am_v3_e2e_rnnt: "settings.sttModelNameGigaAmV3E2eRnnt",
+  giga_am_v3_e2e_ctc: "settings.sttModelNameGigaAmV3E2eCtc",
+  canary_qwen_2_5b: "settings.sttModelNameCanaryQwen25b",
+  granite_speech_3_3_8b: "settings.sttModelNameGraniteSpeech338b",
 } as const satisfies Record<LocalSttFamily, string>;
 
 export function localSttFamilyPlateName(family: LocalSttFamily): string {

@@ -73,6 +73,7 @@ pub fn collect_diagnostics(ctx: &AppContext, app: &AppHandle) -> DiagnosticsSnap
             local_stt_engine: match controller.settings().local_stt_variant().engine() {
                 LocalSttEngine::Whisper => "whisper".to_string(),
                 LocalSttEngine::Sherpa => "sherpa".to_string(),
+                LocalSttEngine::Sidecar => "sidecar".to_string(),
             },
             local_stt_model: controller.settings().local_stt_variant().as_api_id(),
             sherpa_stt_compiled: sherpa_stt_compiled(),
