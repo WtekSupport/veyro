@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::settings::InjectionMode;
 
 use super::clipboard::paste_via_clipboard;
-use super::focus_target::{capture_injection_target, restore_injection_target};
+use super::focus_target::capture_if_needed_then_restore;
 use super::timing::{FOCUS_BEFORE_ENTER_MS, FOCUS_BEFORE_INJECT_MS};
 use super::injector::{InjectionBackendInfo, InjectionError, TextInjector};
 
@@ -48,16 +48,14 @@ impl TextInjector for WindowsInjector {
         mode: InjectionMode,
         soft_line_breaks: bool,
     ) -> Result<(), InjectionError> {
-        capture_injection_target();
-        restore_injection_target();
+        capture_if_needed_then_restore();
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_BEFORE_INJECT_MS));
 
         Self::insert_text_sync(text, mode, soft_line_breaks)
     }
 
     async fn delete_backward(&self, char_count: u32, mode: InjectionMode) -> Result<(), InjectionError> {
-        capture_injection_target();
-        restore_injection_target();
+        capture_if_needed_then_restore();
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_BEFORE_INJECT_MS));
 
         match mode {
@@ -69,8 +67,7 @@ impl TextInjector for WindowsInjector {
     }
 
     async fn send_enter(&self) -> Result<(), InjectionError> {
-        capture_injection_target();
-        restore_injection_target();
+        capture_if_needed_then_restore();
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_BEFORE_ENTER_MS));
         super::windows_keyboard::send_return()
     }

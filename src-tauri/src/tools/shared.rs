@@ -6,8 +6,11 @@ use tracing::warn;
 
 use crate::app::context::AppContext;
 use crate::audio::decode_file::{
-    decode_audio_file_raw_with_progress, decode_audio_file_with_progress, DecodeProgressCallback,
+    decode_audio_file_with_progress, DecodeProgressCallback,
 };
+#[cfg(feature = "local-separation")]
+use crate::audio::decode_file::decode_audio_file_raw_with_progress;
+#[cfg(feature = "local-separation")]
 use crate::audio::resampler::{resample_preserve_channels, SEPARATION_SAMPLE_RATE};
 use crate::audio::preprocess::{preprocess_segment, PreprocessOptions, PreprocessResult};
 use crate::audio::segment::AudioSegment;
@@ -144,6 +147,7 @@ pub fn decode_and_preprocess_for_tools(
 }
 
 /// Decode for vocal separation: preserve stereo (down/up-mix to 2ch) at model sample rate.
+#[cfg(feature = "local-separation")]
 pub fn decode_for_separation(
     path: &Path,
     decode_progress: Option<DecodeProgressCallback>,
@@ -195,6 +199,7 @@ pub fn decode_for_separation(
     ))
 }
 
+#[cfg(feature = "local-separation")]
 fn interleaved_stereo(samples: &[f32], channels: u16) -> Vec<f32> {
     if channels <= 1 {
         return samples.iter().flat_map(|sample| [*sample, *sample]).collect();

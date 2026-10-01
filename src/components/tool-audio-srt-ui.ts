@@ -1,7 +1,9 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   copyTextToClipboard,
+  downloadDiarizationModel,
   EVENTS,
+  getDiarizationModelStatus,
   getSubtitleSttCapability,
   pickSubtitleSavePath,
   pickVoiceFiles,
@@ -10,10 +12,17 @@ import {
   type AudioSrtOptions,
   type AudioSrtProgressPayload,
   type AudioSrtProgressPhase,
+  type AudioSrtSpeakerCountMode,
+  type AudioSrtSpeakerInfo,
   type AudioSrtTranscriptionResult,
   type SubtitleSttCapability,
 } from "../api";
-import { createAudioSrtPreview, mountAudioSrtPreview } from "./audio-srt-preview";
+import {
+  createAudioSrtPreview,
+  mountAudioSrtPreview,
+  speakerColorIndex,
+} from "./audio-srt-preview";
+import { showConfirmDialog } from "./confirm-dialog";
 import { iconCopy } from "./icons";
 import { ToolDecodeProgressSmoother } from "../lib/tool-decode-progress";
 import {
@@ -33,10 +42,14 @@ export interface AudioSrtJob {
   processingPhase: AudioSrtProgressPhase | null;
   processingPercent: number | null;
   srt: string;
+  /** WebVTT companion export (`<v Name>` when speakers exist). */
+  vtt: string;
   errorKey: string | null;
   errorRaw: string | null;
   rewriteFallback: boolean;
   aiRewriteApplied: boolean;
+  speakers: AudioSrtSpeakerInfo[];
+  cueSpeakerIds: Array<number | null>;
 }
 
 export interface AudioSrtUiOptions {
@@ -51,6 +64,15 @@ export interface AudioSrtUiOptions {
   minCueDurationMs: number;
   readingTailMs: number;
   advancedOpen: boolean;
+  speakerDiarization: boolean;
+  speakerCountMode: AudioSrtSpeakerCountMode;
+  speakerExactCount: number;
+  speakerMinCount: number;
+  speakerMaxCount: number;
+  includeSpeakerNames: boolean;
+  diarizationMinSpeechSecs: number;
+  diarizationSensitivity: number;
+  diarizationExpertOpen: boolean;
 }
 
 const DEFAULT_UI_OPTIONS: AudioSrtUiOptions = {
@@ -65,6 +87,15 @@ const DEFAULT_UI_OPTIONS: AudioSrtUiOptions = {
   minCueDurationMs: 1000,
   readingTailMs: 200,
   advancedOpen: false,
+  speakerDiarization: false,
+  speakerCountMode: "auto",
+  speakerExactCount: 2,
+  speakerMinCount: 1,
+  speakerMaxCount: 8,
+  includeSpeakerNames: true,
+  diarizationMinSpeechSecs: 0.25,
+  diarizationSensitivity: 0.45,
+  diarizationExpertOpen: false,
 };
 
 function escapeHtml(value: string): string {
@@ -75,6 +106,10 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function fileNameFromPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   const segment = normalized.split("/").pop();
@@ -83,6 +118,66 @@ function fileNameFromPath(path: string): string {
 
 function pathsMatch(left: string, right: string): boolean {
   return left.replace(/\\/g, "/").toLowerCase() === right.replace(/\\/g, "/").toLowerCase();
+}
+
+/** Replace speaker prefixes in cue text (`Label: …`). */
+export function rewriteSrtSpeakerLabels(
+  srt: string,
+  fromLabel: string,
+  toLabel: string,
+): string {
+  const from = fromLabel.trim();
+  const to = toLabel.trim();
+  if (!from || !to || from === to) {
+    return srt;
+  }
+  const pattern = new RegExp(`(^|\\n)${escapeRegExp(from)}: `, "g");
+  return srt.replace(pattern, `$1${to}: `);
+}
+
+/** Replace WebVTT voice tags `<v OldName>` → `<v NewName>`. */
+export function rewriteVttVoiceTags(
+  vtt: string,
+  fromLabel: string,
+  toLabel: string,
+): string {
+  const from = fromLabel.trim();
+  const to = toLabel.trim();
+  if (!from || !to || from === to) {
+    return vtt;
+  }
+  const pattern = new RegExp(`<v ${escapeRegExp(from)}>`, "g");
+  return vtt.replace(pattern, `<v ${to}>`);
+}
+
+/** Merge `fromId` into `intoId`: update cue ids, drop from speaker list, rewrite prefixes. */
+export function mergeSpeakers(
+  srt: string,
+  vtt: string,
+  speakers: AudioSrtSpeakerInfo[],
+  cueSpeakerIds: Array<number | null>,
+  fromId: number,
+  intoId: number,
+): {
+  srt: string;
+  vtt: string;
+  speakers: AudioSrtSpeakerInfo[];
+  cueSpeakerIds: Array<number | null>;
+} {
+  if (fromId === intoId) {
+    return { srt, vtt, speakers, cueSpeakerIds };
+  }
+  const from = speakers.find((speaker) => speaker.id === fromId);
+  const into = speakers.find((speaker) => speaker.id === intoId);
+  if (!from || !into) {
+    return { srt, vtt, speakers, cueSpeakerIds };
+  }
+  return {
+    srt: rewriteSrtSpeakerLabels(srt, from.label, into.label),
+    vtt: rewriteVttVoiceTags(vtt, from.label, into.label),
+    speakers: speakers.filter((speaker) => speaker.id !== fromId),
+    cueSpeakerIds: cueSpeakerIds.map((id) => (id === fromId ? intoId : id)),
+  };
 }
 
 function stageLabel(phase: AudioSrtProgressPhase | null): string {
@@ -97,6 +192,8 @@ function stageLabel(phase: AudioSrtProgressPhase | null): string {
       return t("tools.audioSrt.stage.wordAlignment");
     case "generating_subtitles":
       return t("tools.audioSrt.stage.generatingSubtitles");
+    case "diarizing":
+      return t("tools.audioSrt.stage.diarizing");
     case "ai_rewrite":
       return t("tools.audioSrt.stage.aiRewrite");
     case "done":
@@ -208,6 +305,12 @@ const SRT_ADVANCED_LIMITS = {
   globalOffsetMs: { min: -3000, max: 3000, step: 50 },
 } as const;
 
+const DIARIZATION_LIMITS = {
+  speakerCount: { min: 1, max: 20 },
+  minSpeechSecs: { min: 0.05, max: 2, step: 0.05 },
+  sensitivity: { min: 0.15, max: 0.9, step: 0.05 },
+} as const;
+
 type SrtSliderFormat = "ms" | "sec-dec" | "sec-int" | "chars" | "offset";
 
 function clampSrtSliderValue(
@@ -217,6 +320,22 @@ function clampSrtSliderValue(
   const { min, max, step } = SRT_ADVANCED_LIMITS[key];
   const snapped = Math.round((value - min) / step) * step + min;
   return Math.min(max, Math.max(min, snapped));
+}
+
+function clampSpeakerCount(value: number): number {
+  const { min, max } = DIARIZATION_LIMITS.speakerCount;
+  return Math.min(max, Math.max(min, Math.round(value) || min));
+}
+
+function clampDiarizationFloat(
+  value: number,
+  limits: { min: number; max: number; step: number },
+  fallback: number,
+): number {
+  const raw = Number.isFinite(value) ? value : fallback;
+  const snapped =
+    Math.round((raw - limits.min) / limits.step) * limits.step + limits.min;
+  return Math.min(limits.max, Math.max(limits.min, Number(snapped.toFixed(2))));
 }
 
 function formatSrtSliderDisplay(value: number, format: SrtSliderFormat): string {
@@ -249,7 +368,7 @@ function renderAdvancedSlider(
   const minLabel = formatSrtSliderDisplay(limits.min, format);
   const maxLabel = formatSrtSliderDisplay(limits.max, format);
   return `
-    <label class="field-compact audio-srt-slider-field">
+    <div class="field-compact audio-srt-slider-field">
       <div class="audio-srt-slider-header">
         <span class="audio-srt-slider-title">${renderFieldTitle(labelKey, hintKey)}</span>
         <span class="audio-srt-slider-value" data-srt-slider-value-for="${escapeHtml(sliderId)}">${escapeHtml(display)}</span>
@@ -263,12 +382,50 @@ function renderAdvancedSlider(
         max="${limits.max}"
         step="${limits.step}"
         value="${snapped}"
+        aria-label="${escapeHtml(t(labelKey))}"
       />
       <div class="audio-srt-slider-bounds" aria-hidden="true">
         <span>${escapeHtml(minLabel)}</span>
         <span>${escapeHtml(maxLabel)}</span>
       </div>
-    </label>
+    </div>
+  `;
+}
+
+function renderFloatSlider(
+  sliderId: string,
+  labelKey: MessageKey,
+  hintKey: MessageKey,
+  dataOptAttr: string,
+  value: number,
+  limits: { min: number; max: number; step: number },
+  unit: string,
+): string {
+  const snapped = clampDiarizationFloat(value, limits, value);
+  const display = `${snapped.toFixed(2)} ${unit}`;
+  return `
+    <div class="field-compact audio-srt-slider-field">
+      <div class="audio-srt-slider-header">
+        <span class="audio-srt-slider-title">${renderFieldTitle(labelKey, hintKey)}</span>
+        <span class="audio-srt-slider-value" data-srt-slider-value-for="${escapeHtml(sliderId)}">${escapeHtml(display)}</span>
+      </div>
+      <input
+        type="range"
+        ${dataOptAttr}
+        data-srt-slider-id="${escapeHtml(sliderId)}"
+        data-srt-float-slider="1"
+        data-srt-float-unit="${escapeHtml(unit)}"
+        min="${limits.min}"
+        max="${limits.max}"
+        step="${limits.step}"
+        value="${snapped}"
+        aria-label="${escapeHtml(t(labelKey))}"
+      />
+      <div class="audio-srt-slider-bounds" aria-hidden="true">
+        <span>${escapeHtml(`${limits.min} ${unit}`)}</span>
+        <span>${escapeHtml(`${limits.max} ${unit}`)}</span>
+      </div>
+    </div>
   `;
 }
 
@@ -285,6 +442,162 @@ function syncSrtSliderLabels(root: HTMLElement): void {
     }
     span.textContent = formatSrtSliderDisplay(Number(input.value), format);
   });
+  root.querySelectorAll<HTMLInputElement>("input[data-srt-float-slider]").forEach((input) => {
+    const id = input.dataset.srtSliderId;
+    if (!id) {
+      return;
+    }
+    const span = root.querySelector<HTMLElement>(`[data-srt-slider-value-for="${id}"]`);
+    if (!span) {
+      return;
+    }
+    const unit = input.dataset.srtFloatUnit ?? "";
+    const value = Number(input.value);
+    span.textContent = `${value.toFixed(2)}${unit ? ` ${unit}` : ""}`;
+  });
+}
+
+function renderDiarizationOptions(
+  options: AudioSrtUiOptions,
+  diarizationAvailable: boolean | null,
+): string {
+  const unavailable = diarizationAvailable === false;
+  const enabled = options.speakerDiarization && !unavailable;
+  const countControls =
+    options.speakerCountMode === "exact"
+      ? `
+        <label class="field-compact">
+          <span class="field-compact-title">${escapeHtml(t("tools.audioSrt.speakerExactCount"))}</span>
+          <input type="number" data-opt-speaker-exact min="1" max="20" step="1" value="${options.speakerExactCount}" />
+        </label>
+      `
+      : options.speakerCountMode === "range"
+        ? `
+        <div class="audio-srt-speaker-range">
+          <label class="field-compact">
+            <span class="field-compact-title">${escapeHtml(t("tools.audioSrt.speakerMinCount"))}</span>
+            <input type="number" data-opt-speaker-min min="1" max="20" step="1" value="${options.speakerMinCount}" />
+          </label>
+          <label class="field-compact">
+            <span class="field-compact-title">${escapeHtml(t("tools.audioSrt.speakerMaxCount"))}</span>
+            <input type="number" data-opt-speaker-max min="1" max="20" step="1" value="${options.speakerMaxCount}" />
+          </label>
+        </div>
+      `
+        : "";
+
+  const body = enabled
+    ? `
+      <div class="audio-srt-diarization-body">
+        <label class="field-compact">
+          ${renderFieldTitle("tools.audioSrt.speakerCountMode", "tools.audioSrt.hint.speakerCountMode")}
+          <select data-opt-speaker-count-mode>
+            <option value="auto"${options.speakerCountMode === "auto" ? " selected" : ""}>${escapeHtml(t("tools.audioSrt.speakerCountAuto"))}</option>
+            <option value="exact"${options.speakerCountMode === "exact" ? " selected" : ""}>${escapeHtml(t("tools.audioSrt.speakerCountExact"))}</option>
+            <option value="range"${options.speakerCountMode === "range" ? " selected" : ""}>${escapeHtml(t("tools.audioSrt.speakerCountRange"))}</option>
+          </select>
+        </label>
+        ${countControls}
+        <label class="field-compact field-compact--checkbox">
+          <input type="checkbox" data-opt-include-speaker-names ${options.includeSpeakerNames ? "checked" : ""} />
+          ${renderFieldTitle("tools.audioSrt.includeSpeakerNames", "tools.audioSrt.hint.includeSpeakerNames")}
+        </label>
+        <details class="audio-srt-diarization-expert"${options.diarizationExpertOpen ? " open" : ""} data-audio-srt-diarization-expert>
+          <summary>${escapeHtml(t("tools.audioSrt.diarizationExpert"))}</summary>
+          <div class="audio-srt-diarization-expert-body">
+            ${renderFloatSlider(
+              "diarMinSpeech",
+              "tools.audioSrt.diarizationMinSpeechSecs",
+              "tools.audioSrt.hint.diarizationMinSpeechSecs",
+              "data-opt-diar-min-speech",
+              options.diarizationMinSpeechSecs,
+              DIARIZATION_LIMITS.minSpeechSecs,
+              "s",
+            )}
+            ${renderFloatSlider(
+              "diarSensitivity",
+              "tools.audioSrt.diarizationSensitivity",
+              "tools.audioSrt.hint.diarizationSensitivity",
+              "data-opt-diar-sensitivity",
+              options.diarizationSensitivity,
+              DIARIZATION_LIMITS.sensitivity,
+              "",
+            )}
+          </div>
+        </details>
+      </div>
+    `
+    : "";
+
+  return `
+    <section class="audio-srt-diarization" data-audio-srt-diarization>
+      <label class="field-compact field-compact--checkbox${unavailable ? " field-compact--disabled" : ""}">
+        <input
+          type="checkbox"
+          data-opt-speaker-diarization
+          ${enabled ? "checked" : ""}
+          ${unavailable ? "disabled" : ""}
+        />
+        ${renderFieldTitle("tools.audioSrt.speakerDiarization", "tools.audioSrt.hint.speakerDiarization")}
+      </label>
+      ${
+        unavailable
+          ? `<p class="voice-files-stage-hint" role="status">${escapeHtml(t("tools.audioSrt.diarizationUnavailable"))}</p>`
+          : ""
+      }
+      ${body}
+    </section>
+  `;
+}
+
+function renderSpeakersPanel(job: AudioSrtJob | null | undefined): string {
+  if (!job || job.status !== "done" || job.speakers.length === 0) {
+    return "";
+  }
+  const rows = job.speakers
+    .map((speaker) => {
+      const colorIndex = speakerColorIndex(speaker.id) ?? 0;
+      const mergeOptions = job.speakers
+        .filter((other) => other.id !== speaker.id)
+        .map(
+          (other) =>
+            `<option value="${other.id}">${escapeHtml(other.label)}</option>`,
+        )
+        .join("");
+      return `
+        <div class="audio-srt-speaker-row" data-speaker-row="${speaker.id}">
+          <span
+            class="audio-srt-speaker-swatch"
+            style="--badge-speaker: var(--audio-srt-speaker-${colorIndex})"
+            aria-hidden="true"
+          ></span>
+          <input
+            type="text"
+            class="audio-srt-speaker-label"
+            data-speaker-label="${speaker.id}"
+            value="${escapeHtml(speaker.label)}"
+            aria-label="${escapeHtml(t("tools.audioSrt.renameSpeaker"))}"
+          />
+          <select
+            class="audio-srt-speaker-merge"
+            data-speaker-merge-from="${speaker.id}"
+            aria-label="${escapeHtml(t("tools.audioSrt.mergeInto"))}"
+            ${mergeOptions ? "" : "disabled"}
+          >
+            <option value="">${escapeHtml(t("tools.audioSrt.mergeInto"))}</option>
+            ${mergeOptions}
+          </select>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `
+    <section class="audio-srt-speakers" data-audio-srt-speakers aria-label="${escapeHtml(t("tools.audioSrt.speakersTitle"))}">
+      <h3 class="audio-srt-speakers-title">${escapeHtml(t("tools.audioSrt.speakersTitle"))}</h3>
+      <div class="audio-srt-speakers-list">${rows}</div>
+    </section>
+  `;
 }
 
 function renderAdvancedOptions(options: AudioSrtUiOptions): string {
@@ -385,6 +698,8 @@ export function renderAudioSrtTool(
   capability: SubtitleSttCapability,
   uiOptions: AudioSrtUiOptions,
   visibleProgressPercent: number | null = null,
+  statusHint: string | null = null,
+  diarizationAvailable: boolean | null = null,
 ): string {
   const selected =
     jobs.find((job) => job.id === selectedId) ??
@@ -418,6 +733,8 @@ export function renderAudioSrtTool(
   const showPreview = selected?.status === "done" && Boolean(selected.path);
   const copyTitle = copyHint ?? t("tools.audioSrt.copy");
   const saveAsTitle = saveHint ?? t("tools.audioSrt.saveAs");
+  const saveSrtTitle = t("tools.audioSrt.save");
+  const saveVttTitle = t("tools.audioSrt.saveVtt");
   const footnote = resultFootnote(selected);
   const footnoteClass = selected?.rewriteFallback
     ? "voice-files-fallback-hint"
@@ -445,7 +762,14 @@ export function renderAudioSrtTool(
         ${renderQueueCompact(jobs, selectedId, visibleProgressPercent)}
       </div>
 
+      ${renderDiarizationOptions(uiOptions, diarizationAvailable)}
       ${renderAdvancedOptions(uiOptions)}
+
+      ${
+        statusHint
+          ? `<p class="voice-files-stage-hint" role="status">${escapeHtml(statusHint)}</p>`
+          : ""
+      }
 
       ${
         progressPercent !== null
@@ -465,12 +789,20 @@ export function renderAudioSrtTool(
       }
 
       <div class="audio-srt-actions">
+        <button type="button" class="btn btn-secondary btn-compact" data-save-srt ${canExport ? "" : "disabled"}>
+          ${escapeHtml(saveSrtTitle)}
+        </button>
+        <button type="button" class="btn btn-secondary btn-compact" data-save-vtt ${canExport ? "" : "disabled"}>
+          ${escapeHtml(saveVttTitle)}
+        </button>
         <button type="button" class="btn btn-secondary btn-compact" data-save-srt-as ${canExport ? "" : "disabled"}>
           ${escapeHtml(saveAsTitle)}
         </button>
       </div>
 
       <div class="audio-srt-preview-slot" data-audio-srt-preview-slot ${showPreview ? "" : "hidden"}></div>
+
+      ${renderSpeakersPanel(selected)}
 
       <div class="voice-files-text-stack" aria-live="polite">
         <div class="voice-files-text-wrap">
@@ -502,7 +834,7 @@ function nextJobId(): string {
 }
 
 function buildApiOptions(ui: AudioSrtUiOptions): AudioSrtOptions {
-  return {
+  const base: AudioSrtOptions = {
     maxLineLength: ui.maxLineLength,
     maxLinesPerCue: ui.maxLinesPerCue,
     globalOffsetMs: ui.globalOffsetMs,
@@ -513,6 +845,20 @@ function buildApiOptions(ui: AudioSrtUiOptions): AudioSrtOptions {
     maxCueDurationMs: ui.maxCueDurationMs,
     minCueDurationMs: ui.minCueDurationMs,
     readingTailMs: ui.readingTailMs,
+    speakerDiarization: ui.speakerDiarization,
+  };
+  if (!ui.speakerDiarization) {
+    return base;
+  }
+  return {
+    ...base,
+    speakerCountMode: ui.speakerCountMode,
+    speakerExactCount: ui.speakerExactCount,
+    speakerMinCount: ui.speakerMinCount,
+    speakerMaxCount: ui.speakerMaxCount,
+    includeSpeakerNames: ui.includeSpeakerNames,
+    diarizationMinSpeechSecs: ui.diarizationMinSpeechSecs,
+    diarizationSensitivity: ui.diarizationSensitivity,
   };
 }
 
@@ -524,12 +870,22 @@ export function createAudioSrtController(root: HTMLElement): {
   let selectedId: string | null = null;
   let copyHint: string | null = null;
   let saveHint: string | null = null;
+  let statusHint: string | null = null;
   let queueRunning = false;
   let progressUnlisten: UnlistenFn | null = null;
   let capability: SubtitleSttCapability = "supported";
+  /** null = still probing backend feature flag */
+  let diarizationAvailable: boolean | null = null;
   let uiOptions: AudioSrtUiOptions = { ...DEFAULT_UI_OPTIONS };
   const preview = createAudioSrtPreview();
   const decodeProgress = new ToolDecodeProgressSmoother();
+
+  const selectedJob = (): AudioSrtJob | undefined => {
+    return (
+      jobs.find((job) => job.id === selectedId) ??
+      (jobs.length > 0 ? jobs[jobs.length - 1] : undefined)
+    );
+  };
 
   const syncPreview = (): void => {
     const slot = root.querySelector<HTMLElement>("[data-audio-srt-preview-slot]");
@@ -546,6 +902,15 @@ export function createAudioSrtController(root: HTMLElement): {
       srtText,
       globalOffsetMs: uiOptions.globalOffsetMs,
       visible: Boolean(selected?.status === "done" && selected.path),
+      speakers: selected?.status === "done" ? selected.speakers : [],
+      cueSpeakerIds: selected?.status === "done" ? selected.cueSpeakerIds : [],
+      onSpeakerBadgeClick: (speakerId) => {
+        const input = root.querySelector<HTMLInputElement>(
+          `[data-speaker-label="${speakerId}"]`,
+        );
+        input?.focus();
+        input?.select();
+      },
     });
   };
 
@@ -556,6 +921,23 @@ export function createAudioSrtController(root: HTMLElement): {
     })
     .catch(() => {
       capability = "supported";
+    });
+
+  void getDiarizationModelStatus()
+    .then((status) => {
+      diarizationAvailable = status.available;
+      if (!status.available) {
+        uiOptions.speakerDiarization = false;
+        if (statusHint === t("tools.audioSrt.diarizationUnavailable")) {
+          statusHint = null;
+        }
+      }
+      paint();
+    })
+    .catch(() => {
+      diarizationAvailable = false;
+      uiOptions.speakerDiarization = false;
+      paint();
     });
 
   const readUiOptionsFromDom = (): void => {
@@ -570,6 +952,25 @@ export function createAudioSrtController(root: HTMLElement): {
     const maxCueSec = root.querySelector<HTMLInputElement>("[data-opt-max-cue-sec]");
     const minCueSec = root.querySelector<HTMLInputElement>("[data-opt-min-cue-sec]");
     const advanced = root.querySelector<HTMLDetailsElement>("[data-audio-srt-advanced]");
+    const speakerDiarization = root.querySelector<HTMLInputElement>(
+      "[data-opt-speaker-diarization]",
+    );
+    const speakerCountMode = root.querySelector<HTMLSelectElement>(
+      "[data-opt-speaker-count-mode]",
+    );
+    const speakerExact = root.querySelector<HTMLInputElement>("[data-opt-speaker-exact]");
+    const speakerMin = root.querySelector<HTMLInputElement>("[data-opt-speaker-min]");
+    const speakerMax = root.querySelector<HTMLInputElement>("[data-opt-speaker-max]");
+    const includeNames = root.querySelector<HTMLInputElement>(
+      "[data-opt-include-speaker-names]",
+    );
+    const diarMinSpeech = root.querySelector<HTMLInputElement>("[data-opt-diar-min-speech]");
+    const diarSensitivity = root.querySelector<HTMLInputElement>(
+      "[data-opt-diar-sensitivity]",
+    );
+    const diarExpert = root.querySelector<HTMLDetailsElement>(
+      "[data-audio-srt-diarization-expert]",
+    );
     if (maxLine) {
       uiOptions.maxLineLength = clampSrtSliderValue(
         "maxLineLength",
@@ -621,6 +1022,46 @@ export function createAudioSrtController(root: HTMLElement): {
     if (advanced) {
       uiOptions.advancedOpen = advanced.open;
     }
+    if (speakerDiarization) {
+      uiOptions.speakerDiarization = speakerDiarization.checked;
+    }
+    if (speakerCountMode) {
+      const mode = speakerCountMode.value;
+      uiOptions.speakerCountMode =
+        mode === "exact" || mode === "range" ? mode : "auto";
+    }
+    if (speakerExact) {
+      uiOptions.speakerExactCount = clampSpeakerCount(Number(speakerExact.value));
+    }
+    if (speakerMin) {
+      uiOptions.speakerMinCount = clampSpeakerCount(Number(speakerMin.value));
+    }
+    if (speakerMax) {
+      uiOptions.speakerMaxCount = clampSpeakerCount(Number(speakerMax.value));
+    }
+    if (uiOptions.speakerMinCount > uiOptions.speakerMaxCount) {
+      uiOptions.speakerMaxCount = uiOptions.speakerMinCount;
+    }
+    if (includeNames) {
+      uiOptions.includeSpeakerNames = includeNames.checked;
+    }
+    if (diarMinSpeech) {
+      uiOptions.diarizationMinSpeechSecs = clampDiarizationFloat(
+        Number(diarMinSpeech.value),
+        DIARIZATION_LIMITS.minSpeechSecs,
+        0.25,
+      );
+    }
+    if (diarSensitivity) {
+      uiOptions.diarizationSensitivity = clampDiarizationFloat(
+        Number(diarSensitivity.value),
+        DIARIZATION_LIMITS.sensitivity,
+        0.45,
+      );
+    }
+    if (diarExpert) {
+      uiOptions.diarizationExpertOpen = diarExpert.open;
+    }
   };
 
   const syncEditedSrtFromTextarea = (): void => {
@@ -632,6 +1073,40 @@ export function createAudioSrtController(root: HTMLElement): {
     if (selected?.status === "done") {
       selected.srt = textarea.value;
     }
+  };
+
+  const renameSpeakerOnJob = (job: AudioSrtJob, speakerId: number, nextLabel: string): void => {
+    const trimmed = nextLabel.trim();
+    if (!trimmed) {
+      return;
+    }
+    const speaker = job.speakers.find((entry) => entry.id === speakerId);
+    if (!speaker || speaker.label === trimmed) {
+      return;
+    }
+    job.srt = rewriteSrtSpeakerLabels(job.srt, speaker.label, trimmed);
+    job.vtt = rewriteVttVoiceTags(job.vtt, speaker.label, trimmed);
+    speaker.label = trimmed;
+    const textarea = root.querySelector<HTMLTextAreaElement>("[data-srt-result-text]");
+    if (textarea && selectedId === job.id) {
+      textarea.value = job.srt;
+    }
+    syncPreview();
+  };
+
+  const mergeSpeakerOnJob = (job: AudioSrtJob, fromId: number, intoId: number): void => {
+    const merged = mergeSpeakers(
+      job.srt,
+      job.vtt,
+      job.speakers,
+      job.cueSpeakerIds,
+      fromId,
+      intoId,
+    );
+    job.srt = merged.srt;
+    job.vtt = merged.vtt;
+    job.speakers = merged.speakers;
+    job.cueSpeakerIds = merged.cueSpeakerIds;
   };
 
   const onProgress = (payload: AudioSrtProgressPayload): void => {
@@ -681,6 +1156,8 @@ export function createAudioSrtController(root: HTMLElement): {
       capability,
       uiOptions,
       visible,
+      statusHint,
+      diarizationAvailable,
     );
     bind();
     syncPreview();
@@ -688,52 +1165,23 @@ export function createAudioSrtController(root: HTMLElement): {
 
   decodeProgress.bindRepaint(paint);
 
-  const bind = (): void => {
-    root.querySelector<HTMLButtonElement>("[data-pick-audio-srt]")?.addEventListener("click", () => {
-      void pickAndEnqueue();
-    });
-
-    root.querySelector<HTMLButtonElement>("[data-copy-srt-result]")?.addEventListener("click", () => {
-      void copyResult();
-    });
-
-    root.querySelector<HTMLButtonElement>("[data-save-srt-as]")?.addEventListener("click", () => {
-      void saveResult();
-    });
-
-    root.querySelectorAll<HTMLButtonElement>("[data-audio-srt-id]").forEach((button) => {
-      button.addEventListener("click", () => {
-        syncEditedSrtFromTextarea();
-        selectedId = button.dataset.audioSrtId ?? null;
-        copyHint = null;
-        saveHint = null;
-        paint();
-      });
-    });
-
-    root.querySelector<HTMLTextAreaElement>("[data-srt-result-text]")?.addEventListener("input", () => {
-      syncEditedSrtFromTextarea();
-      syncPreview();
-    });
-
-    root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
-      "[data-opt-max-line], [data-opt-max-lines], [data-opt-offset], [data-opt-bom], [data-opt-dictation], [data-opt-smart-split], [data-opt-pause-split], [data-opt-reading-tail], [data-opt-max-cue-sec], [data-opt-min-cue-sec]",
-    ).forEach((element) => {
-      const onUpdate = (): void => {
-        const smartBefore = uiOptions.smartSplit;
-        readUiOptionsFromDom();
-        syncSrtSliderLabels(root);
-        if (element.matches("[data-opt-smart-split]") && smartBefore !== uiOptions.smartSplit) {
-          paint();
-        }
-      };
-      element.addEventListener("change", onUpdate);
-      if (element instanceof HTMLInputElement && element.type === "range") {
-        element.addEventListener("input", onUpdate);
+  const bindFieldHelp = (container: HTMLElement | null): void => {
+    if (!container) {
+      return;
+    }
+    // Help sits inside <label> that wraps range inputs — block label activation
+    // so clicking "?" does not flash-focus the slider.
+    container.addEventListener("mousedown", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (target.closest(".field-help-btn")) {
+        event.preventDefault();
+        event.stopPropagation();
       }
     });
-
-    root.querySelector<HTMLElement>(".audio-srt-advanced-body")?.addEventListener("click", (event) => {
+    container.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) {
         return;
@@ -758,9 +1206,190 @@ export function createAudioSrtController(root: HTMLElement): {
         button.setAttribute("aria-expanded", "true");
       }
     });
+  };
+
+  const ensureDiarizationModel = async (): Promise<
+    { ok: true } | { ok: false; reason: "cancelled" | "unavailable" | "download" }
+  > => {
+    try {
+      const status = await getDiarizationModelStatus();
+      if (!status.available) {
+        uiOptions.speakerDiarization = false;
+        diarizationAvailable = false;
+        paint();
+        return { ok: false, reason: "unavailable" };
+      }
+      diarizationAvailable = true;
+      if (status.exists) {
+        return { ok: true };
+      }
+      const ok = await showConfirmDialog({
+        message: t("tools.audioSrt.diarizationDownloadConfirm", {
+          size: String(status.sizeMb || 12),
+        }),
+        confirmLabel: t("tools.audioSrt.diarizationDownload"),
+      });
+      if (!ok) {
+        return { ok: false, reason: "cancelled" };
+      }
+      statusHint = t("tools.audioSrt.diarizationDownloading");
+      paint();
+      await downloadDiarizationModel();
+      statusHint = null;
+      paint();
+      return { ok: true };
+    } catch {
+      statusHint = null;
+      paint();
+      return { ok: false, reason: "download" };
+    }
+  };
+
+  const bind = (): void => {
+    root.querySelector<HTMLButtonElement>("[data-pick-audio-srt]")?.addEventListener("click", () => {
+      void pickAndEnqueue();
+    });
+
+    root.querySelector<HTMLButtonElement>("[data-copy-srt-result]")?.addEventListener("click", () => {
+      void copyResult();
+    });
+
+    root.querySelector<HTMLButtonElement>("[data-save-srt]")?.addEventListener("click", () => {
+      void saveResult("srt");
+    });
+    root.querySelector<HTMLButtonElement>("[data-save-vtt]")?.addEventListener("click", () => {
+      void saveResult("vtt");
+    });
+    root.querySelector<HTMLButtonElement>("[data-save-srt-as]")?.addEventListener("click", () => {
+      void saveResult("auto");
+    });
+
+    root.querySelectorAll<HTMLButtonElement>("[data-audio-srt-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        syncEditedSrtFromTextarea();
+        selectedId = button.dataset.audioSrtId ?? null;
+        copyHint = null;
+        saveHint = null;
+        paint();
+      });
+    });
+
+    root.querySelector<HTMLTextAreaElement>("[data-srt-result-text]")?.addEventListener("input", () => {
+      syncEditedSrtFromTextarea();
+      syncPreview();
+    });
+
+    root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+      "[data-opt-max-line], [data-opt-max-lines], [data-opt-offset], [data-opt-bom], [data-opt-dictation], [data-opt-smart-split], [data-opt-pause-split], [data-opt-reading-tail], [data-opt-max-cue-sec], [data-opt-min-cue-sec], [data-opt-speaker-diarization], [data-opt-speaker-count-mode], [data-opt-speaker-exact], [data-opt-speaker-min], [data-opt-speaker-max], [data-opt-include-speaker-names], [data-opt-diar-min-speech], [data-opt-diar-sensitivity]",
+    ).forEach((element) => {
+      const onUpdate = (): void => {
+        const smartBefore = uiOptions.smartSplit;
+        const diarBefore = uiOptions.speakerDiarization;
+        const modeBefore = uiOptions.speakerCountMode;
+        readUiOptionsFromDom();
+        syncSrtSliderLabels(root);
+        const structureChanged =
+          (element.matches("[data-opt-smart-split]") && smartBefore !== uiOptions.smartSplit) ||
+          (element.matches("[data-opt-speaker-diarization]") &&
+            diarBefore !== uiOptions.speakerDiarization) ||
+          (element.matches("[data-opt-speaker-count-mode]") &&
+            modeBefore !== uiOptions.speakerCountMode);
+        if (structureChanged) {
+          if (
+            element.matches("[data-opt-speaker-diarization]") &&
+            uiOptions.speakerDiarization &&
+            diarizationAvailable === false
+          ) {
+            uiOptions.speakerDiarization = false;
+            paint();
+            return;
+          }
+          paint();
+          if (
+            element.matches("[data-opt-speaker-diarization]") &&
+            uiOptions.speakerDiarization
+          ) {
+            void ensureDiarizationModel().then((result) => {
+              if (!result.ok && uiOptions.speakerDiarization) {
+                uiOptions.speakerDiarization = false;
+                if (result.reason === "unavailable") {
+                  diarizationAvailable = false;
+                }
+                paint();
+              }
+            });
+          }
+        }
+      };
+      element.addEventListener("change", onUpdate);
+      if (element instanceof HTMLInputElement && element.type === "range") {
+        element.addEventListener("input", onUpdate);
+      }
+    });
+
+    bindFieldHelp(root.querySelector<HTMLElement>(".audio-srt-advanced-body"));
+    bindFieldHelp(root.querySelector<HTMLElement>("[data-audio-srt-diarization]"));
 
     root.querySelector<HTMLDetailsElement>("[data-audio-srt-advanced]")?.addEventListener("toggle", () => {
       readUiOptionsFromDom();
+    });
+    root
+      .querySelector<HTMLDetailsElement>("[data-audio-srt-diarization-expert]")
+      ?.addEventListener("toggle", () => {
+        readUiOptionsFromDom();
+      });
+
+    root.querySelectorAll<HTMLInputElement>("[data-speaker-label]").forEach((input) => {
+      const apply = (): void => {
+        const speakerId = Number(input.dataset.speakerLabel);
+        const job = selectedJob();
+        if (!job || job.status !== "done" || !Number.isFinite(speakerId)) {
+          return;
+        }
+        syncEditedSrtFromTextarea();
+        renameSpeakerOnJob(job, speakerId, input.value);
+        const swatchRow = root.querySelector(`[data-speaker-row="${speakerId}"]`);
+        // Keep merge option labels in sync without full paint.
+        root.querySelectorAll<HTMLSelectElement>("[data-speaker-merge-from]").forEach((select) => {
+          const fromId = Number(select.dataset.speakerMergeFrom);
+          if (fromId === speakerId) {
+            return;
+          }
+          const option = select.querySelector<HTMLOptionElement>(`option[value="${speakerId}"]`);
+          if (option) {
+            option.textContent = input.value.trim() || option.textContent;
+          }
+        });
+        void swatchRow;
+      };
+      input.addEventListener("change", apply);
+      input.addEventListener("blur", apply);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        }
+      });
+    });
+
+    root.querySelectorAll<HTMLSelectElement>("[data-speaker-merge-from]").forEach((select) => {
+      select.addEventListener("change", () => {
+        const fromId = Number(select.dataset.speakerMergeFrom);
+        const intoId = Number(select.value);
+        const job = selectedJob();
+        if (
+          !job ||
+          job.status !== "done" ||
+          !Number.isFinite(fromId) ||
+          !Number.isFinite(intoId) ||
+          select.value === ""
+        ) {
+          return;
+        }
+        syncEditedSrtFromTextarea();
+        mergeSpeakerOnJob(job, fromId, intoId);
+        paint();
+      });
     });
 
     const dropzone = root.querySelector<HTMLElement>("[data-audio-srt-dropzone]");
@@ -798,13 +1427,6 @@ export function createAudioSrtController(root: HTMLElement): {
     }
   };
 
-  const selectedJob = (): AudioSrtJob | undefined => {
-    return (
-      jobs.find((job) => job.id === selectedId) ??
-      (jobs.length > 0 ? jobs[jobs.length - 1] : undefined)
-    );
-  };
-
   const copyResult = async (): Promise<void> => {
     syncEditedSrtFromTextarea();
     const textarea = root.querySelector<HTMLTextAreaElement>("[data-srt-result-text]");
@@ -837,24 +1459,49 @@ export function createAudioSrtController(root: HTMLElement): {
     }, 1600);
   };
 
-  const defaultSrtName = (fileName: string): string => {
+  const defaultSubtitleName = (fileName: string, ext: "srt" | "vtt"): string => {
     const base = fileName.replace(/\.[^.\\/]+$/, "");
-    return `${base || "subtitles"}.srt`;
+    return `${base || "subtitles"}.${ext}`;
   };
 
-  const saveResult = async (): Promise<void> => {
+  const contentForFormat = (
+    job: AudioSrtJob,
+    format: "srt" | "vtt",
+  ): string => {
+    if (format === "vtt") {
+      return job.vtt.trim() ? job.vtt : "";
+    }
+    return job.srt.trim() ? job.srt : "";
+  };
+
+  const formatFromPath = (path: string): "srt" | "vtt" => {
+    const lower = path.replace(/\\/g, "/").toLowerCase();
+    return lower.endsWith(".vtt") ? "vtt" : "srt";
+  };
+
+  const saveResult = async (mode: "srt" | "vtt" | "auto"): Promise<void> => {
     syncEditedSrtFromTextarea();
     const selected = selectedJob();
-    if (!selected?.srt.trim()) {
+    if (!selected || (!selected.srt.trim() && !selected.vtt.trim())) {
       return;
     }
     readUiOptionsFromDom();
     try {
-      const targetPath = await pickSubtitleSavePath(defaultSrtName(selected.fileName));
+      const preferredExt = mode === "vtt" ? "vtt" : "srt";
+      const targetPath = await pickSubtitleSavePath(
+        defaultSubtitleName(selected.fileName, preferredExt),
+      );
       if (!targetPath) {
         return;
       }
-      await saveSubtitleFile(targetPath, selected.srt, uiOptions.utf8Bom);
+      const format = mode === "auto" ? formatFromPath(targetPath) : mode;
+      const content = contentForFormat(selected, format);
+      if (!content.trim()) {
+        saveHint = t("tools.audioSrt.saveFailed");
+        paint();
+        return;
+      }
+      await saveSubtitleFile(targetPath, content, uiOptions.utf8Bom);
       saveHint = t("tools.audioSrt.saved");
     } catch {
       saveHint = t("tools.audioSrt.saveFailed");
@@ -885,10 +1532,13 @@ export function createAudioSrtController(root: HTMLElement): {
         processingPhase: null,
         processingPercent: null,
         srt: "",
+        vtt: "",
         errorKey: null,
         errorRaw: null,
         rewriteFallback: false,
         aiRewriteApplied: false,
+        speakers: [],
+        cueSpeakerIds: [],
       });
       if (!selectedId) {
         selectedId = id;
@@ -905,11 +1555,14 @@ export function createAudioSrtController(root: HTMLElement): {
             ...job,
             status: "done",
             srt: result.srt,
+            vtt: result.vtt ?? "",
             rewriteFallback: result.rewriteFallback,
             aiRewriteApplied: result.aiRewriteApplied,
             processingPhase: null,
             processingPercent: null,
             fileName: result.fileName || job.fileName,
+            speakers: result.speakers ?? [],
+            cueSpeakerIds: result.cueSpeakerIds ?? [],
           }
         : job,
     );
@@ -944,6 +1597,24 @@ export function createAudioSrtController(root: HTMLElement): {
         if (!next) {
           break;
         }
+        readUiOptionsFromDom();
+        if (uiOptions.speakerDiarization) {
+          const modelResult = await ensureDiarizationModel();
+          if (!modelResult.ok) {
+            if (modelResult.reason === "cancelled") {
+              break;
+            }
+            applyError(
+              next.id,
+              modelResult.reason === "unavailable"
+                ? "tools.audioSrt.diarizationUnavailable"
+                : "tools.audioSrt.diarizationDownloadFailed",
+            );
+            paint();
+            continue;
+          }
+        }
+
         jobs = jobs.map((job) =>
           job.id === next.id
             ? {
@@ -957,6 +1628,7 @@ export function createAudioSrtController(root: HTMLElement): {
         selectedId = next.id;
         copyHint = null;
         saveHint = null;
+        statusHint = null;
         decodeProgress.reset();
         paint();
 

@@ -12,7 +12,11 @@ use crate::app::transcribe_audio::{transcribe_segment_with_retries, TranscribeSe
 use crate::error::AppError;
 use crate::llm::LlmEngine;
 use crate::settings::{AppSettings, LocalSttEngine, TextProcessingMode};
-use crate::subtitles::{build_subtitle_cues, render_srt, SubtitleLineEnding, SubtitleOptions};
+use crate::subtitles::{
+    apply_speaker_prefixes, assign_cue_speakers, build_subtitle_cues, render_srt, render_vtt,
+    SubtitleLineEnding, SubtitleOptions,
+};
+use crate::diarization::{self, DiarizeOptions, SpeakerCountMode};
 use crate::text::dictionary::{load_dictionary_for_settings, protected_terms, Dictionary};
 use crate::text::pipeline::{process_transcription_immediate_sync, rewrite_processed_text};
 use crate::timed_text::TimedTextSegment;
@@ -29,8 +33,10 @@ use super::shared::{
     validate_tool_file_path,
 };
 
-/// Canonical pipeline (do not reorder without updating `todo/TZ_audio_to_srt.md` §12):
-/// decode → VAD regions → STT per region (absolute offsets) → text cleanup → `build_subtitle_cues`.
+/// Canonical pipeline (do not reorder without updating `todo/TZ_audio_to_srt.md` §12
+/// and `todo/ТЗ_ диаризация в SRT-инструменте Veyro.md`):
+/// decode → VAD regions → STT per region → text cleanup → [optional diarization] →
+/// `build_subtitle_cues` (+ speaker assign/prefix).
 /// Do **not** route the main path through word-align / energy gate — that regresses pause sync.
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,6 +75,54 @@ pub struct AudioToSrtOptions {
     /// Per-request STT language (does not persist settings); used after user picks a language in tools UI.
     #[serde(default)]
     pub stt_language_override: Option<String>,
+    /// Optional speaker diarization after ASR (`todo/ТЗ_ диаризация…`).
+    #[serde(default)]
+    pub speaker_diarization: bool,
+    #[serde(default)]
+    pub speaker_count_mode: SpeakerCountModeDto,
+    #[serde(default = "default_speaker_exact_count")]
+    pub speaker_exact_count: u8,
+    #[serde(default = "default_speaker_min_count")]
+    pub speaker_min_count: u8,
+    #[serde(default = "default_speaker_max_count")]
+    pub speaker_max_count: u8,
+    /// Include `Speaker N:` prefixes in exported SRT text.
+    #[serde(default = "default_include_speaker_names")]
+    pub include_speaker_names: bool,
+    /// Minimum speech blob length for diarization (seconds); expert.
+    #[serde(default = "default_diarization_min_speech_secs")]
+    pub diarization_min_speech_secs: f32,
+    /// Clustering sensitivity (AHC threshold when not default); expert.
+    #[serde(default = "default_diarization_sensitivity")]
+    pub diarization_sensitivity: f32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeakerCountModeDto {
+    #[default]
+    Auto,
+    Exact,
+    Range,
+}
+
+fn default_speaker_exact_count() -> u8 {
+    2
+}
+fn default_speaker_min_count() -> u8 {
+    1
+}
+fn default_speaker_max_count() -> u8 {
+    8
+}
+fn default_include_speaker_names() -> bool {
+    true
+}
+fn default_diarization_min_speech_secs() -> f32 {
+    0.25
+}
+fn default_diarization_sensitivity() -> f32 {
+    0.45
 }
 
 fn default_use_dictation_text_settings() -> bool {
@@ -118,8 +172,23 @@ impl Default for AudioToSrtOptions {
             speech_gate_percent: default_speech_gate_percent(),
             reading_tail_ms: default_reading_tail_ms(),
             stt_language_override: None,
+            speaker_diarization: false,
+            speaker_count_mode: SpeakerCountModeDto::Auto,
+            speaker_exact_count: default_speaker_exact_count(),
+            speaker_min_count: default_speaker_min_count(),
+            speaker_max_count: default_speaker_max_count(),
+            include_speaker_names: default_include_speaker_names(),
+            diarization_min_speech_secs: default_diarization_min_speech_secs(),
+            diarization_sensitivity: default_diarization_sensitivity(),
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioToSrtSpeakerInfo {
+    pub id: u32,
+    pub label: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -127,16 +196,25 @@ impl Default for AudioToSrtOptions {
 pub struct AudioToSrtResult {
     pub file_name: String,
     pub srt: String,
+    /// WebVTT export; uses `<v Name>` voice tags when speakers are assigned.
+    pub vtt: String,
     pub rewrite_fallback: bool,
     pub rewrite_fallback_reason: Option<String>,
     pub ai_rewrite_applied: bool,
+    #[serde(default)]
+    pub speakers: Vec<AudioToSrtSpeakerInfo>,
+    /// Speaker ids aligned with cues in export order (same count as non-empty rendered cues).
+    #[serde(default)]
+    pub cue_speaker_ids: Vec<Option<u32>>,
 }
 
 pub fn subtitle_stt_capability(settings: &AppSettings) -> SubtitleSttCapability {
     if settings.transcription_provider == "local" {
         match settings.local_stt_variant().engine() {
             LocalSttEngine::Whisper => SubtitleSttCapability::Supported,
-            LocalSttEngine::Sherpa => SubtitleSttCapability::UnsupportedProvider,
+            LocalSttEngine::Sherpa | LocalSttEngine::Sidecar => {
+                SubtitleSttCapability::UnsupportedProvider
+            }
         }
     } else {
         SubtitleSttCapability::Supported
@@ -157,6 +235,14 @@ fn subtitle_settings(base: &AppSettings, options: &AudioToSrtOptions) -> AppSett
         settings.language = Some(language.to_string());
     }
     settings
+}
+
+fn default_speaker_label(locale: crate::settings::UiLocale, speaker_id: u32) -> String {
+    let n = speaker_id + 1;
+    match locale {
+        crate::settings::UiLocale::Ru => format!("Спикер {n}"),
+        crate::settings::UiLocale::En => format!("Speaker {n}"),
+    }
 }
 
 fn emit_phase(app: &AppHandle, path: &str, phase: AudioSrtProgressPhase) {
@@ -231,9 +317,12 @@ pub async fn transcribe_audio_to_srt(
         return Ok(AudioToSrtResult {
             file_name,
             srt: String::new(),
+            vtt: String::new(),
             rewrite_fallback: false,
             rewrite_fallback_reason: None,
             ai_rewrite_applied: false,
+            speakers: Vec::new(),
+            cue_speaker_ids: Vec::new(),
         });
     }
 
@@ -274,6 +363,36 @@ pub async fn transcribe_audio_to_srt(
     )
     .await?;
 
+    let speaker_intervals = if options.speaker_diarization {
+        if speech_regions.is_empty() {
+            Vec::new()
+        } else {
+            emit_phase(&app, &path_key, AudioSrtProgressPhase::Diarizing);
+            let diarize_opts = DiarizeOptions {
+                count_mode: match options.speaker_count_mode {
+                    SpeakerCountModeDto::Auto => SpeakerCountMode::Auto,
+                    SpeakerCountModeDto::Exact => SpeakerCountMode::Exact,
+                    SpeakerCountModeDto::Range => SpeakerCountMode::Range,
+                },
+                exact_count: options.speaker_exact_count,
+                min_count: options.speaker_min_count,
+                max_count: options.speaker_max_count,
+                min_speech_secs: options.diarization_min_speech_secs,
+                sensitivity: options.diarization_sensitivity,
+            };
+            // Run blocking polyvoice off the async runtime.
+            let settings_for_diar = settings.clone();
+            let segment_for_diar = prepared.segment.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                diarization::diarize_segment(&settings_for_diar, &segment_for_diar, &diarize_opts)
+            })
+            .await
+            .map_err(|error| format!("tools.audioSrt.diarizationFailed|{error}"))??
+        }
+    } else {
+        Vec::new()
+    };
+
     emit_phase(&app, &path_key, AudioSrtProgressPhase::GeneratingSubtitles);
     let subtitle_opts = SubtitleOptions {
         max_line_length: options.max_line_length.clamp(20, 60),
@@ -284,9 +403,48 @@ pub async fn transcribe_audio_to_srt(
         reading_tail_ms: options.reading_tail_ms.clamp(0, 1_000),
         smart_split: options.smart_split,
     };
-    let cues = build_subtitle_cues(&processed_segments.segments, &subtitle_opts);
+    let mut cues = build_subtitle_cues(&processed_segments.segments, &subtitle_opts);
+    if !speaker_intervals.is_empty() {
+        assign_cue_speakers(&mut cues, &speaker_intervals);
+    }
+
+    let mut speaker_ids: Vec<u32> = cues.iter().filter_map(|cue| cue.speaker_id).collect();
+    speaker_ids.sort_unstable();
+    speaker_ids.dedup();
+    let speakers: Vec<AudioToSrtSpeakerInfo> = speaker_ids
+        .iter()
+        .map(|id| AudioToSrtSpeakerInfo {
+            id: *id,
+            label: default_speaker_label(settings.ui_locale, *id),
+        })
+        .collect();
+
+    let label_map: std::collections::HashMap<u32, String> = speakers
+        .iter()
+        .map(|speaker| (speaker.id, speaker.label.clone()))
+        .collect();
+
+    // SRT: optional text prefixes. VTT: `<v Name>` from speaker_id (clean lines).
+    let mut srt_cues = cues.clone();
+    if options.speaker_diarization && options.include_speaker_names && !speakers.is_empty() {
+        apply_speaker_prefixes(&mut srt_cues, |id| {
+            label_map
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| default_speaker_label(settings.ui_locale, id))
+        });
+    }
+
+    let cue_speaker_ids: Vec<Option<u32>> = cues.iter().map(|cue| cue.speaker_id).collect();
     let srt = render_srt(
+        &srt_cues,
+        SubtitleLineEnding::CrLf,
+        options.global_offset_ms,
+        options.utf8_bom,
+    );
+    let vtt = render_vtt(
         &cues,
+        |id| label_map.get(&id).cloned(),
         SubtitleLineEnding::CrLf,
         options.global_offset_ms,
         options.utf8_bom,
@@ -297,9 +455,12 @@ pub async fn transcribe_audio_to_srt(
     Ok(AudioToSrtResult {
         file_name,
         srt,
+        vtt,
         rewrite_fallback: processed_segments.rewrite_fallback,
         rewrite_fallback_reason: processed_segments.rewrite_fallback_reason,
         ai_rewrite_applied: processed_segments.ai_rewrite_applied,
+        speakers,
+        cue_speaker_ids,
     })
 }
 

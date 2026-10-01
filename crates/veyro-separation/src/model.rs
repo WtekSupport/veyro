@@ -7,6 +7,8 @@ pub enum SeparationProfile {
     Quality,
     Fast,
     Legacy,
+    /// HT-Demucs 6-stem (`htdemucs_6s`) for instrument split of the original mix.
+    MultiStem,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,6 +16,7 @@ pub enum ModelKind {
     RoFormer,
     StftRoFormer,
     Demucs,
+    DemucsMultiStem,
 }
 
 impl SeparationProfile {
@@ -21,6 +24,7 @@ impl SeparationProfile {
         match self {
             Self::Quality | Self::Fast => ModelKind::StftRoFormer,
             Self::Legacy => ModelKind::Demucs,
+            Self::MultiStem => ModelKind::DemucsMultiStem,
         }
     }
 
@@ -28,7 +32,7 @@ impl SeparationProfile {
         match self {
             Self::Quality => 44_100 * 8,
             Self::Fast => 44_100 * 10,
-            Self::Legacy => 0,
+            Self::Legacy | Self::MultiStem => 0,
         }
     }
 
@@ -37,6 +41,7 @@ impl SeparationProfile {
             Self::Quality => "quality",
             Self::Fast => "fast",
             Self::Legacy => "legacy",
+            Self::MultiStem => "multi-stem",
         }
     }
 
@@ -44,7 +49,7 @@ impl SeparationProfile {
         match self {
             Self::Quality => 484_659, // hop * (1100 - 1)
             Self::Fast => 262_144,
-            Self::Legacy => 343_980,
+            Self::Legacy | Self::MultiStem => 343_980,
         }
     }
 
@@ -52,7 +57,7 @@ impl SeparationProfile {
         match self {
             Self::Quality => 44_100,
             Self::Fast => 22_050,
-            Self::Legacy => 34_398,
+            Self::Legacy | Self::MultiStem => 34_398,
         }
     }
 }

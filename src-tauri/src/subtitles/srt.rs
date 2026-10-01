@@ -46,6 +46,50 @@ pub struct SubtitleCue {
     pub start_ms: u64,
     pub end_ms: u64,
     pub lines: Vec<String>,
+    /// Optional speaker cluster id from diarization (0-based).
+    pub speaker_id: Option<u32>,
+}
+
+impl SubtitleCue {
+    pub fn new(start_ms: u64, end_ms: u64, lines: Vec<String>) -> Self {
+        Self {
+            start_ms,
+            end_ms,
+            lines,
+            speaker_id: None,
+        }
+    }
+}
+
+/// Assign `speaker_id` on cues by maximum overlap with diarization turns.
+pub fn assign_cue_speakers(
+    cues: &mut [SubtitleCue],
+    intervals: &[crate::diarization::SpeakerInterval],
+) {
+    for cue in cues.iter_mut() {
+        cue.speaker_id =
+            crate::diarization::speaker_by_max_overlap(cue.start_ms, cue.end_ms, intervals);
+    }
+}
+
+/// Prefix first line of each cue with a localized speaker label (`Speaker 1: …`).
+pub fn apply_speaker_prefixes(cues: &mut [SubtitleCue], label_for_id: impl Fn(u32) -> String) {
+    for cue in cues.iter_mut() {
+        let Some(speaker_id) = cue.speaker_id else {
+            continue;
+        };
+        let Some(first) = cue.lines.first_mut() else {
+            continue;
+        };
+        if first.is_empty() {
+            continue;
+        }
+        let label = label_for_id(speaker_id);
+        if first.starts_with(&format!("{label}:")) {
+            continue;
+        }
+        *first = format!("{label}: {first}");
+    }
 }
 
 pub fn format_srt_timestamp(ms: i64) -> String {
@@ -55,6 +99,85 @@ pub fn format_srt_timestamp(ms: i64) -> String {
     let seconds = (ms % 60_000) / 1_000;
     let millis = ms % 1_000;
     format!("{hours:02}:{minutes:02}:{seconds:02},{millis:03}")
+}
+
+/// WebVTT timestamp uses `.` as the fractional separator.
+pub fn format_vtt_timestamp(ms: i64) -> String {
+    let ms = ms.max(0) as u64;
+    let hours = ms / 3_600_000;
+    let minutes = (ms % 3_600_000) / 60_000;
+    let seconds = (ms % 60_000) / 1_000;
+    let millis = ms % 1_000;
+    format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}")
+}
+
+fn sanitize_vtt_voice_name(name: &str) -> String {
+    name.trim()
+        .chars()
+        .map(|ch| if ch == '>' || ch == '<' || ch == '\n' || ch == '\r' { ' ' } else { ch })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Render WebVTT. When a cue has `speaker_id` and a label is provided, the first
+/// line is prefixed with a voice span: `<v Speaker Name>text`.
+pub fn render_vtt(
+    cues: &[SubtitleCue],
+    speaker_label: impl Fn(u32) -> Option<String>,
+    line_ending: SubtitleLineEnding,
+    global_offset_ms: i64,
+    utf8_bom: bool,
+) -> String {
+    let eol = line_ending.as_str();
+    let mut out = String::new();
+    if utf8_bom {
+        out.push('\u{feff}');
+    }
+    out.push_str("WEBVTT");
+    out.push_str(eol);
+    out.push_str(eol);
+
+    let mut cue_index = 0usize;
+    for cue in cues {
+        if cue.lines.is_empty() {
+            continue;
+        }
+        cue_index += 1;
+        let start = format_vtt_timestamp(global_offset_ms + cue.start_ms as i64);
+        let end = format_vtt_timestamp(global_offset_ms + cue.end_ms as i64);
+        out.push_str(&cue_index.to_string());
+        out.push_str(eol);
+        out.push_str(&start);
+        out.push_str(" --> ");
+        out.push_str(&end);
+        out.push_str(eol);
+
+        let voice = cue
+            .speaker_id
+            .and_then(|id| speaker_label(id))
+            .map(|label| sanitize_vtt_voice_name(&label))
+            .filter(|label| !label.is_empty());
+
+        for (line_i, line) in cue.lines.iter().enumerate() {
+            if line_i == 0 {
+                if let Some(ref name) = voice {
+                    out.push_str("<v ");
+                    out.push_str(name);
+                    out.push('>');
+                    out.push_str(line);
+                } else {
+                    out.push_str(line);
+                }
+            } else {
+                out.push_str(line);
+            }
+            out.push_str(eol);
+        }
+        out.push_str(eol);
+    }
+    out
 }
 
 /// After `.`/`?`/`!`, require at least this gap before a new cue (ms).
@@ -353,11 +476,11 @@ fn cues_from_stt_segment(
             } else {
                 seg_start + duration * best_end as u64 / total_words as u64
             };
-            cues.push(SubtitleCue {
-                start_ms: cue_start,
-                end_ms: cue_end.max(cue_start),
+            cues.push(SubtitleCue::new(
+                cue_start,
+                cue_end.max(cue_start),
                 lines,
-            });
+            ));
         }
         word_start = best_end;
     }
@@ -427,11 +550,11 @@ fn cues_from_timed_words(
         if !lines.is_empty() {
             let cue_start = slice.first().map(|w| w.start_ms).unwrap_or(0);
             let cue_end = slice.last().map(|w| w.end_ms).unwrap_or(cue_start);
-            cues.push(SubtitleCue {
-                start_ms: cue_start,
-                end_ms: cue_end.max(cue_start),
+            cues.push(SubtitleCue::new(
+                cue_start,
+                cue_end.max(cue_start),
                 lines,
-            });
+            ));
         }
         start_index = best_end;
     }
@@ -601,11 +724,11 @@ fn distribute_cues_over_time(
         };
         let cue_start = chunk_start;
         chunk_start = cue_end;
-        out.push(SubtitleCue {
-            start_ms: cue_start,
-            end_ms: cue_end.max(cue_start + options.min_cue_duration_ms),
+        out.push(SubtitleCue::new(
+            cue_start,
+            cue_end.max(cue_start + options.min_cue_duration_ms),
             lines,
-        });
+        ));
     }
 
     out
@@ -803,23 +926,42 @@ mod tests {
     }
 
     #[test]
+    fn render_vtt_header_and_dot_timestamps() {
+        let cues = vec![SubtitleCue::new(1000, 2500, vec!["Hello".to_string()])];
+        let vtt = render_vtt(&cues, |_| None, SubtitleLineEnding::Lf, 0, false);
+        assert!(vtt.starts_with("WEBVTT\n\n"));
+        assert!(vtt.contains("00:00:01.000 --> 00:00:02.500\nHello\n"));
+        assert!(!vtt.contains(','));
+    }
+
+    #[test]
+    fn render_vtt_voice_tag_for_speaker() {
+        let mut cue = SubtitleCue::new(0, 1000, vec!["Hi there".to_string()]);
+        cue.speaker_id = Some(0);
+        let vtt = render_vtt(
+            &[cue],
+            |id| Some(format!("Speaker {}", id + 1)),
+            SubtitleLineEnding::Lf,
+            0,
+            false,
+        );
+        assert!(vtt.contains("<v Speaker 1>Hi there\n"));
+    }
+
+    #[test]
     fn render_srt_numbering_and_block() {
-        let cues = vec![SubtitleCue {
-            start_ms: 0,
-            end_ms: 2340,
-            lines: vec!["Hello world".to_string()],
-        }];
+        let cues = vec![SubtitleCue::new(
+            0,
+            2340,
+            vec!["Hello world".to_string()],
+        )];
         let srt = render_srt(&cues, SubtitleLineEnding::Lf, 0, false);
         assert!(srt.starts_with("1\n00:00:00,000 --> 00:00:02,340\nHello world\n"));
     }
 
     #[test]
     fn global_offset_applied() {
-        let cues = vec![SubtitleCue {
-            start_ms: 1000,
-            end_ms: 2000,
-            lines: vec!["Hi".to_string()],
-        }];
+        let cues = vec![SubtitleCue::new(1000, 2000, vec!["Hi".to_string()])];
         let srt = render_srt(&cues, SubtitleLineEnding::Lf, 500, false);
         assert!(srt.contains("00:00:01,500 --> 00:00:02,500"));
     }

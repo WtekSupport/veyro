@@ -36,6 +36,14 @@ pub fn injection_target_hwnd() -> isize {
 }
 
 /// Whether the captured field/window still has input focus.
+///
+/// When no target is stored (`hwnd == 0`), returns `true` so callers that only
+/// gate on "already focused" (e.g. skip restore) stay no-ops. Prefer
+/// [`should_defer_for_focus`] for injection defer decisions.
+///
+/// Matching is strict: same focus control, or same top-level window when the
+/// focus HWND was not captured. Same-PID other windows do **not** count as a
+/// match (that would skip defer while the user left the original field).
 pub fn focus_target_matches() -> bool {
     #[cfg(windows)]
     {
@@ -47,13 +55,66 @@ pub fn focus_target_matches() -> bool {
         if stored_focus != 0 {
             return current_focus_hwnd() == stored_focus;
         }
-        return current_foreground_hwnd() == stored_window
-            || injection_target_already_active(stored_window);
+        current_foreground_hwnd() == stored_window
     }
     #[cfg(not(windows))]
     {
         true
     }
+}
+
+/// Whether live injection should be buffered instead of typed into the current focus.
+///
+/// Unlike [`focus_target_matches`], a missing target (`hwnd == 0`) is treated as
+/// "do not inject blindly" when abort-on-focus-loss is off.
+pub fn should_defer_for_focus(abort_on_focus_loss: bool) -> bool {
+    #[cfg(windows)]
+    {
+        should_defer_for_focus_state(
+            abort_on_focus_loss,
+            injection_target_hwnd(),
+            focus_target_matches(),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = abort_on_focus_loss;
+        false
+    }
+}
+
+/// Pure defer decision (no HWND I/O) for unit tests and Windows wiring.
+pub(crate) fn should_defer_for_focus_state(
+    abort_on_focus_loss: bool,
+    target_hwnd: isize,
+    focus_matches: bool,
+) -> bool {
+    if abort_on_focus_loss {
+        return false;
+    }
+    if target_hwnd == 0 {
+        return true;
+    }
+    !focus_matches
+}
+
+/// Keep the original injection target while abort-on-focus-loss is off and focus left the field.
+///
+/// Pure decision helper (no HWND I/O) so unit tests can cover the 1.8.48 sticky-target rule.
+pub(crate) fn should_keep_sticky_injection_target(
+    abort_on_focus_loss: bool,
+    prev_target: isize,
+    focus_matches: bool,
+) -> bool {
+    !abort_on_focus_loss && prev_target != 0 && !focus_matches
+}
+
+/// Capture only when no session target exists; otherwise restore the sticky target.
+pub fn capture_if_needed_then_restore() {
+    if injection_target_hwnd() == 0 {
+        capture_injection_target();
+    }
+    restore_injection_target();
 }
 
 #[cfg(windows)]
@@ -246,5 +307,53 @@ fn focus_hwnd(hwnd: isize) -> bool {
         }
 
         focused
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        should_defer_for_focus_state, should_keep_sticky_injection_target,
+    };
+
+    #[test]
+    fn sticky_target_kept_when_abort_off_and_unfocused() {
+        assert!(should_keep_sticky_injection_target(false, 42, false));
+    }
+
+    #[test]
+    fn sticky_target_not_kept_when_focused() {
+        assert!(!should_keep_sticky_injection_target(false, 42, true));
+    }
+
+    #[test]
+    fn sticky_target_not_kept_when_abort_on() {
+        assert!(!should_keep_sticky_injection_target(true, 42, false));
+    }
+
+    #[test]
+    fn sticky_target_not_kept_without_previous_target() {
+        assert!(!should_keep_sticky_injection_target(false, 0, false));
+    }
+
+    #[test]
+    fn defer_when_abort_off_and_no_target() {
+        assert!(should_defer_for_focus_state(false, 0, true));
+    }
+
+    #[test]
+    fn defer_when_abort_off_and_unfocused() {
+        assert!(should_defer_for_focus_state(false, 42, false));
+    }
+
+    #[test]
+    fn no_defer_when_abort_off_and_focused() {
+        assert!(!should_defer_for_focus_state(false, 42, true));
+    }
+
+    #[test]
+    fn no_defer_when_abort_on() {
+        assert!(!should_defer_for_focus_state(true, 0, false));
+        assert!(!should_defer_for_focus_state(true, 42, false));
     }
 }

@@ -54,6 +54,35 @@ fn create_local_transcriber(
     match settings.local_stt_variant().engine() {
         LocalSttEngine::Sherpa => create_sherpa_transcriber(settings, cancel),
         LocalSttEngine::Whisper => create_whisper_transcriber(settings, cancel),
+        LocalSttEngine::Sidecar => create_sidecar_transcriber(settings, cancel),
+    }
+}
+
+fn create_sidecar_transcriber(
+    settings: &AppSettings,
+    cancel: CancellationToken,
+) -> Arc<dyn TranscriptionProvider> {
+    match crate::transcription::local_sidecar::LocalSidecarProvider::new_from_settings(
+        settings, cancel,
+    ) {
+        Ok(provider) => {
+            tracing::info!(
+                "using sidecar STT at {}",
+                crate::transcription::local_stt_model_store::sidecar_bundle_path(
+                    settings,
+                    settings.local_stt_variant(),
+                )
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "(unresolved)".into())
+            );
+            Arc::new(provider)
+        }
+        Err(error) => {
+            warn!("sidecar STT unavailable: {error}");
+            Arc::new(LocalTranscriptionUnavailable {
+                reason: error.to_string(),
+            })
+        }
     }
 }
 

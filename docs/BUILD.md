@@ -150,7 +150,7 @@ Portable Vulkan SDK: положите `vulkan_sdk.exe` в `.tools/` — расп
 | `local-llm` | Локальный LLM (CPU) |
 | `local-llm-vulkan` | LLM + Vulkan GPU |
 | `local-llm-cuda` | LLM + CUDA GPU |
-| `local-sherpa-stt` | Parakeet / Qwen3-ASR (sherpa-onnx, CPU) |
+| `local-sherpa-stt` | Parakeet / Qwen3-ASR / GigaAM (sherpa-onnx, CPU) |
 | `local-sherpa-directml` | sherpa + DirectML (Windows) |
 | `local-sherpa-cuda` | sherpa + CUDA |
 
@@ -169,14 +169,15 @@ Portable Vulkan SDK: положите `vulkan_sdk.exe` в `.tools/` — расп
 | `VEYRO_DISABLE_GPU=1` | Whisper и LLM на CPU (без Vulkan/CUDA) |
 | `VEYRO_DISABLE_LOCAL_LLM=1` | Без локального LLM (нет «Оптимизация (ИИ)» offline) |
 | `VEYRO_DISABLE_LOCAL_WHISPER=1` | Без локального Whisper (только OpenAI STT) |
-| `VEYRO_DISABLE_SHERPA_STT=1` | Без sherpa-onnx (Parakeet / Qwen3); только Whisper локально |
+| `VEYRO_DISABLE_SHERPA_STT=1` | Без sherpa-onnx (Parakeet / Qwen3 / GigaAM); только Whisper локально |
 | `VEYRO_DISABLE_SEPARATION=1` | Без инструмента «Разделить вокал / минус» (`local-separation`) |
+| `VEYRO_DISABLE_DIARIZATION=1` | Без опциональной диаризации в Audio→SRT (`local-diarization` / polyvoice) |
 | `VEYRO_DISABLE_VAD_SILERO=1` | Без Silero VAD (только WebRTC в детекторе речи) |
 | `VEYRO_ALLOW_CUDA=1` | Разрешить авто-выбор CUDA вместо Vulkan (NVIDIA) |
 | `VEYRO_CMAKE_PARALLEL` | Параллелизм cmake для llama.cpp (по умолчанию `1`) |
 | `VEYRO_CARGO_TARGET_DIR` | Переопределить каталог сборки (по умолчанию `C:\veyro-target`) |
 
-Модели разделения: **Quality** / **Fast** — [musetric/vocal-separation-roformer-onnx](https://huggingface.co/musetric/vocal-separation-roformer-onnx) (`syhft_core_t1100.onnx` + `.onnx.data`, STFT на стороне Veyro, CPU); **Legacy** — [StemSplitio/htdemucs-ft-vocals-onnx](https://huggingface.co/StemSplitio/htdemucs-ft-vocals-onnx). После обновления перекачайте модели из окна инструмента (старые silverdaw `folded_fp16_webgpu` больше не используются).
+Модели разделения: **Quality** / **Fast** — [musetric/vocal-separation-roformer-onnx](https://huggingface.co/musetric/vocal-separation-roformer-onnx) (`syhft_core_t1100.onnx` + `.onnx.data`, STFT на стороне Veyro, CPU); **Legacy** — [StemSplitio/htdemucs-ft-vocals-onnx](https://huggingface.co/StemSplitio/htdemucs-ft-vocals-onnx). Расширенный режим «разбить минус на инструменты» — отдельный бандл **multi-stem** [StemSplitio/htdemucs-6s-onnx](https://huggingface.co/StemSplitio/htdemucs-6s-onnx) (`htdemucs_6s_fp16weights.onnx`); скачивается только при первом использовании, запускается вторым независимым проходом по **исходному миксу** (не по `_instrumental`). После обновления перекачайте модели из окна инструмента (старые silverdaw `folded_fp16_webgpu` больше не используются).
 
 Устаревшие (не рекомендуются): `VEYRO_WHISPER_FEATURE`, `VEYRO_LLM_FEATURE` — жёстко задают feature; используйте opt-out флаги выше.
 
@@ -231,7 +232,7 @@ npm run tauri build -- --features local-whisper-vulkan,local-llm-vulkan
 
 ### Локальная модель речи (семейство + квантизация)
 
-В настройках **Голос → Локальная модель речи** выбираются **семейство** (Whisper или Sherpa) и **квантизация** (Q4/Q5/Q8 для Whisper, INT8/FP16/FP32 для Parakeet). Характеристики (размер, RAM/VRAM, скорость) показываются под селектами.
+В настройках **Голос → Локальная модель речи** выбираются **семейство** (Whisper, Sherpa или Large SLM) и **квантизация** (Q4/Q5/Q8 для Whisper, INT8/FP16/FP32 для Parakeet, INT8 для GigaAM/Canary, Q4/Q8 для Granite). Характеристики (размер, RAM/VRAM, скорость) показываются под селектами.
 
 | Семейство | Квант | Источник |
 |-----------|-------|----------|
@@ -240,12 +241,17 @@ npm run tauri build -- --features local-whisper-vulkan,local-llm-vulkan
 | Parakeet TDT 0.6B v3 | INT8 | k2-fsa `asr-models` (официально) |
 | Parakeet TDT 0.6B v3 | FP16/FP32 | Hugging Face (Yiivgeny, third-party) |
 | Qwen3-ASR 0.6B / 1.7B | INT8 | k2-fsa `asr-models` |
+| GigaAM v3 e2e RNNT | INT8 | k2-fsa `asr-models` (punct transducer, `feature_dim=64`) |
+| GigaAM v3 e2e CTC | INT8 | k2-fsa `asr-models` (punct CTC, `feature_dim=64`) |
+| Canary-Qwen 2.5B | INT8 | sidecar NeMo SALM + Optimum Quanto (HF `nvidia/canary-qwen-2.5b`) |
+| Granite Speech 3.3 8B | Q4/Q8 | sidecar CrispASR + GGUF (`cstr/granite-speech-3.3-8b-GGUF`) |
 
 Sherpa-бандлы: `%AppData%\Veyro\models\sherpa\{family}\{int8|fp16|fp32}\`.  
+Sidecar: `%AppData%\Veyro\models\sidecar\{family}\{quant}\`.  
 Whisper-файлы: `%AppData%\Veyro\models\`.  
 Старые установки Sherpa INT8 без подпапки quant по-прежнему распознаются.
 
-Скачивание: **Download model** в том же блоке.
+Скачивание: **Download model** в том же блоке. Canary требует Python 3 + NeMo; Granite — бинарь CrispASR рядом с GGUF (или в PATH).
 
 ### LLM
 
@@ -279,7 +285,7 @@ npx tauri icon src-tauri/icons/icon.png
 | `VEYRO_DISABLE_GPU` | CPU вместо GPU |
 | `VEYRO_DISABLE_LOCAL_LLM` | Без локального LLM |
 | `VEYRO_DISABLE_LOCAL_WHISPER` | Без локального Whisper |
-| `VEYRO_DISABLE_SHERPA_STT` | Без sherpa-onnx (Parakeet / Qwen3) |
+| `VEYRO_DISABLE_SHERPA_STT` | Без sherpa-onnx (Parakeet / Qwen3 / GigaAM) |
 | `VEYRO_DISABLE_VAD_SILERO` | Без Silero VAD (WebRTC-only) |
 | `VEYRO_ALLOW_CUDA=1` | Auto-CUDA (NVIDIA) |
 | `VULKAN_SDK` | Путь к Vulkan SDK |

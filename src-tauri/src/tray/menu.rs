@@ -116,7 +116,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
                 TRAY_ID_QUIT => {
                     if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
-                        ctx.inner().cancel_pending();
+                        ctx.inner().cancel_pending(Some(app));
                         if let Ok(mut audio) = ctx.inner().audio.lock() {
                             if let Ok(vad_join) = audio.stop() {
                                 drop(audio);

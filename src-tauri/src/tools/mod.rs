@@ -1,5 +1,6 @@
 pub mod audio_to_srt;
 pub mod audio_to_srt_timing;
+pub mod dictation_transcripts;
 pub mod docx_export;
 pub mod shared;
 pub mod voice_file;
@@ -17,7 +18,8 @@ pub use voice_file::{
 
 #[cfg(feature = "local-separation")]
 pub use vocal_separator::{
-    separate_vocal_file, VocalSeparatorInvokeOptions, VocalSeparatorResult,
+    separate_vocal_file, split_instrumental_further, SplitInstrumentalResult,
+    VocalSeparatorInvokeOptions, VocalSeparatorResult,
 };
 
 #[cfg(not(feature = "local-separation"))]
@@ -26,6 +28,7 @@ mod vocal_separator_stub {
 
     #[derive(Debug, Clone, Default, Deserialize)]
     #[serde(rename_all = "camelCase")]
+    #[allow(dead_code)]
     pub struct VocalSeparatorInvokeOptions {
         #[serde(default)]
         pub profile: Option<crate::settings::VocalSeparatorProfile>,
@@ -46,7 +49,35 @@ mod vocal_separator_stub {
         #[serde(default)]
         pub warnings: Vec<String>,
     }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct InstrumentStemResult {
+        pub name: String,
+        pub path: String,
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct SplitInstrumentalResult {
+        pub file_name: String,
+        pub stems: Vec<InstrumentStemResult>,
+        #[serde(default)]
+        pub warnings: Vec<String>,
+    }
+
+    pub async fn split_instrumental_further(
+        _app: tauri::AppHandle,
+        _ctx: std::sync::Arc<crate::app::context::AppContext>,
+        _path: String,
+        _options: VocalSeparatorInvokeOptions,
+    ) -> Result<SplitInstrumentalResult, String> {
+        Err("tools.vocalSeparator.unavailable".to_string())
+    }
 }
 
 #[cfg(not(feature = "local-separation"))]
-pub use vocal_separator_stub::{VocalSeparatorInvokeOptions, VocalSeparatorResult};
+pub use vocal_separator_stub::{
+    split_instrumental_further, SplitInstrumentalResult, VocalSeparatorInvokeOptions,
+    VocalSeparatorResult,
+};

@@ -382,26 +382,42 @@ pub(crate) fn split_sentences(text: &str) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut start = 0usize;
 
-    for index in 0..chars.len() {
+    let mut index = 0usize;
+    while index < chars.len() {
         let ch = chars[index];
         if !matches!(ch, '.' | '!' | '?' | '…') {
+            index += 1;
             continue;
         }
 
         if ch == '.' && is_decimal_point(&chars, index) {
+            index += 1;
             continue;
         }
 
-        let mut end = index + 1;
+        // Treat `...` / `….` as one terminator (do not split on the first dot).
+        let mut end_punct = index + 1;
+        if ch == '.' {
+            while end_punct < chars.len() && chars[end_punct] == '.' {
+                end_punct += 1;
+            }
+        } else if ch == '…' {
+            while end_punct < chars.len() && matches!(chars[end_punct], '…' | '.') {
+                end_punct += 1;
+            }
+        }
+
+        let mut end = end_punct;
         while end < chars.len() && chars[end].is_whitespace() {
             end += 1;
         }
 
-        let sentence: String = chars[start..index + 1].iter().collect();
+        let sentence: String = chars[start..end_punct].iter().collect();
         if !sentence.trim().is_empty() {
             sentences.push(sentence.trim().to_string());
         }
         start = end;
+        index = end;
     }
 
     if start < chars.len() {
@@ -1044,6 +1060,18 @@ mod tests {
     }
 
     #[test]
+    fn basic_cleanup_capitalizes_after_period_and_softens_incomplete() {
+        let raw =
+            "Это слушай, я даже не знаю. предложить. ну короче говоря. давай съездим сегодня. город.";
+        let out = apply_basic_cleanup(raw);
+        assert!(out.contains("не знаю..."), "out: {out}");
+        assert!(out.contains("Предложить..."), "out: {out}");
+        assert!(out.contains("короче говоря..."), "out: {out}");
+        assert!(out.contains("Давай съездим сегодня."), "out: {out}");
+        assert!(out.contains("Город..."), "out: {out}");
+    }
+
+    #[test]
     fn basic_cleanup_dedupes_repeated_sentence() {
         let raw = "Видно как. Видно как. Дальше текст.";
         let out = apply_basic_cleanup(raw);
@@ -1148,6 +1176,14 @@ mod tests {
         let sentences = split_sentences("версия 3.14 стабильна. релиз завтра.");
         assert_eq!(sentences.len(), 2);
         assert!(sentences[0].contains("3.14"));
+    }
+
+    #[test]
+    fn split_sentences_keeps_ellipsis_as_single_terminator() {
+        let sentences = split_sentences("ну короче говоря... давай съездим сегодня.");
+        assert_eq!(sentences.len(), 2, "got: {sentences:?}");
+        assert!(sentences[0].ends_with("..."), "got: {sentences:?}");
+        assert!(sentences[1].starts_with("давай"), "got: {sentences:?}");
     }
 
     #[test]

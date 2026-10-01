@@ -15,6 +15,7 @@ export default defineConfig(() => ({
         skillImport: path.resolve(__dirname, "skill-import.html"),
         tools: path.resolve(__dirname, "tools.html"),
         toolVoiceFiles: path.resolve(__dirname, "tool-voice-files.html"),
+        toolDictationTranscripts: path.resolve(__dirname, "tool-dictation-transcripts.html"),
         toolAudioSrt: path.resolve(__dirname, "tool-audio-srt.html"),
         toolVocalSeparator: path.resolve(__dirname, "tool-vocal-separator.html"),
       },

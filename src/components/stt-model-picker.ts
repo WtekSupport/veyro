@@ -1,4 +1,6 @@
 import {
+  isSherpaSttFamily,
+  isSidecarSttFamily,
   isWhisperSttFamily,
   normalizeLocalSttFamily,
   type LocalSttFamily,
@@ -30,6 +32,10 @@ const FAMILY_NAME_KEYS: Record<LocalSttFamily, MessageKey> = {
   parakeet_tdt_0_6b_v3: "settings.sttFamilyParakeet",
   qwen3_asr_0_6b: "settings.sttFamilyQwen3Asr06b",
   qwen3_asr_1_7b: "settings.sttFamilyQwen3Asr17b",
+  giga_am_v3_e2e_rnnt: "settings.sttFamilyGigaAmV3E2eRnnt",
+  giga_am_v3_e2e_ctc: "settings.sttFamilyGigaAmV3E2eCtc",
+  canary_qwen_2_5b: "settings.sttFamilyCanaryQwen25b",
+  granite_speech_3_3_8b: "settings.sttFamilyGraniteSpeech338b",
 };
 
 const WHISPER_QUANT_LABEL_KEYS: Record<LocalSttQuant, MessageKey> = {
@@ -49,6 +55,9 @@ const SHERPA_BUILD_LABEL_KEYS: Partial<Record<LocalSttQuant, MessageKey>> = {
 };
 
 function variantOptionLabel(family: LocalSttFamily, quant: LocalSttQuant): MessageKey {
+  if (isSidecarSttFamily(family)) {
+    return WHISPER_QUANT_LABEL_KEYS[quant];
+  }
   if (!isWhisperSttFamily(family)) {
     return SHERPA_BUILD_LABEL_KEYS[quant] ?? "settings.sttSherpaBuildInt8";
   }
@@ -64,6 +73,10 @@ const FALLBACK_FAMILIES: LocalSttFamily[] = [
   "parakeet_tdt_0_6b_v3",
   "qwen3_asr_0_6b",
   "qwen3_asr_1_7b",
+  "giga_am_v3_e2e_rnnt",
+  "giga_am_v3_e2e_ctc",
+  "canary_qwen_2_5b",
+  "granite_speech_3_3_8b",
 ];
 
 function escapeHtml(value: string): string {
@@ -172,6 +185,9 @@ export function quantsForFamilyFromCatalog(
   if (normalized === "parakeet_tdt_0_6b_v3") {
     return ["int8", "fp16", "fp32"];
   }
+  if (normalized === "granite_speech_3_3_8b") {
+    return ["q4_0", "q8_0"];
+  }
   return ["int8"];
 }
 
@@ -275,10 +291,11 @@ export function renderSttModelPicker(
       ? families.map((item) => normalizeLocalSttFamily(item.family))
       : FALLBACK_FAMILIES;
   const whisperFamilies = catalogFamilies.filter((f) => isWhisperSttFamily(f));
-  const sherpaFamilies = catalogFamilies.filter((f) => !isWhisperSttFamily(f));
+  const sherpaFamilies = catalogFamilies.filter((f) => isSherpaSttFamily(f));
+  const sidecarFamilies = catalogFamilies.filter((f) => isSidecarSttFamily(f));
   const quants = quantsForFamilyFromCatalog(families, normalizedFamily);
   const effectiveQuant = quants.includes(quant) ? quant : (quants[0] ?? "legacy");
-  const isSherpaFamily = !isWhisperSttFamily(normalizedFamily);
+  const isSherpaFamily = isSherpaSttFamily(normalizedFamily);
   const showQuant = quants.length > 1;
   const variantFieldLabel = isSherpaFamily
     ? t("settings.sttModelSherpaBuild")
@@ -320,6 +337,11 @@ export function renderSttModelPicker(
             ${
               sherpaFamilies.length > 0
                 ? `<optgroup label="${escapeHtml(t("settings.sttGroupSherpa"))}">${familyOptions(sherpaFamilies)}</optgroup>`
+                : ""
+            }
+            ${
+              sidecarFamilies.length > 0
+                ? `<optgroup label="${escapeHtml(t("settings.sttGroupSidecar"))}">${familyOptions(sidecarFamilies)}</optgroup>`
                 : ""
             }
           </select>

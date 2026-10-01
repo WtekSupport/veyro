@@ -67,10 +67,46 @@ const KEY_TECHNOLOGIES = [
     url: "https://github.com/k2-fsa/sherpa-onnx",
   },
   {
+    name: "GigaAM",
+    copyright: "Copyright © SberDevices / GigaAM contributors",
+    license: "MIT",
+    url: "https://github.com/salute-developers/GigaAM",
+  },
+  {
+    name: "NVIDIA Canary-Qwen",
+    copyright: "Copyright © NVIDIA Corporation",
+    license: "CC-BY-4.0",
+    url: "https://huggingface.co/nvidia/canary-qwen-2.5b",
+  },
+  {
+    name: "IBM Granite Speech",
+    copyright: "Copyright © IBM Corporation",
+    license: "Apache-2.0",
+    url: "https://huggingface.co/ibm-granite/granite-speech-3.3-8b",
+  },
+  {
+    name: "CrispASR",
+    copyright: "Copyright © CrispStrobe / CrispASR contributors",
+    license: "See project repository",
+    url: "https://github.com/CrispStrobe/CrispASR",
+  },
+  {
     name: "ONNX Runtime",
     copyright: "Copyright © Microsoft Corporation and ONNX Runtime contributors",
     license: "MIT",
     url: "https://github.com/microsoft/onnxruntime",
+  },
+  {
+    name: "HT-Demucs (htdemucs / htdemucs_6s)",
+    copyright: "Copyright © Meta Platforms, Inc. and Demucs contributors",
+    license: "MIT",
+    url: "https://github.com/facebookresearch/demucs",
+  },
+  {
+    name: "StemSplitio HT-Demucs ONNX exports",
+    copyright: "Copyright © StemSplit / demucs-onnx contributors",
+    license: "See model cards (htdemucs-ft-vocals-onnx, htdemucs-6s-onnx)",
+    url: "https://huggingface.co/StemSplitio",
   },
   {
     name: "Silero VAD",

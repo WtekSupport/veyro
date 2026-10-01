@@ -121,28 +121,66 @@ impl AppContext {
             .is_some_and(|c| c.status().state == AppState::Listening)
     }
 
+    /// Abort-off + existing sticky field: keep the same dictation session across VAD Ready
+    /// gaps while focus is away (preserves whisper prompt context, injection_count, buffer).
+    fn should_continue_session_across_focus_loss(&self) -> bool {
+        crate::injection::focus_defer_buffer::should_continue_session_across_focus_loss_state(
+            !self.defer_injection_without_abort(),
+            self.dictation_session.current_id(),
+            crate::injection::focus_target::injection_target_hwnd(),
+            crate::injection::focus_target::focus_target_matches(),
+            self.focus_defer_buffer.has_pending(),
+            self.runtime.pending_count(),
+        )
+    }
+
     fn capture_injection_target_and_sync_buffer(&self) {
         let prev_target = crate::injection::focus_target::injection_target_hwnd();
         #[cfg(windows)]
-        if self.defer_injection_without_abort()
-            && prev_target != 0
-            && !crate::injection::focus_target::focus_target_matches()
-            && self.should_retain_stale_injection_target()
         {
-            return;
+            let abort_on_loss = self
+                .controller
+                .try_lock()
+                .ok()
+                .is_some_and(|c| c.settings().abort_on_focus_loss);
+            let focus_matches = crate::injection::focus_target::focus_target_matches();
+            // Sticky HWND is only for in-flight work (listening / pending / defer).
+            // After idle Ready, always re-capture so a newly focused field wins.
+            if crate::injection::focus_target::should_keep_sticky_injection_target(
+                abort_on_loss,
+                prev_target,
+                focus_matches,
+            ) && self.should_retain_stale_injection_target()
+            {
+                return;
+            }
         }
         crate::injection::focus_target::capture_injection_target();
         let next_target = crate::injection::focus_target::injection_target_hwnd();
         if prev_target != 0 && next_target != 0 && prev_target != next_target {
-            self.focus_defer_buffer.clear();
+            let abort_on_loss = self
+                .controller
+                .try_lock()
+                .ok()
+                .is_some_and(|c| c.settings().abort_on_focus_loss);
+            let session_in_flight = self.should_retain_stale_injection_target();
+            if crate::injection::focus_defer_buffer::should_clear_buffer_on_retarget(
+                abort_on_loss,
+                session_in_flight,
+            ) {
+                self.focus_defer_buffer.clear();
+            }
         }
     }
 
     /// Starts a new dictation session (PTT press or idle→listening VAD).
     pub fn begin_dictation_session(&self, app: &AppHandle) -> u64 {
         let session_id = self.dictation_session.begin_session();
+        // New session must not inherit a previous field HWND/focus.
+        crate::injection::focus_target::clear_injection_target();
         self.capture_injection_target_and_sync_buffer();
         self.maybe_start_focus_watch(app, session_id);
+        crate::tools::dictation_transcripts::ensure_active(Some(app), session_id);
         session_id
     }
 
@@ -182,26 +220,16 @@ impl AppContext {
     }
 
     pub fn should_defer_injection(&self) -> bool {
-        #[cfg(windows)]
-        {
-            let abort_on_loss = self
-                .controller
-                .try_lock()
-                .ok()
-                .is_some_and(|c| c.settings().abort_on_focus_loss);
-            if abort_on_loss {
-                return false;
-            }
-            !crate::injection::focus_target::focus_target_matches()
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = self;
-            false
-        }
+        let abort_on_loss = self
+            .controller
+            .try_lock()
+            .ok()
+            .is_some_and(|c| c.settings().abort_on_focus_loss);
+        crate::injection::focus_target::should_defer_for_focus(abort_on_loss)
     }
 
     pub fn on_focus_lost_defer(&self, app: &AppHandle) {
+        // Abort-off: only log. Keep target + focus watch so later segments buffer and flush on regain.
         self.record_activity(
             Some(app),
             ActivityLevel::Info,
@@ -210,10 +238,6 @@ impl AppContext {
                 "focus_hwnd": crate::injection::focus_target::injection_focus_hwnd(),
             }),
         );
-        if !self.should_retain_stale_injection_target() {
-            crate::injection::focus_target::clear_injection_target();
-            crate::injection::focus_watch::stop_focus_watch();
-        }
     }
 
     pub fn schedule_flush_defer_buffer(&self, app: &AppHandle) {
@@ -229,34 +253,58 @@ impl AppContext {
         });
     }
 
-    pub fn append_deferred_injection(&self, normalized: String, press_enter: bool, defer_ai: bool) {
+    pub fn append_deferred_injection(
+        &self,
+        app: &AppHandle,
+        normalized: String,
+        press_enter: bool,
+        defer_ai: bool,
+    ) {
         self.focus_defer_buffer
             .push_prepared(normalized.clone(), press_enter);
         if defer_ai {
             self.ptt_postprocess
                 .record_phase1_injection(&normalized, press_enter);
         }
+        let session_id = self.dictation_session.current_id();
+        crate::tools::dictation_transcripts::append_text(Some(app), session_id, &normalized);
     }
 
-    pub fn maybe_stop_focus_watch(&self) {
+    /// Whether the dictation-buffers UI should still show a live ("Сейчас") row.
+    /// AI rewrite after inject must not keep a session marked active.
+    fn dictation_transcript_still_live(&self) -> bool {
         if self.focus_defer_buffer.has_pending() {
-            return;
+            return true;
         }
         if self.runtime.pending_count() > 0 {
-            return;
+            return true;
         }
-        if self.ptt_postprocess.has_injected_text() {
-            return;
-        }
-        let listening = self
-            .controller
+        self.controller
             .try_lock()
             .ok()
-            .is_some_and(|c| c.status().state == AppState::Listening);
-        if listening {
-            return;
+            .is_some_and(|c| c.status().state == AppState::Listening)
+    }
+
+    /// Close stale "active" transcript rows when dictation is idle (or keep only the live id).
+    pub fn reconcile_dictation_transcripts(&self, app: &AppHandle) {
+        if self.dictation_transcript_still_live() {
+            crate::tools::dictation_transcripts::mark_done_except(
+                Some(app),
+                self.dictation_session.current_id(),
+            );
+        } else {
+            crate::tools::dictation_transcripts::mark_all_active_done(Some(app));
         }
-        crate::injection::focus_watch::stop_focus_watch();
+    }
+
+    pub fn maybe_stop_focus_watch(&self, app: &AppHandle) {
+        if !self.should_retain_stale_injection_target() {
+            // Idle: always drop sticky field binding. Keeping it after Ready (even while
+            // focus already moved) made the next utterance restore/defer into the old field.
+            crate::injection::focus_watch::stop_focus_watch();
+            crate::injection::focus_target::clear_injection_target();
+        }
+        self.reconcile_dictation_transcripts(app);
     }
 
     pub fn abort_dictation_on_focus_loss(&self, app: &AppHandle) {
@@ -272,7 +320,7 @@ impl AppContext {
             return;
         };
 
-        self.cancel_pending();
+        self.cancel_pending(Some(app));
 
         if let Ok(mut audio) = self.audio.lock() {
             audio.drain_pending_segments();
@@ -302,6 +350,7 @@ impl AppContext {
         );
 
         crate::injection::focus_watch::stop_focus_watch();
+        crate::injection::focus_target::clear_injection_target();
         crate::tray::menu::refresh_tray_menu(app);
     }
 
@@ -575,7 +624,19 @@ impl AppContext {
             if stream_live || ptt_streaming {
                 let pending = ctx.runtime.pending_count();
                 if was_ready && pending == 0 && !ptt_streaming {
-                    ctx.begin_dictation_session(&app_handle);
+                    if ctx.should_continue_session_across_focus_loss() {
+                        // Do not begin_session(): that would wipe STT/prompt context and
+                        // injection_count while the user is still away from the field.
+                        let session_id = ctx.dictation_session.current_id();
+                        ctx.capture_injection_target_and_sync_buffer();
+                        ctx.maybe_start_focus_watch(&app_handle, session_id);
+                        crate::tools::dictation_transcripts::ensure_active(
+                            Some(&app_handle),
+                            session_id,
+                        );
+                    } else {
+                        ctx.begin_dictation_session(&app_handle);
+                    }
                 } else {
                     ctx.capture_injection_target_and_sync_buffer();
                     let session_id = ctx.dictation_session.current_id();
@@ -702,7 +763,7 @@ impl AppContext {
         );
     }
 
-    pub fn cancel_pending(&self) {
+    pub fn cancel_pending(&self, app: Option<&AppHandle>) {
         self.runtime.cancel_pending();
         if let Ok(controller) = self.controller.try_lock() {
             self.runtime.clear_spill_queue(controller.settings());
@@ -713,6 +774,9 @@ impl AppContext {
         if let Ok(audio) = self.audio.lock() {
             audio.set_ptt_vad_segments_on_silence(false);
         }
+        crate::injection::focus_watch::stop_focus_watch();
+        crate::injection::focus_target::clear_injection_target();
+        crate::tools::dictation_transcripts::mark_all_active_done(app);
     }
 }
 

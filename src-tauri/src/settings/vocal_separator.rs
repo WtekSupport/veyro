@@ -7,6 +7,9 @@ pub enum VocalSeparatorProfile {
     Quality,
     Fast,
     Legacy,
+    /// Separate downloadable `htdemucs_6s` bundle for instrument split (not a base profile).
+    #[serde(rename = "multi-stem")]
+    MultiStem,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -24,7 +27,12 @@ impl VocalSeparatorProfile {
             Self::Quality => "quality",
             Self::Fast => "fast",
             Self::Legacy => "legacy",
+            Self::MultiStem => "multi-stem",
         }
+    }
+
+    pub fn is_base_profile(self) -> bool {
+        matches!(self, Self::Quality | Self::Fast | Self::Legacy)
     }
 }
 
@@ -35,6 +43,7 @@ impl From<VocalSeparatorProfile> for veyro_separation::SeparationProfile {
             VocalSeparatorProfile::Quality => Self::Quality,
             VocalSeparatorProfile::Fast => Self::Fast,
             VocalSeparatorProfile::Legacy => Self::Legacy,
+            VocalSeparatorProfile::MultiStem => Self::MultiStem,
         }
     }
 }

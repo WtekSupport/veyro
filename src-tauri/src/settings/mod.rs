@@ -24,7 +24,7 @@ pub use local_stt::{
 pub use stt_catalog::{
     migrate_from_legacy_stt_model, normalize_variant, parse_variant_id, quants_for_family,
     variant_spec, whisper_download_url_for, LocalSttFamily, LocalSttQuant, LocalSttVariant,
-    SherpaOnnxLayout, SttVariantSpec,
+    SherpaOnnxLayout, SidecarRuntime, SttVariantSpec,
 };
 pub use homemaker::{apply_homemaker_patch_side_effects, normalize_homemaker_settings};
 pub use secrets::{clear_api_key, has_api_key, load_api_key, save_api_key};

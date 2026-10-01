@@ -11,7 +11,8 @@ use tracing::info;
 use crate::error::ConfigError;
 use crate::settings::{
     quants_for_family, variant_spec, whisper_download_url_for, AppSettings, LocalSttEngine,
-    LocalSttFamily, LocalSttQuant, LocalSttVariant, SherpaOnnxLayout, SttVariantSpec,
+    LocalSttFamily, LocalSttQuant, LocalSttVariant, SherpaOnnxLayout, SidecarRuntime,
+    SttVariantSpec,
 };
 use crate::transcription::model_store::{download_client, DownloadProgress, resolve_models_dir};
 
@@ -58,7 +59,10 @@ pub fn quant_dir_name(quant: LocalSttQuant) -> &'static str {
         LocalSttQuant::Int8 => "int8",
         LocalSttQuant::Fp16 => "fp16",
         LocalSttQuant::Fp32 => "fp32",
-        _ => "default",
+        LocalSttQuant::Q4_0 => "q4_0",
+        LocalSttQuant::Q5 => "q5",
+        LocalSttQuant::Q8_0 => "q8_0",
+        LocalSttQuant::Legacy => "default",
     }
 }
 
@@ -102,7 +106,42 @@ pub fn resolve_variant_path(
     if variant.family.is_whisper() {
         return whisper_model_path(settings, variant);
     }
+    if variant.family.is_sidecar() {
+        return sidecar_bundle_path(settings, variant);
+    }
     sherpa_bundle_path(settings, variant)
+}
+
+pub fn sidecar_bundle_path(
+    settings: &AppSettings,
+    variant: LocalSttVariant,
+) -> Result<PathBuf, ConfigError> {
+    let key = variant
+        .family
+        .sidecar_bundle_key()
+        .ok_or_else(|| ConfigError::Read("not a sidecar family".to_string()))?;
+    Ok(resolve_models_dir(settings)?
+        .join("sidecar")
+        .join(key)
+        .join(quant_dir_name(variant.quant)))
+}
+
+pub fn required_sidecar_files(variant: LocalSttVariant) -> Vec<&'static str> {
+    let spec = variant_spec(variant);
+    match spec.sidecar_runtime {
+        Some(SidecarRuntime::GraniteCrispAsr) => {
+            if let Some(file) = spec.sidecar_model_file {
+                vec![file]
+            } else {
+                vec![]
+            }
+        }
+        Some(SidecarRuntime::CanaryNemo) => {
+            // Marker written after download/bootstrap; HF weights pulled by Python sidecar.
+            vec!["ready.marker"]
+        }
+        None => vec![],
+    }
 }
 
 pub fn bundle_ready(path: &Path, variant: LocalSttVariant) -> bool {
@@ -115,6 +154,12 @@ pub fn bundle_ready(path: &Path, variant: LocalSttVariant) -> bool {
             return true;
         }
         return path.is_file();
+    }
+
+    if variant.family.is_sidecar() {
+        return required_sidecar_files(variant)
+            .iter()
+            .all(|relative| path.join(relative).exists());
     }
 
     if required_sherpa_files(variant)
@@ -173,6 +218,13 @@ pub fn required_sherpa_files(variant: LocalSttVariant) -> Vec<&'static str> {
             "joiner.int8.onnx",
             "tokens.txt",
         ],
+        Some(SherpaOnnxLayout::GigaAmTransducerInt8) => vec![
+            "encoder.int8.onnx",
+            "decoder.onnx",
+            "joiner.onnx",
+            "tokens.txt",
+        ],
+        Some(SherpaOnnxLayout::NemoCtcInt8) => vec!["model.int8.onnx", "tokens.txt"],
         Some(SherpaOnnxLayout::Qwen3Int8) => vec![
             "conv_frontend.onnx",
             "encoder.int8.onnx",
@@ -295,6 +347,10 @@ where
         return download_whisper_variant(http, settings, variant, spec, on_progress).await;
     }
 
+    if variant.family.is_sidecar() {
+        return download_sidecar_variant(http, settings, variant, spec, on_progress).await;
+    }
+
     download_sherpa_variant(http, settings, variant, spec, on_progress).await
 }
 
@@ -404,6 +460,100 @@ where
     if !bundle_ready(&bundle_dir, variant) {
         return Err(format!(
             "extracted bundle incomplete at {}",
+            bundle_dir.display()
+        ));
+    }
+    Ok(bundle_dir)
+}
+
+async fn download_sidecar_variant<F>(
+    http: &Client,
+    settings: &AppSettings,
+    variant: LocalSttVariant,
+    spec: SttVariantSpec,
+    mut on_progress: F,
+) -> Result<PathBuf, String>
+where
+    F: FnMut(DownloadProgress),
+{
+    let bundle_dir = sidecar_bundle_path(settings, variant).map_err(|e| e.to_string())?;
+    if bundle_ready(&bundle_dir, variant) {
+        return Ok(bundle_dir);
+    }
+    fs::create_dir_all(&bundle_dir).map_err(|e| e.to_string())?;
+
+    match spec.sidecar_runtime {
+        Some(SidecarRuntime::CanaryNemo) => {
+            // Bootstrap marker; NeMo sidecar downloads HF weights on first load.
+            let marker = bundle_dir.join("ready.marker");
+            info!("bootstrapping Canary-Qwen sidecar bundle at {}", bundle_dir.display());
+            if let Some(url) = spec.sidecar_model_url {
+                // Best-effort reachability probe for download UI progress.
+                match http.get(url).send().await {
+                    Ok(_) => on_progress(DownloadProgress::new(1, Some(1))),
+                    Err(error) => {
+                        tracing::warn!("Canary HF probe failed ({error}); continuing bootstrap");
+                        on_progress(DownloadProgress::new(1, Some(1)));
+                    }
+                }
+            } else {
+                on_progress(DownloadProgress::new(1, Some(1)));
+            }
+            fs::write(
+                &marker,
+                format!(
+                    "canary-qwen-2.5b\nmodel=nvidia/canary-qwen-2.5b\nquant=int8\nbundle={}\n",
+                    bundle_dir.display()
+                ),
+            )
+            .map_err(|e| e.to_string())?;
+            // Copy bundled Python worker next to the marker if present in resources.
+            if let Err(error) = crate::transcription::local_sidecar::ensure_canary_worker(&bundle_dir)
+            {
+                tracing::warn!("canary worker bootstrap: {error}");
+            }
+        }
+        Some(SidecarRuntime::GraniteCrispAsr) => {
+            let file_name = spec
+                .sidecar_model_file
+                .ok_or_else(|| "missing granite model file".to_string())?;
+            let url = spec
+                .sidecar_model_url
+                .ok_or_else(|| "missing granite model URL".to_string())?;
+            let dest = bundle_dir.join(file_name);
+            if !dest.is_file() {
+                info!("downloading Granite GGUF from {url}");
+                let response = http
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .error_for_status()
+                    .map_err(|e| e.to_string())?;
+                let total = response.content_length();
+                let mut downloaded = 0_u64;
+                let mut stream = response.bytes_stream();
+                let mut file = fs::File::create(&dest).map_err(|e| e.to_string())?;
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(|e| e.to_string())?;
+                    use std::io::Write;
+                    file.write_all(&chunk).map_err(|e| e.to_string())?;
+                    downloaded += chunk.len() as u64;
+                    on_progress(DownloadProgress::new(downloaded, total));
+                }
+            }
+            if let Err(error) =
+                crate::transcription::local_sidecar::ensure_crispasr_binary(&bundle_dir, http).await
+            {
+                tracing::warn!("crispasr bootstrap: {error}");
+            }
+        }
+        None => return Err("not a sidecar variant".to_string()),
+    }
+
+    if !bundle_ready(&bundle_dir, variant) {
+        return Err(format!(
+            "sidecar bundle incomplete at {}",
             bundle_dir.display()
         ));
     }

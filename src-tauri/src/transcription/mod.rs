@@ -3,6 +3,7 @@ pub mod factory;
 pub mod local;
 #[cfg(feature = "local-sherpa-stt")]
 pub mod local_sherpa;
+pub mod local_sidecar;
 pub mod local_stt_model_store;
 pub mod language;
 #[cfg(feature = "local-whisper")]

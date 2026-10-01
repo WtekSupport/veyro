@@ -242,7 +242,7 @@ fn enhance_long(
 fn enhance_block(loaded: &mut LoadedEngine, text: &str, lang: &str) -> Result<String, String> {
     use tch::{IValue, Kind, Tensor};
 
-    let processed = process_unicode(text, &loaded.uni_symbols);
+    let processed = process_unicode(&text.to_lowercase(), &loaded.uni_symbols);
     let ids_value = loaded
         .tokenizer
         .method_is("convert_string_to_ids", &[IValue::String(processed)])
@@ -320,21 +320,44 @@ fn enhance_block(loaded: &mut LoadedEngine, text: &str, lang: &str) -> Result<St
         (6, '_'),
     ];
     let pieces = enhance_tokens(inner_tokens, inner_punct, inner_capital, &index2punct);
-    let joined = loaded
+    let joined = convert_tokens_to_string(loaded, pieces)?;
+    // '&' is Silero's OOV placeholder — never leave it in spoken output.
+    Ok(string_from_ivalue(joined)?.replace('&', ""))
+}
+
+#[cfg(feature = "silero-te")]
+fn convert_tokens_to_string(
+    loaded: &LoadedEngine,
+    pieces: Vec<String>,
+) -> Result<tch::IValue, String> {
+    use tch::IValue;
+
+    // TorchScript: convert_tokens_to_string(self, str[] tokens) -> str
+    // tch maps str[] → IValue::StringList; GenericList[String] is List[Any] and fails.
+    match loaded
         .tokenizer
-        .method_is(
-            "convert_tokens_to_string",
-            &[IValue::GenericList(
-                pieces.into_iter().map(IValue::String).collect(),
-            )],
-        )
-        .map_err(|error| error.to_string())?;
-    string_from_ivalue(joined)
+        .method_is("convert_tokens_to_string", &[IValue::StringList(pieces.clone())])
+    {
+        Ok(value) => return Ok(value),
+        Err(string_list_err) => {
+            match loaded.tokenizer.method_is(
+                "convert_tokens_to_string",
+                &[IValue::GenericList(
+                    pieces.into_iter().map(IValue::String).collect(),
+                )],
+            ) {
+                Ok(value) => Ok(value),
+                Err(generic_err) => Err(format!(
+                    "convert_tokens_to_string failed: StringList: {string_list_err} | GenericList: {generic_err}"
+                )),
+            }
+        }
+    }
 }
 
 #[cfg(feature = "silero-te")]
 fn convert_ids_to_tokens(loaded: &LoadedEngine, ids: &tch::Tensor) -> Result<Vec<String>, String> {
-    use tch::IValue;
+    use tch::{IValue, Kind, Tensor};
 
     let batched = batch_token_ids(ids.shallow_clone());
     let flat: Vec<i64> = batched
@@ -342,25 +365,78 @@ fn convert_ids_to_tokens(loaded: &LoadedEngine, ids: &tch::Tensor) -> Result<Vec
         .try_into()
         .map_err(|_| "failed to flatten token ids".to_string())?;
 
-    let mut last_error = String::new();
-    let candidates: [Result<IValue, tch::TchError>; 3] = [
-        loaded.tokenizer.method_is(
-            "convert_ids_to_tokens",
-            &[IValue::GenericList(vec![IValue::Tensor(batched.shallow_clone())])],
+    let seq_1d = Tensor::from_slice(&flat).to_kind(Kind::Int64);
+    // TorchScript schema: convert_ids_to_tokens(self, Tensor[] ids) -> str[]
+    // tch maps Tensor[] to IValue::TensorList (not IntList / GenericList).
+    let scalar_tensors: Vec<Tensor> = flat
+        .iter()
+        .copied()
+        .map(|id| {
+            Tensor::from_slice(&[id])
+                .to_kind(Kind::Int64)
+                .squeeze_dim(0)
+        })
+        .collect();
+
+    let attempts: [(&str, Result<IValue, tch::TchError>); 6] = [
+        (
+            "TensorList[scalars]",
+            loaded.tokenizer.method_is(
+                "convert_ids_to_tokens",
+                &[IValue::TensorList(
+                    scalar_tensors
+                        .iter()
+                        .map(|t| t.shallow_clone())
+                        .collect(),
+                )],
+            ),
         ),
-        loaded.tokenizer.method_is("convert_ids_to_tokens", &[IValue::Tensor(batched)]),
-        loaded.tokenizer.method_is("convert_ids_to_tokens", &[IValue::IntList(flat)]),
+        (
+            "TensorList[1d]",
+            loaded.tokenizer.method_is(
+                "convert_ids_to_tokens",
+                &[IValue::TensorList(vec![seq_1d.shallow_clone()])],
+            ),
+        ),
+        (
+            "TensorList[batched]",
+            loaded.tokenizer.method_is(
+                "convert_ids_to_tokens",
+                &[IValue::TensorList(vec![batched.shallow_clone()])],
+            ),
+        ),
+        (
+            "GenericList[Tensor1d]",
+            loaded.tokenizer.method_is(
+                "convert_ids_to_tokens",
+                &[IValue::GenericList(vec![IValue::Tensor(seq_1d.shallow_clone())])],
+            ),
+        ),
+        (
+            "Tensor1d",
+            loaded
+                .tokenizer
+                .method_is("convert_ids_to_tokens", &[IValue::Tensor(seq_1d)]),
+        ),
+        (
+            "IntList",
+            loaded
+                .tokenizer
+                .method_is("convert_ids_to_tokens", &[IValue::IntList(flat)]),
+        ),
     ];
 
-    for attempt in candidates {
+    let mut errors = Vec::new();
+    for (label, attempt) in attempts {
         match attempt {
             Ok(value) => return tokens_from_ivalue(value),
-            Err(error) => last_error = error.to_string(),
+            Err(error) => errors.push(format!("{label}: {error}")),
         }
     }
 
     Err(format!(
-        "convert_ids_to_tokens failed for all argument forms: {last_error}"
+        "convert_ids_to_tokens failed for all argument forms: {}",
+        errors.join(" | ")
     ))
 }
 

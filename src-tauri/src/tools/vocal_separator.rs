@@ -19,8 +19,8 @@ use crate::separation::model_store::{self, bundle_ready_for_settings};
 use crate::settings::vocal_separator::{VocalSeparatorOutputFormat, VocalSeparatorProfile};
 use crate::settings::AppSettings;
 use veyro_separation::{
-    load_model, separate, AudioBuffer, SeparationError, SeparationOptions, SeparationProfile,
-    SeparationWarning,
+    load_model, separate, separate_multi_stem, AudioBuffer, SeparationError, SeparationOptions,
+    SeparationProfile, SeparationWarning,
 };
 
 use super::shared::{
@@ -51,8 +51,24 @@ pub struct VocalSeparatorResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstrumentStemResult {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitInstrumentalResult {
+    pub file_name: String,
+    pub stems: Vec<InstrumentStemResult>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub warnings: Vec<String>,
+}
+
 fn emit_phase(app: &AppHandle, path: &str, phase: VocalSeparatorProgressPhase) {
-    emit_progress(app, path, phase, None, None, None);
+    emit_progress(app, path, phase, None, None, None, Vec::new());
 }
 
 fn emit_progress(
@@ -62,6 +78,7 @@ fn emit_progress(
     percent: Option<u8>,
     vocals_path: Option<String>,
     instrumental_path: Option<String>,
+    instrument_stems: Vec<crate::app::events::VocalSeparatorInstrumentStem>,
 ) {
     emit_vocal_separator_progress(
         app,
@@ -71,6 +88,7 @@ fn emit_progress(
             percent,
             vocals_path,
             instrumental_path,
+            instrument_stems,
         },
     );
 }
@@ -148,6 +166,9 @@ fn run_separation(
     normalize: bool,
     progress: Arc<dyn Fn(u8) + Send + Sync>,
 ) -> Result<(AudioSegment, AudioSegment, Vec<SeparationWarning>), String> {
+    if !profile.is_base_profile() {
+        return Err("tools.vocalSeparator.modelIncompatible".to_string());
+    }
     if !bundle_ready_for_settings(settings, profile) {
         return Err("tools.vocalSeparator.modelMissing".to_string());
     }
@@ -301,6 +322,7 @@ pub async fn separate_vocal_file(
                     Some(percent),
                     None,
                     None,
+                    Vec::new(),
                 );
             }
         }));
@@ -326,6 +348,7 @@ pub async fn separate_vocal_file(
                     Some(percent),
                     None,
                     None,
+                    Vec::new(),
                 );
             }
         }));
@@ -345,6 +368,7 @@ pub async fn separate_vocal_file(
             Some(100),
             None,
             None,
+            Vec::new(),
         );
         let output_dir = resolve_output_dir(
             &settings_for_work,
@@ -378,6 +402,7 @@ pub async fn separate_vocal_file(
             Some(100),
             Some(vocals_path_str.clone()),
             Some(instrumental_path_str.clone()),
+            Vec::new(),
         );
 
         Ok::<VocalSeparatorResult, String>(VocalSeparatorResult {
@@ -388,6 +413,185 @@ pub async fn separate_vocal_file(
                 .to_string(),
             vocals_path: vocals_path_str,
             instrumental_path: instrumental_path_str,
+            warnings: warnings
+                .into_iter()
+                .map(|warning| warning_key(warning).to_string())
+                .collect(),
+        })
+    })
+    .await
+    .map_err(|error| format!("tools.vocalSeparator.separationFailed|{error}"))?;
+
+    result
+}
+
+/// Second independent inference on the **original mix** (not the instrumental file).
+/// Keeps base `_instrumental` untouched; discards `htdemucs_6s` vocals stem.
+pub async fn split_instrumental_further(
+    app: AppHandle,
+    ctx: Arc<AppContext>,
+    path: String,
+    options: VocalSeparatorInvokeOptions,
+) -> Result<SplitInstrumentalResult, String> {
+    let _guard = ToolsTranscriptionGuard::try_begin(&ctx)?;
+
+    let (path_key, path_buf, file_name) = validate_tool_file_path(&path, "tools.vocalSeparator")?;
+
+    let settings = ctx
+        .controller
+        .lock()
+        .map_err(|_| "application controller lock poisoned".to_string())?
+        .settings()
+        .clone();
+
+    let output_format = options
+        .output_format
+        .unwrap_or(settings.vocal_separator_output_format);
+    let normalize = options
+        .normalize
+        .unwrap_or(settings.vocal_separator_normalize);
+    let output_dir_override = options.output_dir.clone();
+
+    if !bundle_ready_for_settings(&settings, VocalSeparatorProfile::MultiStem) {
+        return Err("tools.vocalSeparator.multiStemModelMissing".to_string());
+    }
+
+    let app_for_progress = app.clone();
+    let path_key_for_progress = path_key.clone();
+    let path_buf_for_work = path_buf.clone();
+    let settings_for_work = settings.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        emit_phase(
+            &app_for_progress,
+            &path_key_for_progress,
+            VocalSeparatorProgressPhase::Decoding,
+        );
+        let decode_progress = throttled_percent_callback(Arc::new({
+            let app = app_for_progress.clone();
+            let path_key = path_key_for_progress.clone();
+            move |percent: u8| {
+                emit_progress(
+                    &app,
+                    &path_key,
+                    VocalSeparatorProgressPhase::Decoding,
+                    Some(percent),
+                    None,
+                    None,
+                    Vec::new(),
+                );
+            }
+        }));
+        let (segment, _source_rate) = decode_for_separation(
+            &path_buf_for_work,
+            Some(decode_progress),
+            "tools.vocalSeparator",
+        )?;
+
+        emit_phase(
+            &app_for_progress,
+            &path_key_for_progress,
+            VocalSeparatorProgressPhase::SplittingInstruments,
+        );
+        let separate_progress = throttled_percent_callback(Arc::new({
+            let app = app_for_progress.clone();
+            let path_key = path_key_for_progress.clone();
+            move |percent: u8| {
+                emit_progress(
+                    &app,
+                    &path_key,
+                    VocalSeparatorProgressPhase::SplittingInstruments,
+                    Some(percent),
+                    None,
+                    None,
+                    Vec::new(),
+                );
+            }
+        }));
+
+        let input = AudioBuffer::new(segment.samples, segment.sample_rate, segment.channels);
+        let model_path = model_store::model_path(&settings_for_work, VocalSeparatorProfile::MultiStem)
+            .map_err(|e| e.to_string())?;
+        let model = load_model(&model_path, SeparationProfile::MultiStem).map_err(|error| {
+            match error {
+                SeparationError::IncompatibleModel => {
+                    "tools.vocalSeparator.modelIncompatible".to_string()
+                }
+                other => format!("tools.vocalSeparator.modelLoadFailed|{other}"),
+            }
+        })?;
+        let sep_options = SeparationOptions {
+            profile: SeparationProfile::MultiStem,
+            normalize_output: false,
+            execution_provider: separation_execution_provider(&settings_for_work),
+        };
+        let (multi, warnings) =
+            separate_multi_stem(&input, &model, &sep_options, separate_progress).map_err(
+                |error| match error {
+                    SeparationError::IncompatibleModel => {
+                        "tools.vocalSeparator.modelIncompatible".to_string()
+                    }
+                    other => format!("tools.vocalSeparator.separationFailed|{other}"),
+                },
+            )?;
+
+        let output_dir = resolve_output_dir(
+            &settings_for_work,
+            &path_buf_for_work,
+            output_dir_override.as_deref(),
+        )?;
+        let stem = path_buf_for_work
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("output");
+        let ext = output_extension(&path_buf_for_work, output_format);
+        let encode_format = match output_format {
+            VocalSeparatorOutputFormat::MatchSource if ext == "flac" => {
+                VocalSeparatorOutputFormat::Flac
+            }
+            _ => VocalSeparatorOutputFormat::Wav,
+        };
+
+        let mut stem_results = Vec::with_capacity(multi.stems.len());
+        for (name, buffer) in multi.stems {
+            let mut segment =
+                AudioSegment::new(buffer.samples, buffer.sample_rate, buffer.channels);
+            if normalize {
+                normalize_peak(&mut segment);
+            }
+            let out_path = output_dir.join(format!("{stem}_{name}.{ext}"));
+            write_stem(&segment, &out_path, encode_format)?;
+            stem_results.push(InstrumentStemResult {
+                name,
+                path: out_path.display().to_string(),
+            });
+        }
+
+        let instrument_stems: Vec<_> = stem_results
+            .iter()
+            .map(|s| crate::app::events::VocalSeparatorInstrumentStem {
+                name: s.name.clone(),
+                path: s.path.clone(),
+            })
+            .collect();
+
+        emit_progress(
+            &app_for_progress,
+            &path_key_for_progress,
+            VocalSeparatorProgressPhase::Done,
+            Some(100),
+            None,
+            None,
+            instrument_stems,
+        );
+
+        Ok::<SplitInstrumentalResult, String>(SplitInstrumentalResult {
+            file_name: path_buf_for_work
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(&file_name)
+                .to_string(),
+            stems: stem_results,
             warnings: warnings
                 .into_iter()
                 .map(|warning| warning_key(warning).to_string())
