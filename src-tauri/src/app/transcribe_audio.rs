@@ -18,6 +18,7 @@ const RETRY_MIN_DURATION_MS: u64 = 400;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TranscribeSegmentFlags {
     pub request_segment_timestamps: bool,
+    pub request_word_timestamps: bool,
 }
 
 pub async fn transcribe_segment_with_retries(
@@ -42,6 +43,7 @@ pub async fn transcribe_segment_with_retries(
             .map(|path| path.display().to_string()),
         whisper_progress: whisper_progress.clone(),
         request_segment_timestamps: flags.request_segment_timestamps,
+        request_word_timestamps: flags.request_word_timestamps,
     };
 
     let mut transcription = transcriber
@@ -82,6 +84,7 @@ pub async fn transcribe_segment_with_retries(
             prompt: None,
             whisper_progress: whisper_progress.clone(),
             request_segment_timestamps: flags.request_segment_timestamps,
+            request_word_timestamps: flags.request_word_timestamps,
             ..options
         };
         transcription = transcriber

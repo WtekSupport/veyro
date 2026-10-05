@@ -1,0 +1,57 @@
+# Optional labeled clips for regression / monotonicity checks.
+# Place WAV files under src-tauri/tests/fixtures/speech_analysis/ and run:
+#   cargo test speech_analysis_calibration -- --ignored
+#
+# expected_rank: higher = better expected overall (relative order matters).
+
+[[clip]]
+id = "clean_read_ru"
+path = "tests/fixtures/speech_analysis/clean_read_ru.wav"
+expected_rank = 90
+notes = "Studio-like read, low noise"
+
+[[clip]]
+id = "noisy_room_ru"
+path = "tests/fixtures/speech_analysis/noisy_room_ru.wav"
+expected_rank = 55
+notes = "Moderate SNR, same speaker if possible"
+
+[[clip]]
+id = "mumbled_fast_ru"
+path = "tests/fixtures/speech_analysis/mumbled_fast_ru.wav"
+expected_rank = 40
+
+[[clip]]
+id = "telephone_ru"
+path = "tests/fixtures/speech_analysis/telephone_ru.wav"
+expected_rank = 50
+
+[[clip]]
+id = "placeholder_5"
+path = "tests/fixtures/speech_analysis/clip_05.wav"
+expected_rank = 70
+
+[[clip]]
+id = "placeholder_6"
+path = "tests/fixtures/speech_analysis/clip_06.wav"
+expected_rank = 65
+
+[[clip]]
+id = "placeholder_7"
+path = "tests/fixtures/speech_analysis/clip_07.wav"
+expected_rank = 60
+
+[[clip]]
+id = "placeholder_8"
+path = "tests/fixtures/speech_analysis/clip_08.wav"
+expected_rank = 45
+
+[[clip]]
+id = "placeholder_9"
+path = "tests/fixtures/speech_analysis/clip_09.wav"
+expected_rank = 35
+
+[[clip]]
+id = "placeholder_10"
+path = "tests/fixtures/speech_analysis/clip_10.wav"
+expected_rank = 30

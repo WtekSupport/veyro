@@ -3,6 +3,7 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import {
   checkForAppUpdate,
   downloadAndInstallUpdate,
+  formatUpdateErrorMessage,
   type UpdateProgress,
 } from "../updater";
 import { t } from "../i18n";
@@ -27,6 +28,7 @@ function renderBanner(host: HTMLElement, progress: UpdateProgress | null): void 
     progress?.phase === "installing";
 
   let body = t("update.available", { version });
+  let detail: string | null = null;
   if (progress?.phase === "checking") {
     body = t("update.checking");
   } else if (progress?.phase === "downloading") {
@@ -36,22 +38,39 @@ function renderBanner(host: HTMLElement, progress: UpdateProgress | null): void 
   } else if (progress?.phase === "installing") {
     body = t("update.installing");
   } else if (progress?.phase === "error") {
-    body = progress.message ?? t("update.failed");
+    const formatted = formatUpdateErrorMessage(
+      progress.message ?? "",
+      progress.errorKind ?? "install",
+    );
+    body = formatted.title;
+    detail = formatted.detail;
   }
 
+  const isError = progress?.phase === "error";
+  const showInstall = Boolean(pendingUpdate) && !isWorking && !isError;
+  const showDismiss = (!isWorking && Boolean(pendingUpdate)) || isError;
+  const dismissLabel = isError ? t("update.dismiss") : t("update.later");
+
   host.innerHTML = `
-    <div class="update-banner" role="status">
-      <div class="update-banner-text">${escapeHtml(body)}</div>
+    <div class="update-banner" role="alert">
+      <div class="update-banner-text">
+        <p class="update-banner-line">${escapeHtml(body)}</p>
+        ${
+          detail
+            ? `<p class="update-banner-detail">${escapeHtml(detail)}</p>`
+            : ""
+        }
+      </div>
       <div class="update-banner-actions">
         ${
-          isWorking
-            ? ""
-            : `<button type="button" class="btn btn-primary update-banner-install">${escapeHtml(t("update.install"))}</button>`
+          showInstall
+            ? `<button type="button" class="btn btn-primary update-banner-install">${escapeHtml(t("update.install"))}</button>`
+            : ""
         }
         ${
-          isWorking
-            ? ""
-            : `<button type="button" class="btn btn-secondary update-banner-dismiss">${escapeHtml(t("update.later"))}</button>`
+          showDismiss
+            ? `<button type="button" class="btn btn-secondary update-banner-dismiss">${escapeHtml(dismissLabel)}</button>`
+            : ""
         }
       </div>
     </div>
@@ -81,7 +100,7 @@ async function runInstall(host: HTMLElement): Promise<void> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    renderBanner(host, { phase: "error", message });
+    renderBanner(host, { phase: "error", message, errorKind: "install" });
     busy = false;
   }
 }
@@ -106,8 +125,11 @@ export async function runStartupUpdateCheck(
   }
 
   if (result.status === "error") {
-    console.warn("update check failed:", result.message);
-    renderBanner(host, { phase: "error", message: result.message });
+    renderBanner(host, {
+      phase: "error",
+      message: result.message,
+      errorKind: "check",
+    });
     return;
   }
 

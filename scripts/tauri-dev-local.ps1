@@ -5,18 +5,30 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 # Dev must run elevated so injected text reaches apps running as administrator.
-. (Join-Path $PSScriptRoot "ensure-admin.ps1") -CallerScript $PSCommandPath -Wait
-
-if ($IsWindows -or $env:OS -like "*Windows*") {
+function Test-VeyroDevIsAdmin {
+    if (-not (($IsWindows -eq $true) -or ($env:OS -like "*Windows*"))) {
+        return $true
+    }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Error @"
-Veyro dev requires administrator privileges (UAC) so dictation can type into elevated applications.
-If you run from Git Bash, accept the UAC prompt (it may appear on another desktop - check the taskbar).
-Or open PowerShell as Administrator, cd to the repo, and run: npm run tauri:dev
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if (-not (Test-VeyroDevIsAdmin)) {
+    if ($env:VEYRO_DEV_NO_ELEVATE -eq "1") {
+        Write-Warning "VEYRO_DEV_NO_ELEVATE=1: skipping UAC relaunch; cargo run will fail with os error 740 unless you start from an elevated shell."
+    } else {
+        # Dot-source so `exit` in ensure-admin stops this instance after the elevated child exits.
+        . (Join-Path $PSScriptRoot "ensure-admin.ps1") -CallerScript $PSCommandPath
+        if (-not (Test-VeyroDevIsAdmin)) {
+            Write-Error @"
+Could not run Veyro dev elevated (UAC denied or elevation failed).
+Accept the UAC prompt (check the taskbar / other desktop), open PowerShell as Administrator and run: npm run tauri:dev
+Or run without elevation: `$env:VEYRO_DEV_NO_ELEVATE='1'; npm run tauri:dev
+Or: npm run tauri:dev:direct
 "@
-        exit 1
+            exit 1
+        }
     }
 }
 
@@ -50,12 +62,9 @@ if (-not $cargoExe) {
     Write-Error "cargo not found in PATH. Install Rust: https://rustup.rs/"
 }
 
-Write-Host "Using cargo: $cargoExe"
-
 $devLog = Join-Path $env:CARGO_TARGET_DIR ("tauri-dev-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 try {
     Start-Transcript -Path $devLog | Out-Null
-    Write-Host "Session log: $devLog"
 } catch {
     Write-Warning "Could not start transcript log: $_"
 }
@@ -66,25 +75,24 @@ function Stop-VeyroDevBuildProcesses {
     }
     Start-Sleep -Seconds 2
 }
-Write-Host "Build output: $env:CARGO_TARGET_DIR\"
-
 . (Join-Path $PSScriptRoot "resolve-local-features.ps1")
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
-$parallel = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
-
-Write-Host "Selected features: $features"
+$cargoJobs = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
+$cmakeParallel = Get-CmakeBuildParallelism
 
 if ($null -eq $env:VEYRO_CARGO_INCREMENTAL -and ($IsWindows -or $env:OS -like "*Windows*")) {
     $env:CARGO_INCREMENTAL = "0"
-    Write-Host "CARGO_INCREMENTAL=0 (override with VEYRO_CARGO_INCREMENTAL=1 for faster incremental dev rebuilds)"
 }
 
+Write-Host "Dev: target=$($env:CARGO_TARGET_DIR) | cargo=$cargoExe | features=$features | log=$devLog"
+
 $featureArgs = Get-CargoFeatureArgs -Features $features
+Enable-DiarizationBlasLink -RepoRoot $repoRoot -Features $features
 
 function Invoke-DevCargoBuild {
     Push-Location (Join-Path $repoRoot "src-tauri")
     try {
-        & $cargoExe build @featureArgs -j $parallel
+        & $cargoExe build @featureArgs -j $cargoJobs
         return $LASTEXITCODE
     } finally {
         Pop-Location
@@ -97,7 +105,7 @@ if ($features -match "local-llm") {
         Where-Object { Test-Path $_ } |
         Select-Object -First 1
     if ($llamaDll) {
-        Write-Host "llama.cpp already installed ($llamaDll) - skipping pre-dev cargo build"
+        Write-Host "llama.cpp: cached (skip pre-dev cargo build)"
     } else {
         Write-Host "Pre-building debug binary (llama.cpp first build can take 30-40+ min)..."
         Stop-VeyroDevBuildProcesses
@@ -111,7 +119,7 @@ if ($features -match "local-llm") {
                 break
             }
             Write-Warning "cargo build failed ($buildExit) - running finish-llama-cpp-build..."
-            & (Join-Path $PSScriptRoot "finish-llama-cpp-build.ps1") -RepoRoot $repoRoot -Profile "debug" -Parallel $parallel
+            & (Join-Path $PSScriptRoot "finish-llama-cpp-build.ps1") -RepoRoot $repoRoot -Profile "debug" -Parallel $cmakeParallel
             $llamaDll = Get-ChildItem (Join-Path $env:CARGO_TARGET_DIR "debug\build") -Directory -Filter "llama-cpp-sys-2-*" -ErrorAction SilentlyContinue |
                 ForEach-Object { Join-Path $_.FullName "out\bin\llama.dll" } |
                 Where-Object { Test-Path $_ } |
@@ -140,7 +148,7 @@ if ($features -match "silero-te") {
 }
 
 $nodeExe = (Get-Command node -ErrorAction Stop).Source
-& $nodeExe $tauriJs dev --features $features -- -j $parallel
+& $nodeExe $tauriJs dev --features $features -- -j $cargoJobs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

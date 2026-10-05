@@ -39,6 +39,8 @@ release.py
 
 # Rust / Tauri
 src-tauri/target/
+target-agent-check/
+/target/
 src-tauri/gen/
 src-tauri/binaries/*.dll
 
@@ -91,3 +93,5 @@ coverage/
 # Local cargo overrides (e.g. per-machine build.target-dir)
 .cargo/config.toml
 src-tauri/.cargo/config.toml
+
+AGENTS.md

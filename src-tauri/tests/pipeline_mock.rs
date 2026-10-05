@@ -45,6 +45,7 @@ async fn mock_pipeline_processes_and_injects() {
                 dictionary_path: None,
                 whisper_progress: None,
                 request_segment_timestamps: false,
+                request_word_timestamps: false,
             },
         )
         .await

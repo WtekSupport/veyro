@@ -26,7 +26,8 @@ if ($cmakePath.Count -gt 0) {
 }
 . (Join-Path $PSScriptRoot "resolve-local-features.ps1")
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
-$parallel = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
+$cargoJobs = Set-LlamaCppBuildParallelism -RepoRoot $repoRoot
+. (Join-Path $PSScriptRoot "invoke-tauri-bundle.ps1")
 
 if ($features -match "local-llm") {
     & (Join-Path $PSScriptRoot "stage-llm-dlls.ps1") -RepoRoot $repoRoot
@@ -43,7 +44,7 @@ if (-not $SkipCargo) {
     Push-Location (Join-Path $repoRoot "src-tauri")
     try {
         $featureArgs = Get-CargoFeatureArgs -Features $features
-        cargo build --release @featureArgs -j $parallel
+        cargo build --release @featureArgs -j $cargoJobs
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally {
         Pop-Location
@@ -53,11 +54,8 @@ if (-not $SkipCargo) {
 if (-not (Set-UpdaterSigningEnv)) {
     Write-Error "Updater signing env missing."
 }
-$bundleArgs = @("run", "tauri", "build", "--")
-if ($features) { $bundleArgs += @("--features", $features) } else { $bundleArgs += @("--no-default-features") }
-$bundleArgs += @("--", "-j", $parallel)
-npm @bundleArgs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Invoke-VeyroFrontendBuild
+Invoke-VeyroTauriBundle -Features $features
 
 $version = Get-Content (Join-Path $repoRoot "version.json") -Raw | ConvertFrom-Json
 $semver = "$($version.major).$($version.minor).$($version.build)"

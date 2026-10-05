@@ -1,5 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { AudioSrtSpeakerInfo } from "../api";
+import type { AudioSrtCueWord, AudioSrtSpeakerInfo } from "../api";
 import {
   formatPreviewClock,
   formatSrtClock,
@@ -10,6 +10,160 @@ import { t } from "../i18n";
 import { escapeHtml } from "../lib/html";
 
 export const AUDIO_SRT_SPEAKER_COLOR_COUNT = 8;
+
+function normalizeToken(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+}
+
+function normalizeLineWordsKey(text: string): string {
+  return text
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => normalizeToken(token))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function subtitleLineTokens(lines: string[]): string[][] {
+  return lines.map((line) => line.trim().split(/\s+/).filter(Boolean));
+}
+
+function timedWordMatchesToken(wordText: string, token: string): boolean {
+  const word = normalizeToken(wordText);
+  const target = normalizeToken(token);
+  if (!word || !target) {
+    return word === target;
+  }
+  if (word === target) {
+    return true;
+  }
+  if (word.length > target.length) {
+    return word.includes(target);
+  }
+  return target.includes(word);
+}
+
+/** Merged STT token already covered a following SRT token (e.g. «мыже» after «мы»). */
+function tokenCoveredByPreviousWord(previousWordText: string, token: string): boolean {
+  const word = normalizeToken(previousWordText);
+  const target = normalizeToken(token);
+  if (!word || !target || word === target) {
+    return false;
+  }
+  return word.includes(target);
+}
+
+function groupByTokenCounts(
+  tokenCounts: number[],
+  words: AudioSrtCueWord[],
+): AudioSrtCueWord[][] {
+  const groups: AudioSrtCueWord[][] = [];
+  let index = 0;
+  for (const count of tokenCounts) {
+    groups.push(words.slice(index, index + count));
+    index += count;
+  }
+  if (index < words.length && groups.length > 0) {
+    groups[groups.length - 1].push(...words.slice(index));
+  }
+  return groups;
+}
+
+/** Split timed words across SRT cue lines (respects manual line breaks in the textarea). */
+export function groupCueWordsByLines(
+  lines: string[],
+  words: AudioSrtCueWord[],
+): AudioSrtCueWord[][] {
+  if (lines.length === 0) {
+    return words.length > 0 ? [words] : [];
+  }
+  if (words.length === 0) {
+    return lines.map(() => []);
+  }
+
+  const tokensByLine = subtitleLineTokens(lines);
+  const tokenCounts = tokensByLine.map((tokens) => tokens.length);
+  const expectedTokens = tokenCounts.reduce((sum, count) => sum + count, 0);
+
+  if (expectedTokens === words.length) {
+    return groupByTokenCounts(tokenCounts, words);
+  }
+
+  const groups: AudioSrtCueWord[][] = tokensByLine.map(() => []);
+  let wordIndex = 0;
+  let lastAssignedWordText: string | null = null;
+
+  for (let lineIndex = 0; lineIndex < tokensByLine.length; lineIndex += 1) {
+    for (const token of tokensByLine[lineIndex] ?? []) {
+      if (
+        lastAssignedWordText &&
+        tokenCoveredByPreviousWord(lastAssignedWordText, token)
+      ) {
+        continue;
+      }
+      if (wordIndex >= words.length) {
+        break;
+      }
+
+      const start = wordIndex;
+      wordIndex += 1;
+      let builtKey = normalizeLineWordsKey(
+        words.slice(start, wordIndex).map((word) => word.text).join(" "),
+      );
+      const targetKey = normalizeLineWordsKey(token);
+
+      while (wordIndex < words.length && builtKey !== targetKey) {
+        const withNext = normalizeLineWordsKey(
+          words
+            .slice(start, wordIndex + 1)
+            .map((word) => word.text)
+            .join(" "),
+        );
+        if (withNext === targetKey) {
+          wordIndex += 1;
+          builtKey = withNext;
+          break;
+        }
+        const lastWord = words[wordIndex - 1];
+        if (lastWord && timedWordMatchesToken(lastWord.text, token)) {
+          break;
+        }
+        wordIndex += 1;
+        builtKey = normalizeLineWordsKey(
+          words.slice(start, wordIndex).map((word) => word.text).join(" "),
+        );
+      }
+
+      const chunk = words.slice(start, wordIndex);
+      groups[lineIndex].push(...chunk);
+      lastAssignedWordText = chunk[chunk.length - 1]?.text ?? null;
+    }
+  }
+
+  if (wordIndex < words.length && groups.length > 0) {
+    groups[groups.length - 1].push(...words.slice(wordIndex));
+  }
+  return groups;
+}
+
+function renderKaraokeWordsHtml(lines: string[], words: AudioSrtCueWord[]): string {
+  const grouped = groupCueWordsByLines(lines, words);
+  let wordIndex = 0;
+  const renderWord = (word: AudioSrtCueWord): string => {
+    const html = `<span class="audio-srt-preview-word" data-word-index="${wordIndex}">${escapeHtml(word.text)}</span>`;
+    wordIndex += 1;
+    return html;
+  };
+
+  return grouped
+    .map((lineWords) => {
+      const inner = lineWords.map((word) => renderWord(word)).join("");
+      return `<span class="audio-srt-preview-line">${inner}</span>`;
+    })
+    .join("");
+}
 
 export function speakerColorIndex(speakerId: number | null | undefined): number | null {
   if (speakerId === null || speakerId === undefined || !Number.isFinite(speakerId)) {
@@ -25,6 +179,8 @@ export interface AudioSrtPreviewUpdate {
   visible: boolean;
   speakers?: AudioSrtSpeakerInfo[];
   cueSpeakerIds?: Array<number | null>;
+  cueWords?: AudioSrtCueWord[][];
+  karaokeHighlight?: boolean;
   onSpeakerBadgeClick?: (speakerId: number, label: string) => void;
 }
 
@@ -81,6 +237,8 @@ export function createAudioSrtPreview(): AudioSrtPreviewController & {
   let rafId = 0;
   let seekDragging = false;
   let lastSubtitleKey: string | null = null;
+  let cueWords: AudioSrtCueWord[][] = [];
+  let karaokeHighlight = false;
 
   const labelForSpeaker = (speakerId: number | null | undefined): string | null => {
     if (speakerId === null || speakerId === undefined) {
@@ -149,10 +307,28 @@ export function createAudioSrtPreview(): AudioSrtPreviewController & {
     });
   };
 
+  const highlightActiveWords = (timeMs: number, cue: ParsedSrtCue | null): void => {
+    if (!karaokeHighlight || !cue) {
+      return;
+    }
+    const words = cueWords[cue.index - 1];
+    if (!words?.length) {
+      return;
+    }
+    const spans = subtitleEl.querySelectorAll<HTMLElement>(".audio-srt-preview-word");
+    spans.forEach((span, index) => {
+      const word = words[index];
+      const active =
+        word !== undefined && timeMs >= word.startMs && timeMs < word.endMs;
+      span.classList.toggle("audio-srt-preview-word--active", active);
+    });
+  };
+
   const updateSubtitle = (timeMs: number): void => {
     const cue = activeCue(timeMs);
     if (!cue) {
       if (lastSubtitleKey === "empty") {
+        highlightActiveWords(timeMs, cue);
         return;
       }
       lastSubtitleKey = "empty";
@@ -166,37 +342,47 @@ export function createAudioSrtPreview(): AudioSrtPreviewController & {
     const speakerId = cue.speakerId;
     const speakerLabel = labelForSpeaker(speakerId);
     const colorIndex = speakerColorIndex(speakerId);
-    const key = `${cue.index}|${cue.startMs}|${cue.endMs}|${cue.lines.join("\n")}|${speakerId ?? ""}|${speakerLabel ?? ""}`;
-    if (key === lastSubtitleKey) {
-      return;
+    const words = cueWords[cue.index - 1];
+    const karaokeWords =
+      karaokeHighlight && words !== undefined && words.length > 0;
+    const key = `${cue.index}|${cue.startMs}|${cue.endMs}|${cue.lines.join("\n")}|${speakerId ?? ""}|${speakerLabel ?? ""}|${karaokeWords ? "k" : "p"}`;
+    if (key !== lastSubtitleKey) {
+      lastSubtitleKey = key;
+
+      subtitleEl.classList.remove("audio-srt-preview-subtitle--empty");
+      if (karaokeWords && words) {
+        subtitleEl.classList.add("audio-srt-preview-subtitle--karaoke");
+        subtitleEl.innerHTML = renderKaraokeWordsHtml(cue.lines, words);
+      } else {
+        subtitleEl.classList.remove("audio-srt-preview-subtitle--karaoke");
+        subtitleEl.innerHTML = cue.lines.map((line) => escapeHtml(line)).join("<br />");
+      }
+      subtitleMetaEl.classList.remove("audio-srt-preview-subtitle-meta--empty");
+      subtitleMetaEl.replaceChildren();
+
+      if (speakerLabel !== null && speakerId !== null && speakerId !== undefined && colorIndex !== null) {
+        const badge = document.createElement("button");
+        badge.type = "button";
+        badge.className = "audio-srt-speaker-badge";
+        badge.style.setProperty("--badge-speaker", `var(--audio-srt-speaker-${colorIndex})`);
+        badge.textContent = speakerLabel;
+        badge.title = t("tools.audioSrt.renameSpeaker");
+        badge.setAttribute("aria-label", t("tools.audioSrt.renameSpeaker"));
+        badge.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onSpeakerBadgeClick?.(speakerId, speakerLabel);
+        });
+        subtitleMetaEl.appendChild(badge);
+        subtitleMetaEl.appendChild(document.createTextNode(" · "));
+      }
+
+      const metaText = document.createElement("span");
+      metaText.textContent = `#${cue.index} · ${formatSrtClock(cue.startMs)} --> ${formatSrtClock(cue.endMs)}`;
+      subtitleMetaEl.appendChild(metaText);
     }
-    lastSubtitleKey = key;
 
-    subtitleEl.classList.remove("audio-srt-preview-subtitle--empty");
-    subtitleEl.innerHTML = cue.lines.map((line) => escapeHtml(line)).join("<br />");
-    subtitleMetaEl.classList.remove("audio-srt-preview-subtitle-meta--empty");
-    subtitleMetaEl.replaceChildren();
-
-    if (speakerLabel !== null && speakerId !== null && speakerId !== undefined && colorIndex !== null) {
-      const badge = document.createElement("button");
-      badge.type = "button";
-      badge.className = "audio-srt-speaker-badge";
-      badge.style.setProperty("--badge-speaker", `var(--audio-srt-speaker-${colorIndex})`);
-      badge.textContent = speakerLabel;
-      badge.title = t("tools.audioSrt.renameSpeaker");
-      badge.setAttribute("aria-label", t("tools.audioSrt.renameSpeaker"));
-      badge.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onSpeakerBadgeClick?.(speakerId, speakerLabel);
-      });
-      subtitleMetaEl.appendChild(badge);
-      subtitleMetaEl.appendChild(document.createTextNode(" · "));
-    }
-
-    const metaText = document.createElement("span");
-    metaText.textContent = `#${cue.index} · ${formatSrtClock(cue.startMs)} --> ${formatSrtClock(cue.endMs)}`;
-    subtitleMetaEl.appendChild(metaText);
+    highlightActiveWords(timeMs, cue);
   };
 
   const syncChrome = (): void => {
@@ -325,6 +511,8 @@ export function createAudioSrtPreview(): AudioSrtPreviewController & {
     speakers = state.speakers ?? [];
     onSpeakerBadgeClick = state.onSpeakerBadgeClick;
     lastSubtitleKey = null;
+    cueWords = state.cueWords ?? [];
+    karaokeHighlight = Boolean(state.karaokeHighlight);
     cues = parseSrt(state.srtText, 0);
     const cueSpeakerIds = state.cueSpeakerIds ?? [];
     if (cueSpeakerIds.length > 0) {

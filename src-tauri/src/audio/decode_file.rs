@@ -23,6 +23,10 @@ fn is_wav_path(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
 }
 
+pub fn resample_audio_for_stt(segment: AudioSegment) -> Result<AudioSegment, String> {
+    resample_to_stt(segment).map_err(|error| error.to_string())
+}
+
 fn resample_to_stt(segment: AudioSegment) -> Result<AudioSegment, AudioError> {
     if segment.sample_rate == TARGET_SAMPLE_RATE && segment.channels == 1 {
         return Ok(segment);

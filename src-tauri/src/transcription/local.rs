@@ -11,7 +11,7 @@ use crate::audio::resampler::TARGET_SAMPLE_RATE;
 use crate::audio::segment::AudioSegment;
 use crate::text::dictionary::Dictionary;
 use crate::text::normalize::{clean_raw_transcription_with_dictionary, strip_prompt_echo};
-use crate::timed_text::TimedTextSegment;
+use crate::timed_text::{TimedTextSegment, TimedWord};
 use crate::transcription::models::{
     TranscriptionOptions, TranscriptionResult, WhisperDecodingOptions, WhisperProgressCallback,
 };
@@ -350,6 +350,9 @@ impl SharedModel {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        if options.request_word_timestamps {
+            params.set_token_timestamps(true);
+        }
 
         if let Some(progress) = options.whisper_progress.clone() {
             params.set_progress_callback_safe(whisper_progress_callback(progress));
@@ -405,11 +408,16 @@ impl SharedModel {
                 .full_get_segment_t1(index)
                 .map(whisper_timestamp_to_ms)
                 .unwrap_or(start_ms);
+            let words = if options.request_word_timestamps {
+                whisper_segment_words(&state, index, start_ms, end_ms)
+            } else {
+                Vec::new()
+            };
             timed_segments.push(TimedTextSegment {
                 text: trimmed.to_string(),
                 start_ms,
                 end_ms,
-                words: Vec::new(),
+                words,
             });
             raw_segments.push(trimmed.to_string());
             text.push_str(trimmed);
@@ -428,6 +436,86 @@ impl SharedModel {
 
 fn whisper_timestamp_to_ms(timestamp: i64) -> u64 {
     timestamp.max(0) as u64 * 10
+}
+
+fn whisper_token_time_ms(token: &whisper_rs::WhisperTokenData, fallback_start: u64) -> (u64, u64) {
+    let start = whisper_timestamp_to_ms(token.t0);
+    let end = whisper_timestamp_to_ms(token.t1);
+    if start == 0 && end == 0 {
+        (fallback_start, fallback_start)
+    } else if end <= start {
+        (start, start.saturating_add(10))
+    } else {
+        (start, end)
+    }
+}
+
+fn whisper_segment_words(
+    state: &whisper_rs::WhisperState,
+    segment_index: i32,
+    seg_start_ms: u64,
+    seg_end_ms: u64,
+) -> Vec<TimedWord> {
+    let Ok(token_count) = state.full_n_tokens(segment_index) else {
+        return Vec::new();
+    };
+    if token_count <= 0 {
+        return Vec::new();
+    }
+
+    let mut words: Vec<TimedWord> = Vec::new();
+    let mut current_text = String::new();
+    let mut current_start: Option<u64> = None;
+    let mut current_end = seg_start_ms;
+
+    for token_index in 0..token_count {
+        let Ok(token_text) = state.full_get_token_text_lossy(segment_index, token_index) else {
+            continue;
+        };
+        if token_text.is_empty() {
+            continue;
+        }
+        if token_text.starts_with('[') && token_text.ends_with(']') {
+            continue;
+        }
+
+        let (t0_ms, t1_ms) = state
+            .full_get_token_data(segment_index, token_index)
+            .map(|data| whisper_token_time_ms(&data, seg_start_ms))
+            .unwrap_or((seg_start_ms, seg_end_ms));
+
+        let starts_new_word =
+            current_text.is_empty() || token_text.starts_with(' ') || token_text.starts_with('\u{00a0}');
+
+        if starts_new_word && !current_text.is_empty() {
+            words.push(TimedWord {
+                text: current_text.trim().to_string(),
+                start_ms: current_start.unwrap_or(seg_start_ms),
+                end_ms: current_end.max(current_start.unwrap_or(seg_start_ms)),
+                confidence: None,
+            });
+            current_text.clear();
+            current_start = None;
+        }
+
+        if current_start.is_none() {
+            current_start = Some(t0_ms);
+        }
+        current_text.push_str(token_text.trim_start());
+        current_end = t1_ms;
+    }
+
+    if !current_text.is_empty() {
+        words.push(TimedWord {
+            text: current_text.trim().to_string(),
+            start_ms: current_start.unwrap_or(seg_start_ms),
+            end_ms: current_end.max(current_start.unwrap_or(seg_start_ms)),
+            confidence: None,
+        });
+    }
+
+    words.retain(|word| !word.text.is_empty());
+    words
 }
 
 fn sampling_strategy(beam_size: u8) -> SamplingStrategy {

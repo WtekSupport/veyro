@@ -49,15 +49,10 @@ function Get-VulkanSdkPath {
 }
 
 function Write-GpuInventory {
-    $controllers = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
-    if (-not $controllers) {
-        Write-Host "GPU inventory: unavailable"
-        return
-    }
-
-    foreach ($gpu in $controllers) {
-        if ($gpu.Name) {
-            Write-Host "Detected GPU: $($gpu.Name)"
-        }
+    $names = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Name } |
+        Where-Object { $_ })
+    if ($names.Count -gt 0) {
+        Write-Host "GPUs: $($names -join '; ')"
     }
 }

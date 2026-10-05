@@ -42,8 +42,7 @@ Remove the variable or set VEYRO_DISABLE_GPU=1 instead.
     $vulkanSdk = Get-VulkanSdkPath -RepoRoot $RepoRoot
     if ($vulkanSdk) {
         $env:VULKAN_SDK = $vulkanSdk
-        Write-Host "Vulkan SDK: $vulkanSdk"
-        Write-Host "Selected GPU backend: Vulkan (NVIDIA / AMD / Intel)"
+        Write-Host "GPU backend: Vulkan ($vulkanSdk)"
         return "local-whisper-vulkan"
     }
 
@@ -58,8 +57,7 @@ Remove the variable or set VEYRO_DISABLE_GPU=1 instead.
                 }
                 $env:CUDACXX = $nvcc
                 $env:CMAKE_CUDA_COMPILER = $nvcc
-                Write-Host "CUDA toolkit: $cudaRoot"
-                Write-Host "Selected GPU backend: CUDA (NVIDIA only)"
+                Write-Host "GPU backend: CUDA ($cudaRoot)"
                 return "local-whisper-cuda"
             }
         }

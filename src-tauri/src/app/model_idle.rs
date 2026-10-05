@@ -120,6 +120,16 @@ fn check_and_unload_idle_stt(app: &AppHandle, ctx: &Arc<AppContext>) -> Result<(
         return Ok(());
     }
 
+    if ctx
+        .controller
+        .lock()
+        .map(|controller| controller.is_tools_transcription_busy())
+        .unwrap_or(false)
+    {
+        touch_dictation_activity(&ctx.llm_dictation_activity_ms);
+        return Ok(());
+    }
+
     let last_ms = ctx.llm_dictation_activity_ms.load(Ordering::Relaxed);
     let now_ms = dictation_activity_now_ms();
     if !idle_elapsed_ms(last_ms, now_ms, after) {
@@ -277,9 +287,13 @@ impl AppContext {
             return;
         }
         let runtime = self.runtime.clone();
-        std::thread::spawn(move || {
-            let _ = tauri::async_runtime::block_on(runtime.prewarm_transcriber());
-        });
+        std::thread::Builder::new()
+            .name("veyro-stt-load".into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let _ = tauri::async_runtime::block_on(runtime.prewarm_transcriber());
+            })
+            .ok();
     }
 }
 

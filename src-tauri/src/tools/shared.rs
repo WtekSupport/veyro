@@ -1,15 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
-
 use tracing::warn;
 
+use tokio_util::sync::CancellationToken;
+
 use crate::app::context::AppContext;
+use crate::transcription::{create_transcriber, TranscriptionProvider};
 use crate::audio::decode_file::{
-    decode_audio_file_with_progress, DecodeProgressCallback,
+    decode_audio_file_raw_with_progress, DecodeProgressCallback,
 };
-#[cfg(feature = "local-separation")]
-use crate::audio::decode_file::decode_audio_file_raw_with_progress;
 #[cfg(feature = "local-separation")]
 use crate::audio::resampler::{resample_preserve_channels, SEPARATION_SAMPLE_RATE};
 use crate::audio::preprocess::{preprocess_segment, PreprocessOptions, PreprocessResult};
@@ -21,6 +21,11 @@ pub const STT_SELECT_LANGUAGE_ERROR: &str = "tools.stt.selectLanguage";
 
 pub fn stt_failed_in_auto_mode(settings: &AppSettings, language_override: Option<&str>) -> bool {
     settings.language.is_none() && language_override.is_none()
+}
+
+/// STT for tools uses its own cancel token so idle unload / settings reload does not abort long jobs.
+pub fn tool_transcriber(ctx: &AppContext, settings: &AppSettings) -> Arc<dyn TranscriptionProvider> {
+    create_transcriber(settings, ctx.http.clone(), CancellationToken::new())
 }
 
 pub struct ToolsTranscriptionGuard<'a> {
@@ -59,8 +64,22 @@ impl Drop for ToolsTranscriptionGuard<'_> {
     }
 }
 
+pub fn normalize_tool_path_key(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let path_buf = PathBuf::from(trimmed);
+    let path_buf = std::fs::canonicalize(&path_buf).unwrap_or(path_buf);
+    let mut path_key = path_buf.to_string_lossy().into_owned();
+    if let Some(stripped) = path_key.strip_prefix(r"\\?\") {
+        path_key = stripped.to_owned();
+    }
+    path_key
+}
+
 pub fn validate_tool_file_path(path: &str, error_prefix: &str) -> Result<(String, PathBuf, String), String> {
-    let path_key = path.trim().to_string();
+    let path_key = normalize_tool_path_key(path);
     if path_key.is_empty() {
         return Err(format!("{error_prefix}.invalidPath"));
     }
@@ -112,6 +131,8 @@ pub struct PreparedToolAudio {
     pub captured: AudioSegment,
     pub segment: AudioSegment,
     pub skipped_as_silence: bool,
+    /// Sample rate of the decoded file before resampling to the STT working rate.
+    pub source_file_sample_rate_hz: u32,
 }
 
 pub fn decode_and_preprocess_for_tools(
@@ -120,7 +141,10 @@ pub fn decode_and_preprocess_for_tools(
     decode_progress: Option<DecodeProgressCallback>,
     error_prefix: &str,
 ) -> Result<PreparedToolAudio, String> {
-    let raw = decode_audio_file_with_progress(path, decode_progress.clone())
+    let file_segment = decode_audio_file_raw_with_progress(path, decode_progress.clone())
+        .map_err(|error| map_decode_error(error, error_prefix))?;
+    let source_file_sample_rate_hz = file_segment.sample_rate;
+    let raw = crate::audio::decode_file::resample_audio_for_stt(file_segment)
         .map_err(|error| map_decode_error(error, error_prefix))?;
 
     if let Some(callback) = &decode_progress {
@@ -146,6 +170,7 @@ pub fn decode_and_preprocess_for_tools(
         captured,
         segment: preprocessed.segment,
         skipped_as_silence: preprocessed.skipped_as_silence,
+        source_file_sample_rate_hz,
     })
 }
 
@@ -209,3 +234,4 @@ fn interleaved_stereo(samples: &[f32], channels: u16) -> Vec<f32> {
     }
     samples.to_vec()
 }
+

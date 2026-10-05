@@ -12,7 +12,7 @@ use crate::llm::model_store::{needs_local_llm, selected_model_exists};
 use crate::llm::model_store::resolve_model_path;
 #[cfg(feature = "local-llm")]
 use crate::settings::local_llm_gpu_compiled;
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, TextRewriteProvider};
 
 #[cfg(feature = "local-llm")]
 const DEFAULT_N_CTX: u32 = 4096;
@@ -165,7 +165,56 @@ impl LlmEngine {
                 "local LLM is not required for current settings".to_string(),
             ));
         }
+        Self::from_settings_for_local_model(settings)
+    }
 
+    /// Load the selected local model when text rewrite provider is Local (e.g. speech-analysis coach).
+    pub fn ensure_loaded_for_text_rewrite(
+        settings: &AppSettings,
+        engine: &Arc<std::sync::RwLock<LlmEngine>>,
+    ) -> Result<(), String> {
+        if !matches!(settings.text_rewrite_provider, TextRewriteProvider::Local) {
+            return Ok(());
+        }
+        Self::ensure_local_model_into_engine(settings, engine, "local LLM could not be loaded")
+    }
+
+    pub fn ensure_loaded(settings: &AppSettings, engine: &Arc<std::sync::RwLock<LlmEngine>>) -> Result<(), String> {
+        if !needs_local_llm(settings) {
+            return Ok(());
+        }
+        Self::ensure_local_model_into_engine(
+            settings,
+            engine,
+            "local LLM is required but could not be loaded for the current settings",
+        )
+    }
+
+    fn ensure_local_model_into_engine(
+        settings: &AppSettings,
+        engine: &Arc<std::sync::RwLock<LlmEngine>>,
+        load_failed_message: &str,
+    ) -> Result<(), String> {
+        if engine
+            .read()
+            .map(|guard| guard.is_ready())
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+
+        let loaded = Self::from_settings_for_local_model(settings);
+        if !loaded.is_ready() {
+            return Err(load_failed_message.to_string());
+        }
+
+        if let Ok(mut guard) = engine.write() {
+            *guard = loaded;
+        }
+        Ok(())
+    }
+
+    fn from_settings_for_local_model(settings: &AppSettings) -> Self {
         if !cfg!(feature = "local-llm") {
             return Self::unloaded(Some("local LLM is not compiled into this build".to_string()));
         }
@@ -205,32 +254,6 @@ impl LlmEngine {
         {
             Self::unloaded(Some("local LLM is not compiled into this build".to_string()))
         }
-    }
-
-    pub fn ensure_loaded(settings: &AppSettings, engine: &Arc<std::sync::RwLock<LlmEngine>>) -> Result<(), String> {
-        if !needs_local_llm(settings) {
-            return Ok(());
-        }
-
-        if engine
-            .read()
-            .map(|guard| guard.is_ready())
-            .unwrap_or(false)
-        {
-            return Ok(());
-        }
-
-        let loaded = LlmEngine::from_settings(settings);
-        if !loaded.is_ready() {
-            return Err(
-                "local LLM is required but could not be loaded for the current settings".to_string(),
-            );
-        }
-
-        if let Ok(mut guard) = engine.write() {
-            *guard = loaded;
-        }
-        Ok(())
     }
 
     pub fn unload(&self) {

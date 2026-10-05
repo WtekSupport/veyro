@@ -393,6 +393,9 @@ export const EVENTS = {
   vocalSeparatorProgress: "app://vocal-separator-progress",
   vocalSeparatorWindowReady: "app://vocal-separator-window-ready",
   separationModelDownloadProgress: "app://separation-model-download-progress",
+  diarizationModelDownloadProgress: "app://diarization-model-download-progress",
+  speechAnalysisProgress: "app://speech-analysis-progress",
+  speechAnalysisWindowReady: "app://speech-analysis-window-ready",
 } as const;
 
 export type VoiceFileProgressPhase =
@@ -1233,6 +1236,14 @@ export interface AudioSrtProgressPayload {
 export type SubtitleSttCapability = "supported" | "unsupportedProvider";
 
 export type AudioSrtSpeakerCountMode = "auto" | "exact" | "range";
+export type DiarizationQuality = "fast" | "accurate";
+
+export interface DiarizationModelDownloadProgress {
+  quality: DiarizationQuality;
+  downloaded: number;
+  total: number | null;
+  percent: number | null;
+}
 
 export interface AudioSrtOptions {
   maxLineLength?: number;
@@ -1250,6 +1261,7 @@ export interface AudioSrtOptions {
   /** Fixed STT language for this request only (after user picks in tools UI). */
   sttLanguageOverride?: string | null;
   speakerDiarization?: boolean;
+  diarizationQuality?: DiarizationQuality;
   speakerCountMode?: AudioSrtSpeakerCountMode;
   speakerExactCount?: number;
   speakerMinCount?: number;
@@ -1257,6 +1269,14 @@ export interface AudioSrtOptions {
   includeSpeakerNames?: boolean;
   diarizationMinSpeechSecs?: number;
   diarizationSensitivity?: number;
+  /** WebVTT karaoke word highlight (same STT pass). */
+  karaokeWordHighlight?: boolean;
+}
+
+export interface AudioSrtCueWord {
+  text: string;
+  startMs: number;
+  endMs: number;
 }
 
 export interface AudioSrtSpeakerInfo {
@@ -1274,6 +1294,8 @@ export interface AudioSrtTranscriptionResult {
   aiRewriteApplied: boolean;
   speakers?: AudioSrtSpeakerInfo[];
   cueSpeakerIds?: Array<number | null>;
+  wordTimingsAvailable?: boolean;
+  cueWords?: AudioSrtCueWord[][];
 }
 
 export interface DiarizationModelStatus {
@@ -1281,6 +1303,13 @@ export interface DiarizationModelStatus {
   exists: boolean;
   sizeMb: number;
   available: boolean;
+  speakrsAvailable: boolean;
+  fastReady: boolean;
+  accurateReady: boolean;
+  accurateSizeMb: number;
+  speakrsPath: string;
+  needPolyvoiceDownload: boolean;
+  needSpeakrsDownload: boolean;
 }
 
 export async function openAudioSrtToolWindow(): Promise<void> {
@@ -1329,8 +1358,10 @@ export async function getDiarizationModelStatus(): Promise<DiarizationModelStatu
   return invoke<DiarizationModelStatus>("get_diarization_model_status");
 }
 
-export async function downloadDiarizationModel(): Promise<string> {
-  return invoke<string>("download_diarization_model");
+export async function downloadDiarizationModel(
+  quality: DiarizationQuality = "fast",
+): Promise<string> {
+  return invoke<string>("download_diarization_model", { quality });
 }
 
 export async function saveSubtitleFile(
@@ -1514,6 +1545,368 @@ export async function openTranscriptionDictionaryFolder(): Promise<void> {
 
 export async function pickTranscriptionDictionary(): Promise<string | null> {
   return pickDataStorageDir();
+}
+
+export type SpeechAnalysisProgressPhase =
+  | "decoding"
+  | "downloading_model"
+  | "transcribing"
+  | "analyzing"
+  | "interpreting"
+  | "done";
+
+export type SpeechAnalysisCoachStatus = "available" | "skipped_unavailable" | "failed";
+
+export interface SpeechAnalysisCoach {
+  status: SpeechAnalysisCoachStatus;
+  provider: string;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  consistencyNotes: string[];
+  failedMessageKey?: string | null;
+}
+
+export type SpeechAnalysisModelPolicy = "auto" | "follow_global" | "manual";
+
+export interface SpeechAnalysisCache {
+  transcript: string;
+  timedSegments: Array<{
+    text: string;
+    startMs: number;
+    endMs: number;
+    words: Array<{
+      text: string;
+      startMs: number;
+      endMs: number;
+      confidence?: number | null;
+    }>;
+  }>;
+  detectedLanguage?: string | null;
+  qc: SpeechAnalysisReport["qc"];
+  fluency: SpeechAnalysisReport["fluency"];
+  prosody: SpeechAnalysisReport["prosody"];
+  coach?: SpeechAnalysisCoach | null;
+}
+
+export interface SpeechAnalysisProgressPayload {
+  path: string;
+  phase: SpeechAnalysisProgressPhase;
+  percent?: number;
+}
+
+export interface SpeechAnalysisReport {
+  pathKey: string;
+  fileName: string;
+  transcript: string;
+  timedSegments?: Array<SpeechAnalysisCache["timedSegments"][number]>;
+  detectedLanguage?: string | null;
+  qc: {
+    durationMs: number;
+    speechDurationMs: number;
+    sampleRateHz: number;
+    sourceFileSampleRateHz?: number | null;
+    snrDbEstimate?: number | null;
+    clipRatio: number;
+    narrowband: boolean;
+    reliability: "high" | "medium" | "low" | "unavailable";
+    flags: string[];
+  };
+  fluency: {
+    wordCount: number;
+    syllableCount: number;
+    wpmOverall?: number | null;
+    wpmPhonation?: number | null;
+    phonationRatio: number;
+    pauseCount: number;
+    meanPauseMs: number;
+    longPauseCount: number;
+    pauseTotalMs: number;
+    minPauseMs: number;
+    longPauseMs: number;
+    veryLongPauseMs: number;
+    pauseCountPunctuation: number;
+    pauseCountMidPhrase: number;
+    veryLongPauseCount: number;
+    pauseMeasurementReliable: boolean;
+    fillersPer100Words: number;
+    fillerHits: Array<{ phrase: string; count: number }>;
+    repetitionCount: number;
+  };
+  prosody: {
+    f0MedianHz?: number | null;
+    f0RangeSemitones?: number | null;
+    f0StdSemitones: number;
+    voicedFraction: number;
+    expressiveness: "monotone" | "moderate" | "expressive";
+    lowConfidence: boolean;
+    f0Contour?: Array<{ timeMs: number; hz?: number | null }>;
+    voiceQuality?: {
+      jitterLocalPercent?: number | null;
+      shimmerLocalPercent?: number | null;
+      cppsDb?: number | null;
+      lowConfidence: boolean;
+    } | null;
+  };
+  intelligibility: {
+    meanWordConfidence?: number | null;
+    lowConfidenceWordCount: number;
+    lowConfidenceWords: Array<{
+      text: string;
+      startMs: number;
+      endMs: number;
+      confidence: number;
+    }>;
+    reliability: "high" | "medium" | "low" | "unavailable";
+  };
+  articulation: {
+    reliability: "high" | "medium" | "low" | "unavailable";
+    unavailableReasonKey?: string | null;
+    ctcVariantUsed?: string | null;
+    missingCtcDownload?: { family: LocalSttFamily; quant: LocalSttQuant } | null;
+    meanGop?: number | null;
+    per?: number | null;
+    lowGopTokenCount: number;
+    alignmentTokenCount: number;
+    letterBaselineErrorRatePercent?: number | null;
+    weakSymbols: Array<{
+      symbol: string;
+      tokenCount: number;
+      errorCount: number;
+      errorRatePercent: number;
+      excessVsBaselinePercent: number;
+      lowSample: boolean;
+    }>;
+    topSubstitutions: Array<{ expected: string; observed: string; count: number }>;
+    phonemeSegments: Array<{
+      symbol: string;
+      startMs: number;
+      endMs: number;
+      gop?: number | null;
+    }>;
+    wordGopHits?: Array<{
+      text: string;
+      startMs: number;
+      endMs: number;
+      gop: number;
+    }>;
+  };
+  summary: SpeechAnalysisSummary;
+  limitations: string[];
+  coach?: SpeechAnalysisCoach | null;
+}
+
+export interface SpeechAnalysisCaveat {
+  code: string;
+  param?: string | null;
+}
+
+export type SpeechAnalysisDimensionStatus =
+  | "available"
+  | "insufficient_data"
+  | "unavailable";
+
+export type SpeechAnalysisOverallScoreMode = "hidden" | "preliminary" | "full";
+
+export interface SpeechAnalysisSummaryDimension {
+  id: string;
+  status: SpeechAnalysisDimensionStatus;
+  score?: number | null;
+  gradeKey: string;
+  detailKey?: string | null;
+  reasonKey?: string | null;
+  reasonRequiredSec?: number | null;
+  reasonRequiredWords?: number | null;
+  reasonRequiredTokens?: number | null;
+}
+
+export interface SpeechAnalysisReliability {
+  level: "high" | "medium" | "low" | "unavailable";
+  score: number;
+  labelKey: string;
+}
+
+export interface SpeechAnalysisCoverage {
+  included: number;
+  total: number;
+  includedIds: string[];
+  missingIds: string[];
+}
+
+export interface SpeechAnalysisProblemWord {
+  text: string;
+  startMs: number;
+  endMs: number;
+  reasonKey: string;
+  scoreHint?: number | null;
+  context?: string | null;
+}
+
+export interface SpeechAnalysisProblems {
+  sourceKey: string;
+  problemWords: SpeechAnalysisProblemWord[];
+  weakSymbols: Array<{
+    symbol: string;
+    tokenCount: number;
+    errorCount: number;
+    errorRatePercent: number;
+    excessVsBaselinePercent: number;
+    lowSample: boolean;
+  }>;
+  substitutions: Array<{ expected: string; observed: string; count: number }>;
+  repetitionCount: number;
+  repetitionExamples: Array<{
+    token: string;
+    context: string;
+    startMs: number;
+    endMs: number;
+    kind: "stutter" | "emphasis" | "possible_deliberate";
+  }>;
+}
+
+export interface SpeechAnalysisSummary {
+  overallScoreMode: SpeechAnalysisOverallScoreMode;
+  overallScore?: number | null;
+  overallGradeKey: string;
+  overallLabelKey: string;
+  overallShowGrade: boolean;
+  overallCoverage?: SpeechAnalysisCoverage | null;
+  overallWeakSpotId?: string | null;
+  reliability: SpeechAnalysisReliability;
+  dimensions: SpeechAnalysisSummaryDimension[];
+  caveats: SpeechAnalysisCaveat[];
+  problems: SpeechAnalysisProblems;
+}
+
+export interface SpeechAnalysisOptions {
+  sttLanguageOverride?: string | null;
+  modelPolicy?: SpeechAnalysisModelPolicy;
+  manualVariant?: { family: LocalSttFamily; quant: LocalSttQuant } | null;
+  fillGapsOnly?: boolean;
+  autoDownloadModels?: boolean;
+  cache?: SpeechAnalysisCache | null;
+  enableLlmCoach?: boolean | null;
+  regenerateCoach?: boolean;
+}
+
+export function buildSpeechAnalysisCache(
+  report: SpeechAnalysisReport,
+): SpeechAnalysisCache {
+  return {
+    transcript: report.transcript,
+    timedSegments: report.timedSegments ?? [],
+    detectedLanguage: report.detectedLanguage ?? null,
+    qc: report.qc,
+    fluency: report.fluency,
+    prosody: report.prosody,
+    coach: report.coach ?? null,
+  };
+}
+
+export async function openSpeechAnalysisToolWindow(): Promise<void> {
+  return invoke<void>("open_speech_analysis_tool_window");
+}
+
+export async function openSpeechAnalysisToolWindowAndWaitReady(): Promise<void> {
+  const timeoutMs = 20_000;
+  let settled = false;
+  let finishReady: () => void = () => {};
+  const readyPromise = new Promise<void>((resolve) => {
+    finishReady = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+  });
+  const timer = window.setTimeout(finishReady, timeoutMs);
+  const unlisten = await listen(EVENTS.speechAnalysisWindowReady, () => {
+    window.clearTimeout(timer);
+    finishReady();
+  });
+
+  try {
+    await openSpeechAnalysisToolWindow();
+    await readyPromise;
+  } finally {
+    window.clearTimeout(timer);
+    void unlisten();
+  }
+}
+
+export type SttCapability =
+  | "text"
+  | "word_timestamps"
+  | "word_probs"
+  | "ctc_posteriors"
+  | "char_timing";
+
+export type SpeechAnalysisModelInstallStatus =
+  | "not_installed"
+  | "downloading"
+  | "verifying"
+  | "installed"
+  | "failed";
+
+export interface SpeechModelStatusDto {
+  variantId: string;
+  family: LocalSttFamily;
+  quant: LocalSttQuant;
+  langTags: string[];
+  priority: number;
+  caps: SttCapability[];
+  sizeMb: number;
+  status: SpeechAnalysisModelInstallStatus;
+  failedMessageKey?: string | null;
+}
+
+export interface SpeechAnalysisPlanDto {
+  main?: { family: LocalSttFamily; quant: LocalSttQuant } | null;
+  aux: Array<{ family: LocalSttFamily; quant: LocalSttQuant }>;
+  toDownload: Array<{ family: LocalSttFamily; quant: LocalSttQuant }>;
+  satisfiedCaps: SttCapability[];
+  missingCaps: SttCapability[];
+}
+
+export async function listSpeechAnalysisModels(
+  lang?: string | null,
+): Promise<SpeechModelStatusDto[]> {
+  return invoke<SpeechModelStatusDto[]>("list_speech_analysis_models", { lang });
+}
+
+export async function speechAnalysisResolvePlan(
+  options: SpeechAnalysisOptions = {},
+  lang?: string | null,
+): Promise<SpeechAnalysisPlanDto> {
+  return invoke<SpeechAnalysisPlanDto>("speech_analysis_resolve_plan", { lang, options });
+}
+
+export async function speechAnalysisLoadDiskCache(
+  pathKey: string,
+): Promise<SpeechAnalysisReport | null> {
+  return invoke<SpeechAnalysisReport | null>("speech_analysis_load_disk_cache", { pathKey });
+}
+
+export async function analyzeSpeechAnalysisFile(
+  path: string,
+  options: SpeechAnalysisOptions = {},
+): Promise<SpeechAnalysisReport> {
+  return invoke<SpeechAnalysisReport>("analyze_speech_analysis_file", { path, options });
+}
+
+export async function pickSpeechAnalysisSavePath(
+  defaultName: string,
+  extension: string,
+): Promise<string | null> {
+  return invoke<string | null>("pick_speech_analysis_save_path", { defaultName, extension });
+}
+
+export async function exportSpeechAnalysisReport(
+  path: string,
+  report: SpeechAnalysisReport,
+  format: "md",
+): Promise<void> {
+  return invoke<void>("export_speech_analysis_report", { path, report, format });
 }
 
 export async function subscribe<T>(

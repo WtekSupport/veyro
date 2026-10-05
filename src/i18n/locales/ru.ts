@@ -403,8 +403,17 @@ export const ru: Record<MessageKey, string> = {
   "update.downloading": "Загрузка обновления… {percent}%",
   "update.installing": "Установка… Veyro перезапустится.",
   "update.failed": "Не удалось обновить. Попробуйте позже или скачайте с GitHub Releases.",
+  "update.checkFailed":
+    "Не удалось проверить обновления. Попробуйте позже или скачайте сборку с GitHub Releases.",
+  "update.checkFailedNetwork":
+    "Не удалось связаться с сервером обновлений. Проверьте интернет или файрвол, либо скачайте сборку с GitHub Releases.",
+  "update.checkFailedNotFound":
+    "На сервере нет данных об обновлении. Возможно, у вас уже актуальная версия или релиз ещё не опубликован.",
+  "update.downloadFailedNetwork":
+    "Не удалось скачать обновление. Проверьте соединение и повторите, либо скачайте с GitHub Releases.",
   "update.install": "Обновить",
   "update.later": "Позже",
+  "update.dismiss": "Закрыть",
   "settings.uiLocale": "Язык интерфейса",
   "settings.uiLocaleEn": "English",
   "settings.uiLocaleRu": "Русский",
@@ -713,7 +722,7 @@ export const ru: Record<MessageKey, string> = {
   "activity.voiceWatch.tooLong": "Voice watch: файл слишком длинный для авторежима",
 
   "tools.audioSrt.windowLoading": "Загрузка",
-  "tools.audioSrt.title": "Аудио → субтитры (SRT)",
+  "tools.audioSrt.title": "Аудио → субтитры",
   "tools.audioSrt.description": "Распознавание с таймкодами и экспорт субтитров .srt / .vtt.",
   "tools.audioSrt.dropHint": "Перетащите аудиофайлы сюда или выберите на диске",
   "tools.audioSrt.pickFiles": "Выбрать файлы…",
@@ -769,6 +778,13 @@ export const ru: Record<MessageKey, string> = {
     "Добавляет метку UTF-8 BOM в начало файла для плееров или редакторов, которым она нужна.",
   "tools.audioSrt.hint.useDictationTextSettings":
     "Применяет ту же очистку текста и опциональное ИИ-переписывание, что и при диктовке, отдельно для каждого сегмента речи, чтобы сохранить синхронизацию.",
+  "tools.audioSrt.karaokeWordHighlight": "Караоке-подсветка слов",
+  "tools.audioSrt.hint.karaokeWordHighlight":
+    "Добавляет таймкоды отдельных слов внутри cue в .vtt для плееров с поддержкой WebVTT-караоке. Только экспорт VTT и предпросмотр, не .srt.",
+  "tools.audioSrt.karaokeUnavailable":
+    "Покадровые таймкоды слов недоступны для этого файла (движок не вернул word-level данные или они потерялись при сборке блоков). Повторите с локальным Whisper или OpenAI STT.",
+  "tools.audioSrt.karaokeUnavailableAi":
+    "Для караоке нужны таймкоды слов от исходной расшифровки. Отключите ИИ-переписывание (в режиме караоке используется только базовая очистка) и распознайте файл заново.",
   "tools.audioSrt.status.pending": "Ожидание",
   "tools.audioSrt.status.processing": "Обработка…",
   "tools.audioSrt.status.done": "Готово",
@@ -784,7 +800,14 @@ export const ru: Record<MessageKey, string> = {
   "tools.audioSrt.stage.diarizing": "Разделение по спикерам…",
   "tools.audioSrt.speakerDiarization": "Разделение по спикерам",
   "tools.audioSrt.hint.speakerDiarization":
-    "Определяет, кто когда говорил, и помечает реплики. Нужна небольшая локальная модель (~12 МБ). По умолчанию выключено.",
+    "Определяет, кто когда говорил, и помечает реплики. Нужна локальная модель (размер зависит от режима). По умолчанию выключено.",
+  "tools.audioSrt.diarizationQuality": "Режим диаризации",
+  "tools.audioSrt.diarizationQualityFast": "Быстро (polyvoice)",
+  "tools.audioSrt.diarizationQualityAccurate": "Точно (speakrs)",
+  "tools.audioSrt.hint.diarizationQuality":
+    "Быстро — polyvoice INT8 (~12 МБ). Точно в этой сборке использует тот же polyvoice, если speakrs не включён.",
+  "tools.audioSrt.hint.diarizationQualitySpeakrs":
+    "Быстро — polyvoice INT8 (~12 МБ). Точно — speakrs: сегментация pyannote 3.0 и WeSpeaker FP32 (~60 МБ). Ползунок чувствительности действует только на точный режим.",
   "tools.audioSrt.speakerCountMode": "Число спикеров",
   "tools.audioSrt.hint.speakerCountMode":
     "Авто подбирает число по аудио. Точное — фиксированное значение. Диапазон ограничивает поиск.",
@@ -803,23 +826,38 @@ export const ru: Record<MessageKey, string> = {
     "Игнорировать короче этого. Больше — меньше шума; меньше — ловятся короткие реплики.",
   "tools.audioSrt.diarizationSensitivity": "Чувствительность кластеризации",
   "tools.audioSrt.hint.diarizationSensitivity":
-    "Выше — строже (больше спикеров). Ниже — похожие голоса чаще сливаются.",
+    "Только для «Точно». Шкала уже сдвинута в диапазон, где speakrs разделяет голоса: середина — рабочая, выше — строже. «Быстро» ползунок не использует.",
   "tools.audioSrt.speakersTitle": "Спикеры",
   "tools.audioSrt.renameSpeaker": "Переименовать спикера",
   "tools.audioSrt.mergeSpeaker": "Объединить",
   "tools.audioSrt.mergeInto": "Объединить с…",
   "tools.audioSrt.diarizationDownloadConfirm":
     "Для разделения по спикерам нужна локальная модель (~{size} МБ). Скачать сейчас?",
+  "tools.audioSrt.diarizationDownloadConfirmAccurate":
+    "Режим «Точно» использует speakrs (~{size} МБ) в папке models/diarization/speakrs. Скачать сейчас?",
   "tools.audioSrt.diarizationDownload": "Скачать",
+  "tools.audioSrt.diarizationDownloadSizeUnit": "МБ",
+  "tools.audioSrt.diarizationDownloadHintFast":
+    "Нужна модель polyvoice для режима «Быстро» (или VBx без speakrs).",
+  "tools.audioSrt.diarizationDownloadHintAccurate":
+    "Нужна модель speakrs для режима «Точно» (папка models/diarization/speakrs).",
+  "tools.audioSrt.diarizationSpeakrsNotInBuild":
+    "В этой сборке нет speakrs — режим «Точно» использует только VBx/polyvoice (~12 МБ). Для pyannote-class пересоберите приложение (local-diarization-speakrs).",
+  "tools.audioSrt.diarizationModelRequiredDownload":
+    "Сначала скачайте модель диаризации кнопкой «Скачать» под режимом.",
   "tools.audioSrt.diarizationDownloading": "Загрузка модели диаризации…",
   "tools.audioSrt.diarizationUnavailable":
     "Разделение по спикерам недоступно в этой сборке. Пересоберите приложение с local-diarization.",
   "tools.audioSrt.diarizationFailed": "Не удалось выполнить диаризацию.",
   "tools.audioSrt.diarizationFailed.detail":
     "Текст мог быть распознан, но спикеров назначить не удалось. Повторите или отключите диаризацию.",
+  "tools.audioSrt.diarizationNoSegments":
+    "Точная диаризация не нашла сегментов спикеров.",
+  "tools.audioSrt.diarizationNoSegments.detail":
+    "Проверьте, что модель speakrs скачана полностью (папка bundle ~60 МБ), перезапустите приложение или переключитесь на режим «Быстро».",
   "tools.audioSrt.diarizationDownloadFailed": "Не удалось скачать модель диаризации.",
   "tools.audioSrt.diarizationDownloadFailed.detail":
-    "Проверьте сеть и место на диске, затем попробуйте снова.",
+    "Проверьте сеть и место на диске. При ошибке сертификата установите корневой сертификат VPN/прокси или антивируса в хранилище доверенных корневых центров Windows.",
   "tools.audioSrt.diarizationModelRequired": "Нужна модель диаризации.",
   "tools.audioSrt.readFailed": "Не удалось прочитать или декодировать аудио.",
   "tools.audioSrt.unsupportedFormat": "Этот формат аудио не поддерживается.",
@@ -840,6 +878,284 @@ export const ru: Record<MessageKey, string> = {
     "Некорректный путь к файлу. Выберите файл на диске снова.",
   "tools.audioSrt.failed.detail":
     "Цепочка субтитров прервалась до записи SRT. Проверьте технические подробности и настройки распознавания.",
+
+  "tools.speechAnalysis.windowLoading": "Загрузка",
+  "tools.speechAnalysis.windowTitle": "Анализ речи",
+  "tools.speechAnalysis.title": "Анализ речи",
+  "tools.speechAnalysis.description":
+    "Загрузите аудио: контроль качества, беглость, просодия и метрики артикуляции (при локальной CTC-модели).",
+  "tools.speechAnalysis.sidebarTitle": "Файлы",
+  "tools.speechAnalysis.pickFiles": "Выбрать файл…",
+  "tools.speechAnalysis.analyze": "Анализировать",
+  "tools.speechAnalysis.exportMd": "Сохранить отчёт (Markdown)",
+  "tools.speechAnalysis.exportDone": "Отчёт сохранён",
+  "tools.speechAnalysis.copyMd": "Копировать отчёт",
+  "tools.speechAnalysis.sectionQc": "Качество записи",
+  "tools.speechAnalysis.sectionFluency": "Беглость",
+  "tools.speechAnalysis.sectionProsody": "Просодия (F0)",
+  "tools.speechAnalysis.sectionIntelligibility": "Разборчивость",
+  "tools.speechAnalysis.sectionArticulation": "Артикуляция (CTC)",
+  "tools.speechAnalysis.sectionTranscript": "Транскрипт",
+  "tools.speechAnalysis.sectionLimitations": "Ограничения",
+  "tools.speechAnalysis.noJobs": "Выберите аудиофайл для анализа.",
+  "tools.speechAnalysis.articulationNeedsCtc":
+    "Нужна скачанная локальная CTC-модель GigaAM для метрик GOP/PER.",
+  "tools.speechAnalysis.ctcDecodeFailed": "Не удалось выполнить CTC-декод для артикуляции.",
+  "tools.speechAnalysis.ctcUnavailable": "CTC-модель недоступна.",
+  "tools.speechAnalysis.noSpeech": "Речь не обнаружена.",
+  "tools.speechAnalysis.expressiveness.monotone": "Скорее монотонно",
+  "tools.speechAnalysis.expressiveness.moderate": "Умеренно",
+  "tools.speechAnalysis.expressiveness.expressive": "Выразительно",
+  "tools.speechAnalysis.stage.decoding": "Декодирование…",
+  "tools.speechAnalysis.stage.downloadingModel": "Скачиваем компонент оценки…",
+  "tools.speechAnalysis.stage.transcribing": "Распознавание…",
+  "tools.speechAnalysis.stage.analyzing": "Метрики…",
+  "tools.speechAnalysis.stage.interpreting": "Интерпретация…",
+  "tools.speechAnalysis.docs.metricsVsCoach":
+    "Баллы — по акустике и распознаванию; блок «Пояснение» — интерпретация ИИ, не замена оценки.",
+  "tools.speechAnalysis.coach.title": "Пояснение",
+  "tools.speechAnalysis.coach.disclaimer":
+    "Текст сгенерирован ИИ по метрикам и транскрипту; числа в пояснении не добавляйте к баллам.",
+  "tools.speechAnalysis.coach.expand": "Пояснение ИИ (по проверенным фактам)",
+  "tools.speechAnalysis.coach.strengths": "Сильные стороны",
+  "tools.speechAnalysis.coach.improvements": "Что улучшить",
+  "tools.speechAnalysis.coach.consistency": "Согласованность с метриками",
+  "tools.speechAnalysis.coach.unavailable":
+    "Пояснение ИИ недоступно — настройте локальную модель или API OpenAI в параметрах переписывания текста.",
+  "tools.speechAnalysis.coach.failed": "Не удалось получить пояснение ИИ.",
+  "tools.speechAnalysis.coach.noApiKey": "Нет API-ключа OpenAI.",
+  "tools.speechAnalysis.coach.empty": "Пустой ответ модели.",
+  "tools.speechAnalysis.coach.parseFailed": "Не удалось разобрать ответ модели.",
+  "tools.speechAnalysis.coach.rawResponse": "Ответ модели (фрагмент)",
+  "tools.speechAnalysis.models.autoDownloadHint":
+    "Недостающий компонент оценки скачается автоматически, метрики обновятся.",
+  "tools.speechAnalysis.models.downloading":
+    "Скачиваем {name} (~{size} МБ)…",
+  "tools.speechAnalysis.models.backfill":
+    "Обновляем метрики для готовых файлов…",
+  "tools.speechAnalysis.models.failed": "Не удалось скачать компонент оценки.",
+  "tools.speechAnalysis.models.verifyFailed": "Загрузка завершилась, но модель не прошла проверку.",
+  "tools.speechAnalysis.fillGapsMissingCache":
+    "Не удалось обновить метрики — запустите полный анализ файла снова.",
+  "tools.speechAnalysis.advanced.title": "Дополнительно",
+  "tools.speechAnalysis.advanced.modelPolicy": "Модель распознавания",
+  "tools.speechAnalysis.advanced.policyAuto": "Авто (рекомендуется)",
+  "tools.speechAnalysis.advanced.policyFollowGlobal": "Как в настройках",
+  "tools.speechAnalysis.advanced.policyManual": "Выбрать модель",
+  "tools.speechAnalysis.advanced.manualVariant": "Модель для этого инструмента",
+  "tools.speechAnalysis.advanced.hint":
+    "Влияет только на анализ речи; глобальное STT в настройках не меняется.",
+  "tools.speechAnalysis.advanced.llmCoach": "Пояснение ИИ (если доступно)",
+  "tools.speechAnalysis.status.pending": "В очереди",
+  "tools.speechAnalysis.status.processing": "Обработка…",
+  "tools.speechAnalysis.status.done": "Готово",
+  "tools.speechAnalysis.status.error": "Ошибка",
+  "tools.speechAnalysis.readFailed": "Не удалось прочитать или декодировать файл.",
+  "tools.speechAnalysis.unsupportedFormat": "Формат аудио не поддерживается.",
+  "tools.speechAnalysis.emptyAudio": "В файле нет пригодного аудио.",
+  "tools.speechAnalysis.invalidPath": "Некорректный путь к файлу.",
+  "tools.speechAnalysis.exportFailed": "Не удалось сохранить отчёт.",
+  "tools.speechAnalysis.technicalDetails": "Технические данные и транскрипт",
+  "tools.speechAnalysis.processingHint": "Идёт анализ — этап и прогресс обновляются автоматически.",
+  "tools.speechAnalysis.readyToAnalyze": "Нажмите «Анализировать», чтобы запустить проверку речи.",
+  "tools.speechAnalysis.downloadCtcModel": "Скачать модель",
+  "tools.speechAnalysis.downloadCtcHint":
+    "Для оценки артикуляции нужна отдельная модель {model} (не та, что выбрана для распознавания).",
+  "tools.speechAnalysis.retryAfterDownload": "Анализировать снова",
+  "tools.speechAnalysis.downloadFailed": "Не удалось скачать модель.",
+  "tools.speechAnalysis.summary.overallTitle": "Качество речи",
+  "tools.speechAnalysis.summary.dimension.recording": "Запись",
+  "tools.speechAnalysis.summary.dimension.signalQuality": "Качество сигнала",
+  "tools.speechAnalysis.summary.dimension.confidence": "Уверенность",
+  "tools.speechAnalysis.summary.dimension.intelligibility":
+    "Разборчивость (уверенность STT)",
+  "tools.speechAnalysis.summary.dimension.articulation": "Согласованность (черновая)",
+  "tools.speechAnalysis.summary.dimension.fluency": "Беглость",
+  "tools.speechAnalysis.summary.dimension.prosody": "Просодия",
+  "tools.speechAnalysis.summary.grade.excellent": "Отлично",
+  "tools.speechAnalysis.summary.grade.good": "Хорошо",
+  "tools.speechAnalysis.summary.grade.fair": "Средне",
+  "tools.speechAnalysis.summary.grade.weak": "Слабо",
+  "tools.speechAnalysis.summary.grade.unavailable": "Недостаточно данных",
+  "tools.speechAnalysis.summary.detail.recording": "Чистота и уровень сигнала",
+  "tools.speechAnalysis.summary.detail.signalQuality":
+    "SNR, клиппинг и полоса — влияет на достоверность, не на балл дикции",
+  "tools.speechAnalysis.summary.detail.intelligibilityProxy":
+    "Косвенно: доля слов с низкой уверенностью распознавания (не WER)",
+  "tools.speechAnalysis.summary.detail.articulationProxy":
+    "Согласованность CTC по символам; для фонем нужен G2P",
+  "tools.speechAnalysis.summary.detail.articulationDraft":
+    "Нужна более длинная речь для полной оценки согласованности CTC",
+  "tools.speechAnalysis.summary.label.full": "Оценка дикции",
+  "tools.speechAnalysis.summary.label.preliminary": "Предварительная оценка (беглость и выразительность)",
+  "tools.speechAnalysis.summary.label.hidden": "Оценка недоступна",
+  "tools.speechAnalysis.summary.badgePreliminary": "предварительно",
+  "tools.speechAnalysis.summary.badgeFull": "полная",
+  "tools.speechAnalysis.summary.noScore": "—",
+  "tools.speechAnalysis.summary.hiddenHint":
+    "Нужны артикуляция (GigaAM CTC) и разборчивость, либо больше речи для отдельных метрик.",
+  "tools.speechAnalysis.summary.coverage": "В балле учтено блоков: {included} из {total}",
+  "tools.speechAnalysis.summary.coverageBreakdown":
+    "Учтено: {includedList}. Не учтено: {missingList}.",
+  "tools.speechAnalysis.summary.weakSpot": "Слабое место: {name} ({score}/100)",
+  "tools.speechAnalysis.summary.lowestAxis":
+    "Слабых мест не найдено; ниже всего: {name} ({score}/100)",
+  "tools.speechAnalysis.summary.articulationNotScored":
+    "Чёткость произношения звуков пока не оценена (нужно ещё {remaining} с речи, сейчас {actual} из {required} с).",
+  "tools.speechAnalysis.summary.reason.pauseMeasurementUnreliable":
+    "Паузы по энергии не удалось надёжно измерить — балл беглости скрыт",
+  "tools.speechAnalysis.summary.fluencyMetric.sylPerSec": "Темп (слогов/с):",
+  "tools.speechAnalysis.summary.fluencyMetric.wpm": "Скорость (слов/мин):",
+  "tools.speechAnalysis.summary.fluencyMetric.pauses": "Паузы:",
+  "tools.speechAnalysis.summary.fluencyMetric.pausesValue":
+    "≥{minMs} мс — {count} шт., средняя {meanMs} мс",
+  "tools.speechAnalysis.summary.fluencyMetric.longPauses": "Длинные паузы:",
+  "tools.speechAnalysis.summary.fluencyMetric.fillers": "Паразиты на 100 слов:",
+  "tools.speechAnalysis.summary.fluencyMetric.reps": "Запинки:",
+  "tools.speechAnalysis.summary.prosodyF0ChartCaption": "Контур F0 (voiced-кадры)",
+  "tools.speechAnalysis.summary.reason.needsLongerRecording":
+    "Нужна более длинная запись речи для этой метрики",
+  "tools.speechAnalysis.summary.reason.needsLongerRecording.howTo":
+    "Запишите связный монолог или прочитайте текст вслух: меньше длинных пауз и тишины, больше непрерывной речи.",
+  "tools.speechAnalysis.summary.reason.recordingDuration":
+    "Сейчас речи: {actual} с, для этой метрики нужно от {required} с",
+  "tools.speechAnalysis.summary.reason.articulationAwait":
+    "Ожидает: нужно ещё {remaining} с речи ({actual} из {required} с)",
+  "tools.speechAnalysis.summary.missingReason.articulationShortSpeech": "мало речи",
+  "tools.speechAnalysis.summary.missingReason.confidenceMerged": "объединена с разборчивостью",
+  "tools.speechAnalysis.summary.reason.needsMoreWords":
+    "Нужно больше распознанных слов",
+  "tools.speechAnalysis.summary.reason.needsMoreWords.howTo":
+    "Говорите чуть громче и чётче, уберите сильный фон; можно тот же текст, но длиннее и без больших пауз.",
+  "tools.speechAnalysis.summary.reason.wordCount":
+    "Распознано слов: {actual}, нужно не менее {required}",
+  "tools.speechAnalysis.summary.reason.needsMoreArticulationTokens":
+    "Мало текста для оценки артикуляции",
+  "tools.speechAnalysis.summary.reason.needsMoreArticulationTokens.howTo":
+    "Прочитайте вслух более длинный фрагмент (монолог или абзац): нужно больше слов и букв в распознанном тексте, не только секунды записи.",
+  "tools.speechAnalysis.summary.reason.articulationTokenCount":
+    "Символов в выравнивании: {actual}, нужно не менее {required}",
+  "tools.speechAnalysis.summary.reason.needsCtcModel":
+    "Скачайте модель GigaAM CTC для артикуляции",
+  "tools.speechAnalysis.summary.reason.needsCtcModel.howTo":
+    "В режиме «Авто» приложение скачает GigaAM CTC и пересчитает метрики. Иначе — «Скачать» на карточке.",
+  "tools.speechAnalysis.summary.reason.needsVoicedFrames":
+    "Недостаточно участков с голосом для оценки высоты (F0)",
+  "tools.speechAnalysis.summary.reason.needsVoicedFrames.howTo":
+    "Говорите громче и связнее, ближе к микрофону; уменьшите шум и шёпот — нужны устойчивые звонкие гласные.",
+  "tools.speechAnalysis.summary.reason.wordConfidenceUnavailable":
+    "Уверенность по словам недоступна для текущей модели распознавания",
+  "tools.speechAnalysis.summary.reason.wordConfidenceUnavailable.howTo":
+    "Приложение докачает нужный компонент (если возможно) и автоматически обновит эти метрики.",
+  "tools.speechAnalysis.summary.reason.noRecognizedWords":
+    "Речь не распознана или слишком мало слов",
+  "tools.speechAnalysis.summary.reason.noRecognizedWords.howTo":
+    "Проверьте громкость и формат файла; запишите 20–30 с связной речи без длинной тишины в начале и конце.",
+  "tools.speechAnalysis.summary.reason.articulationUnavailable":
+    "Артикуляция не посчитана (ошибка CTC или нет данных)",
+  "tools.speechAnalysis.summary.reason.articulationUnavailable.howTo":
+    "Повторите анализ после загрузки CTC; если ошибка повторяется — другой файл или короче фрагмент для декода.",
+  "tools.speechAnalysis.reliability.title": "Достоверность записи",
+  "tools.speechAnalysis.reliability.high": "высокая",
+  "tools.speechAnalysis.reliability.medium": "средняя",
+  "tools.speechAnalysis.reliability.low": "низкая",
+  "tools.speechAnalysis.summary.verdictPending":
+    "Вердикт «Отлично/Хорошо…» появится, когда в оценке участвуют не менее 4 блоков.",
+  "tools.speechAnalysis.problems.sectionTitle": "На что обратить внимание",
+  "tools.speechAnalysis.problems.ctcSelfConsistencySource":
+    "Технически: расхождения букв между основным STT и повторным CTC-декодом (не эталонный текст). Редукция о→а и оглушение отфильтрованы; пары с менее чем 3 повторами скрыты.",
+  "tools.speechAnalysis.problems.uncertaintyDisclaimer":
+    "Модель могла сомневаться в отдельных словах — это не всегда ошибка дикции; прослушайте фрагмент.",
+  "tools.speechAnalysis.problems.uncertaintySource":
+    "Слова и фрагменты, где распознавание было неуверенно. Расхождения двух декодов вынесены в технические данные — они слабо связаны с дикцией.",
+  "tools.speechAnalysis.problems.sttUncertaintySource":
+    "Слова, где модель распознавания была неуверенна (без CTC-постериоров по звукам).",
+  "tools.speechAnalysis.playFragment": "Прослушать фрагмент",
+  "tools.speechAnalysis.problems.wordsTitle":
+    "Слова, где модель распознавания была неуверенна",
+  "tools.speechAnalysis.problems.substitutionsTitle":
+    "Расхождения букв (после фильтра редукции)",
+  "tools.speechAnalysis.technical.letterMismatchTitle":
+    "Самосогласованность декодов (буквы)",
+  "tools.speechAnalysis.technical.letterBaseline":
+    "Средний уровень расхождений по записи: около {percent}% букв",
+  "tools.speechAnalysis.technical.letterOutliersTitle":
+    "Буквы заметно выше базы (≥8 вхождений, +3 п.п.)",
+  "tools.speechAnalysis.technical.weakSymbolRow":
+    "{symbol}: {errors} из {count} ({percent}%), выше базы на {excess} п.п.",
+  "tools.speechAnalysis.technical.noLetterIssuesAboveBaseline":
+    "Выраженных отклонений по буквам не найдено (ничего не превысило базу записи).",
+  "tools.speechAnalysis.technical.noSubstitutionsAboveThreshold":
+    "Нет пар расхождений с тремя и более повторами.",
+  "tools.speechAnalysis.problems.weakSymbolDetail": "ошибок {errors} из {count}",
+  "tools.speechAnalysis.problems.repetitionStutter": "запинка",
+  "tools.speechAnalysis.problems.repetitionEmphasis": "повтор для выразительности",
+  "tools.speechAnalysis.problems.repetitionsTitle": "Повторы и запинки",
+  "tools.speechAnalysis.problems.repetitionCount": "Подряд идущих повторов слов: {count}",
+  "tools.speechAnalysis.problems.lowConfidence": "низкая уверенность STT",
+  "tools.speechAnalysis.problems.suspiciousWord": "подозрительное слово в транскрипте",
+  "tools.speechAnalysis.problems.lowGop": "слабое согласование звуков (GOP по транскрипту)",
+  "tools.speechAnalysis.transcript.clickHint":
+    "Нажмите на слово, чтобы прослушать фрагмент. Подсветка — подозрительные места.",
+  "tools.speechAnalysis.summary.fluencyMetric.midPhrasePauses":
+    "Паузы внутри фразы (без знака):",
+  "tools.speechAnalysis.summary.fluencyMetric.punctuationPauses":
+    "Паузы после знаков / границ:",
+  "tools.speechAnalysis.summary.fluencyMetric.veryLongPauses": "Очень длинные паузы:",
+  "tools.speechAnalysis.summary.voiceQuality.jitter": "Jitter (лок.) {value}%",
+  "tools.speechAnalysis.summary.voiceQuality.shimmer": "Shimmer (лок.) {value}%",
+  "tools.speechAnalysis.summary.voiceQuality.cpps": "CPPS (прокси) {value} dB",
+  "tools.speechAnalysis.problems.transcriptQualitySource":
+    "Транскрипт может содержать артефакты склейки кусков — метрики STT и разборчивости занижены по надёжности.",
+  "tools.speechAnalysis.caveat.transcriptQualityDegraded":
+    "Транскрипт содержит повторы фраз или подозрительные слова — проверьте текст перед выводами по темпу и разборчивости.",
+  "tools.speechAnalysis.summary.fluencyMetric.sylPerSecArticulation":
+    "Темп артикуляции (без пауз, слогов/с):",
+  "tools.speechAnalysis.summary.fluencyMetric.longPausesValue":
+    "≥{minMs} мс — {count} шт.",
+  "tools.speechAnalysis.technical.workingSampleRate": "рабочая {hz} Гц",
+  "tools.speechAnalysis.technical.sourceSampleRate": "файл {hz} Гц",
+  "tools.speechAnalysis.caveat.preliminaryScore":
+    "Итог предварительный: в общий балл вошли не все оси (см. перечень выше).",
+  "tools.speechAnalysis.caveat.articulationCharLevel":
+    "GOP/PER по буквам (символам), не по клиническим фонемам — нужен G2P для фонемных оценок.",
+  "tools.speechAnalysis.summary.detail.confidence": "Средняя уверенность распознавания слов",
+  "tools.speechAnalysis.summary.detail.intelligibility": "Доля слов с низкой уверенностью",
+  "tools.speechAnalysis.summary.detail.articulation": "Согласованность произнесения (GOP/PER)",
+  "tools.speechAnalysis.summary.detail.fluency": "Темп, паузы и слова-паразиты",
+  "tools.speechAnalysis.summary.detail.prosody":
+    "F0: σ (в semitones), доля voiced и диапазон — не полная интонация",
+  "tools.speechAnalysis.summary.detail.prosodyValues":
+    "Разброс F0: {std} st (ориентир ~2–5); voiced-кадры (справка): {voiced}%; p5–p95: {range} st",
+  "tools.speechAnalysis.summary.detail.fluencyValues":
+    "Темп: {sylPerSec} сл/с, {wpm} сл/мин · паузы ≥{minPauseMs} мс: {pauseCount} (ср. {meanPauseMs} мс), длинных: {longPauses} · паразиты: {fillers}/100 сл · запинки: {reps}",
+  "tools.speechAnalysis.summary.detail.intelligibilityMerged":
+    "Доля слов с низкой уверенностью распознавания; средняя уверенность — на карточке технических данных",
+  "tools.speechAnalysis.summary.detail.prosodyLow": "Мало voiced-участков для надёжной оценки F0",
+  "tools.speechAnalysis.technical.words": "{count} слов",
+  "tools.speechAnalysis.technical.longPauses": "{count} длинных пауз",
+  "tools.speechAnalysis.technical.fillers": "{value} паразитов на 100 слов",
+  "tools.speechAnalysis.technical.meanConfidence": "средняя уверенность {percent}%",
+  "tools.speechAnalysis.technical.ctcModel": "модель {model}",
+  "tools.speechAnalysis.qc.lowSnr": "низкий SNR",
+  "tools.speechAnalysis.qc.moderateSnr": "умеренный SNR",
+  "tools.speechAnalysis.qc.clipping": "клиппинг",
+  "tools.speechAnalysis.qc.narrowband": "узкополосная запись",
+  "tools.speechAnalysis.qc.shortSpeech": "короткая речь (< 1 мин)",
+  "tools.speechAnalysis.caveat.wordConfidenceUnavailable":
+    "Уверенность по словам недоступна для этой модели распознавания.",
+  "tools.speechAnalysis.caveat.articulationCtcMissing":
+    "Метрики артикуляции недоступны: не установлена модель GigaAM CTC.",
+  "tools.speechAnalysis.caveat.articulationCtcDecodeFailed":
+    "Не удалось выполнить CTC-декод для оценки артикуляции.",
+  "tools.speechAnalysis.caveat.prosodyLowConfidence":
+    "Просодия оценена с низкой уверенностью (мало voiced-фреймов).",
+  "tools.speechAnalysis.caveat.qcLowSnr": "Низкое отношение сигнал/шум — метрики менее надёжны.",
+  "tools.speechAnalysis.caveat.qcModerateSnr": "Умеренный SNR — возможны погрешности.",
+  "tools.speechAnalysis.caveat.qcClipping": "Обнаружен клиппинг в записи.",
+  "tools.speechAnalysis.caveat.qcNarrowband": "Низкая частота дискретизации.",
+  "tools.speechAnalysis.caveat.qcShortSpeech": "Короткий фрагмент речи — часть метрик ориентировочные.",
+  "tools.speechAnalysis.caveat.noSpeech": "Речь не обнаружена или файл слишком тихий.",
 
   "tools.vocalSeparator.windowLoading": "Загрузка",
   "tools.vocalSeparator.title": "Разделить вокал и минус",

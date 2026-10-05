@@ -2,7 +2,14 @@
 
 $ErrorActionPreference = "Stop"
 
-. (Join-Path $PSScriptRoot "ensure-admin.ps1") -CallerScript $PSCommandPath -Wait
+if (($IsWindows -eq $true) -or ($env:OS -like "*Windows*")) {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        . (Join-Path $PSScriptRoot "ensure-admin.ps1") -CallerScript $PSCommandPath
+        exit 1
+    }
+}
 
 . (Join-Path $PSScriptRoot "ensure-cargo-target.ps1")
 

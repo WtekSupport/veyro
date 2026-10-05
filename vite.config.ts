@@ -18,6 +18,7 @@ export default defineConfig(() => ({
         toolDictationTranscripts: path.resolve(__dirname, "tool-dictation-transcripts.html"),
         toolAudioSrt: path.resolve(__dirname, "tool-audio-srt.html"),
         toolVocalSeparator: path.resolve(__dirname, "tool-vocal-separator.html"),
+        toolSpeechAnalysis: path.resolve(__dirname, "tool-speech-analysis.html"),
       },
     },
   },

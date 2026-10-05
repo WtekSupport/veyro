@@ -1,0 +1,25 @@
+# Speech analysis calibration notes (Veyro).
+# Tune thresholds against labeled reference clips: live conversation, monotone read, noisy room.
+#
+# Prosody F0 spread (robust semitones around median):
+#   ideal_lo = 2.0  — below: somewhat flat / monotone
+#   ideal_hi = 5.5  — above: soft penalty only
+#
+# Pauses (energy RMS vs speech peak):
+#   pause_energy_db_below_peak = 38  (~−38 dB from peak speech frame)
+#   min_pause_ms = 200
+#   long_ms = 250
+#   very_long_ms = 1500
+#
+# Reference corpus (optional WAV paths): see calibration_corpus.toml and
+# `cargo test speech_analysis_calibration` when fixtures are present.
+
+[prosody]
+spread_ideal_lo = 2.0
+spread_ideal_hi = 5.5
+
+[pause]
+energy_db_below_peak = 38.0
+min_ms = 200
+long_ms = 250
+very_long_ms = 1500

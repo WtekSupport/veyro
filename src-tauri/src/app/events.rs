@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::app::activity_log::ActivityLogEntry;
@@ -31,7 +31,10 @@ pub const AUDIO_SRT_PROGRESS: &str = "app://audio-srt-progress";
 pub const AUDIO_SRT_WINDOW_READY: &str = "app://audio-srt-window-ready";
 pub const VOCAL_SEPARATOR_PROGRESS: &str = "app://vocal-separator-progress";
 pub const VOCAL_SEPARATOR_WINDOW_READY: &str = "app://vocal-separator-window-ready";
+pub const SPEECH_ANALYSIS_PROGRESS: &str = "app://speech-analysis-progress";
+pub const SPEECH_ANALYSIS_WINDOW_READY: &str = "app://speech-analysis-window-ready";
 pub const SEPARATION_MODEL_DOWNLOAD_PROGRESS: &str = "app://separation-model-download-progress";
+pub const DIARIZATION_MODEL_DOWNLOAD_PROGRESS: &str = "app://diarization-model-download-progress";
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -249,4 +252,48 @@ pub fn emit_separation_model_download_progress(
     payload: SeparationModelDownloadProgressPayload,
 ) {
     let _ = app.emit(SEPARATION_MODEL_DOWNLOAD_PROGRESS, payload);
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiarizationModelDownloadProgressPayload {
+    pub quality: String,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub percent: Option<f32>,
+}
+
+pub fn emit_diarization_model_download_progress(
+    app: &AppHandle,
+    payload: DiarizationModelDownloadProgressPayload,
+) {
+    let _ = app.emit(DIARIZATION_MODEL_DOWNLOAD_PROGRESS, payload);
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechAnalysisProgressPhase {
+    Decoding,
+    DownloadingModel,
+    Transcribing,
+    Analyzing,
+    Interpreting,
+    Done,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechAnalysisProgressPayload {
+    pub path: String,
+    pub phase: SpeechAnalysisProgressPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u8>,
+}
+
+pub fn emit_speech_analysis_progress(app: &AppHandle, payload: SpeechAnalysisProgressPayload) {
+    let _ = app.emit(SPEECH_ANALYSIS_PROGRESS, payload);
+}
+
+pub fn emit_speech_analysis_window_ready(app: &AppHandle) {
+    let _ = app.emit(SPEECH_ANALYSIS_WINDOW_READY, ());
 }

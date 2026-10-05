@@ -97,13 +97,27 @@ impl MonoResampler {
     }
 }
 
+/// Resample to 16 kHz mono, including any tail buffered in the resampler.
+pub fn resample_mono_to_16k(
+    samples: &[f32],
+    channels: u16,
+    source_rate: u32,
+) -> Result<Vec<f32>, AudioError> {
+    if source_rate == TARGET_SAMPLE_RATE && channels <= 1 {
+        return Ok(samples.to_vec());
+    }
+    let mut resampler = MonoResampler::new(source_rate, TARGET_SAMPLE_RATE)?;
+    let mut out = resampler.push(samples, channels)?;
+    out.extend(resampler.flush()?);
+    Ok(out)
+}
+
 pub fn normalize_segment(
     samples: &[f32],
     sample_rate: u32,
     channels: u16,
 ) -> Result<(Vec<f32>, u32), AudioError> {
-    let mut resampler = MonoResampler::new(sample_rate, TARGET_SAMPLE_RATE)?;
-    let resampled = resampler.push(samples, channels)?;
+    let resampled = resample_mono_to_16k(samples, channels, sample_rate)?;
     Ok((resampled, TARGET_SAMPLE_RATE))
 }
 

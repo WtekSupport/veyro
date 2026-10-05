@@ -12,8 +12,10 @@ function Enable-SerialCmakeWrapper {
         New-Item -ItemType Directory -Force -Path $wrapperDir | Out-Null
     }
 
+    $serialMjs = Join-Path $RepoRoot "scripts\cmake-build-serial.mjs"
     $batPath = Join-Path $wrapperDir "cmake.bat"
-    $batContent = @'
+    # Cargo sets NUM_JOBS from `cargo -j`, so cmake-rs passes `--parallel N` unless we rewrite argv.
+    $batContent = @"
 @echo off
 setlocal EnableExtensions
 set "REAL=%~dp0..\cmake\bin\cmake.exe"
@@ -30,19 +32,10 @@ if errorlevel 1 (
   "%REAL%" %*
   exit /b %ERRORLEVEL%
 )
-echo.%* | findstr /I /C:" /m:" >nul
-if not errorlevel 1 (
-  "%REAL%" %*
-  exit /b %ERRORLEVEL%
-)
-echo.%* | findstr /I /C:"-- /m:" >nul
-if not errorlevel 1 (
-  "%REAL%" %*
-  exit /b %ERRORLEVEL%
-)
-"%REAL%" %* -- /m:1 /p:BuildInParallel=false
+set "CMAKE_BUILD_PARALLEL_LEVEL=1"
+node "$serialMjs" "%REAL%" %*
 exit /b %ERRORLEVEL%
-'@
+"@
 
     Set-Content -LiteralPath $batPath -Value $batContent -Encoding ASCII
 

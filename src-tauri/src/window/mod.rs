@@ -23,6 +23,7 @@ pub const TOOL_VOICE_FILES_WINDOW_LABEL: &str = "tool-voice-files";
 pub const TOOL_DICTATION_TRANSCRIPTS_WINDOW_LABEL: &str = "tool-dictation-transcripts";
 pub const TOOL_AUDIO_SRT_WINDOW_LABEL: &str = "tool-audio-srt";
 pub const TOOL_VOCAL_SEPARATOR_WINDOW_LABEL: &str = "tool-vocal-separator";
+pub const TOOL_SPEECH_ANALYSIS_WINDOW_LABEL: &str = "tool-speech-analysis";
 pub const OVERLAY_WINDOW_LABEL: &str = "overlay";
 
 const WINDOW_WIDTH: f64 = 400.0;
@@ -45,6 +46,8 @@ const TOOL_AUDIO_SRT_WINDOW_WIDTH: f64 = 480.0;
 const TOOL_AUDIO_SRT_WINDOW_HEIGHT: f64 = 640.0;
 const TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH: f64 = 460.0;
 const TOOL_VOCAL_SEPARATOR_WINDOW_HEIGHT: f64 = 580.0;
+const TOOL_SPEECH_ANALYSIS_WINDOW_WIDTH: f64 = 920.0;
+const TOOL_SPEECH_ANALYSIS_WINDOW_HEIGHT: f64 = 640.0;
 const OVERLAY_WINDOW_WIDTH: f64 = 140.0;
 const OVERLAY_WINDOW_HEIGHT: f64 = 40.0;
 const OVERLAY_CORNER_MARGIN: f64 = 16.0;
@@ -234,6 +237,18 @@ pub fn configure_vocal_separator_tool_window(window: &WebviewWindow) {
         window,
         TOOL_VOCAL_SEPARATOR_WINDOW_WIDTH,
         TOOL_VOCAL_SEPARATOR_WINDOW_HEIGHT,
+    );
+}
+
+pub fn configure_speech_analysis_tool_window(window: &WebviewWindow) {
+    configure_settings_window_chrome(window);
+    let _ = window.set_resizable(true);
+    let _ = window.set_maximizable(false);
+    let _ = window.set_always_on_top(true);
+    enforce_window_size(
+        window,
+        TOOL_SPEECH_ANALYSIS_WINDOW_WIDTH,
+        TOOL_SPEECH_ANALYSIS_WINDOW_HEIGHT,
     );
 }
 
@@ -894,6 +909,68 @@ pub fn show_vocal_separator_tool_window(app: &AppHandle) -> Result<(), String> {
 
     if !created {
         crate::app::events::emit_vocal_separator_window_ready(app);
+    }
+
+    Ok(())
+}
+
+fn ensure_speech_analysis_tool_window(app: &AppHandle) -> Result<(WebviewWindow, bool), String> {
+    if let Some(window) = app.get_webview_window(TOOL_SPEECH_ANALYSIS_WINDOW_LABEL) {
+        return Ok((window, false));
+    }
+
+    let builder = WebviewWindowBuilder::new(
+        app,
+        TOOL_SPEECH_ANALYSIS_WINDOW_LABEL,
+        WebviewUrl::App("tool-speech-analysis.html".into()),
+    )
+    .title("Veyro")
+    .inner_size(
+        TOOL_SPEECH_ANALYSIS_WINDOW_WIDTH,
+        TOOL_SPEECH_ANALYSIS_WINDOW_HEIGHT,
+    )
+    .decorations(true)
+    .resizable(true)
+    .maximizable(false)
+    .closable(true)
+    .always_on_top(true)
+    .center()
+    .visible(false)
+    .background_color(SETTINGS_WINDOW_BG);
+
+    #[cfg(windows)]
+    let builder = builder.drag_and_drop(true);
+
+    let window = builder
+        .build()
+        .map_err(|error| format!("failed to create speech analysis tool window: {error}"))?;
+
+    configure_speech_analysis_tool_window(&window);
+    Ok((window, true))
+}
+
+pub fn show_speech_analysis_tool_window(app: &AppHandle) -> Result<(), String> {
+    let (window, created) = ensure_speech_analysis_tool_window(app).inspect_err(|error| {
+        warn!("speech analysis tool window creation failed: {error}");
+    })?;
+
+    let _ = window.set_title(&crate::i18n::translate(
+        settings_ui_locale(app),
+        "tools.speechAnalysis.windowTitle",
+        &[],
+    ));
+    configure_speech_analysis_tool_window(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_skip_taskbar(false);
+
+    #[cfg(windows)]
+    activate_window(&window);
+
+    let _ = window.set_focus();
+
+    if !created {
+        crate::app::events::emit_speech_analysis_window_ready(app);
     }
 
     Ok(())

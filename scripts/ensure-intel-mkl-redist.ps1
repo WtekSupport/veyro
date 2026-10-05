@@ -27,9 +27,7 @@ function Test-MklRedistReady {
     return $true
 }
 
-if (Test-MklRedistReady) {
-    Write-Host "Intel MKL redist ready at $nativeDir"
-} else {
+if (-not (Test-MklRedistReady)) {
     New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
     $nupkg = Join-Path $toolsDir "intelmkl.redist.win-x64.$mklVersion.nupkg"
     $url = "https://www.nuget.org/api/v2/package/intelmkl.redist.win-x64/$mklVersion"
@@ -54,4 +52,6 @@ $mklDlls = @(Get-ChildItem $nativeDir -Filter "mkl*.dll" -File)
 foreach ($dll in $mklDlls) {
     Copy-Item $dll.FullName (Join-Path $dispatchDir $dll.Name) -Force
 }
-Write-Host "Synced $($mklDlls.Count) MKL DLL(s) to $dispatchDir"
+if ($env:VEYRO_DEV_VERBOSE -eq "1") {
+    Write-Host "Intel MKL redist: $($mklDlls.Count) DLL(s) in $dispatchDir"
+}

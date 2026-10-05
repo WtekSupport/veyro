@@ -41,13 +41,15 @@ impl Default for SubtitleOptions {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SubtitleCue {
     pub start_ms: u64,
     pub end_ms: u64,
     pub lines: Vec<String>,
     /// Optional speaker cluster id from diarization (0-based).
     pub speaker_id: Option<u32>,
+    /// Word-level timings for WebVTT karaoke (when populated by STT).
+    pub words: Vec<TimedWord>,
 }
 
 impl SubtitleCue {
@@ -57,8 +59,86 @@ impl SubtitleCue {
             end_ms,
             lines,
             speaker_id: None,
+            words: Vec::new(),
         }
     }
+}
+
+/// Merge words shorter than `min_duration_ms` into a neighbor to reduce player flicker.
+pub fn merge_short_words(words: &[TimedWord], min_duration_ms: u64) -> Vec<TimedWord> {
+    if words.is_empty() || min_duration_ms == 0 {
+        return words.to_vec();
+    }
+    let mut merged: Vec<TimedWord> = Vec::new();
+    for word in words {
+        let duration = word.end_ms.saturating_sub(word.start_ms);
+        if duration >= min_duration_ms {
+            merged.push(word.clone());
+            continue;
+        }
+        if let Some(last) = merged.last_mut() {
+            if !last.text.is_empty() && !word.text.is_empty() {
+                let last_char = last.text.chars().last();
+                let next_char = word.text.chars().next();
+                let needs_space = matches!(
+                    (last_char, next_char),
+                    (Some(c), Some(n))
+                        if c.is_alphanumeric() && n.is_alphanumeric()
+                            && last.text.len() > 1
+                            && word.text.len() > 1
+                );
+                if needs_space {
+                    last.text.push(' ');
+                }
+                last.text.push_str(&word.text);
+            } else {
+                last.text.push_str(&word.text);
+            }
+            last.end_ms = word.end_ms.max(last.end_ms);
+        } else {
+            merged.push(word.clone());
+        }
+    }
+    merged
+}
+
+pub fn cues_have_karaoke_word_timings(cues: &[SubtitleCue]) -> bool {
+    let mut saw_cue = false;
+    for cue in cues {
+        if cue.lines.is_empty() {
+            continue;
+        }
+        saw_cue = true;
+        if cue.words.is_empty() {
+            return false;
+        }
+        let mut previous_start = cue.words[0].start_ms;
+        for word in cue.words.iter().skip(1) {
+            if word.start_ms < previous_start {
+                return false;
+            }
+            previous_start = word.start_ms;
+        }
+    }
+    saw_cue
+}
+
+fn format_karaoke_line(words: &[TimedWord], global_offset_ms: i64) -> String {
+    if words.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for (index, word) in words.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+            out.push_str(&format!(
+                "<{}>",
+                format_vtt_timestamp(global_offset_ms + word.start_ms as i64)
+            ));
+        }
+        out.push_str(&word.text);
+    }
+    out
 }
 
 /// Assign `speaker_id` on cues by maximum overlap with diarization turns.
@@ -129,6 +209,7 @@ pub fn render_vtt(
     line_ending: SubtitleLineEnding,
     global_offset_ms: i64,
     utf8_bom: bool,
+    karaoke: bool,
 ) -> String {
     let eol = line_ending.as_str();
     let mut out = String::new();
@@ -160,20 +241,35 @@ pub fn render_vtt(
             .map(|label| sanitize_vtt_voice_name(&label))
             .filter(|label| !label.is_empty());
 
-        for (line_i, line) in cue.lines.iter().enumerate() {
-            if line_i == 0 {
-                if let Some(ref name) = voice {
-                    out.push_str("<v ");
-                    out.push_str(name);
-                    out.push('>');
-                    out.push_str(line);
+        let karaoke_payload = karaoke && !cue.words.is_empty();
+        if karaoke_payload {
+            let payload = format_karaoke_line(&cue.words, global_offset_ms);
+            if let Some(ref name) = voice {
+                out.push_str("<v ");
+                out.push_str(name);
+                out.push('>');
+                out.push_str(&payload);
+                out.push_str("</v>");
+            } else {
+                out.push_str(&payload);
+            }
+            out.push_str(eol);
+        } else {
+            for (line_i, line) in cue.lines.iter().enumerate() {
+                if line_i == 0 {
+                    if let Some(ref name) = voice {
+                        out.push_str("<v ");
+                        out.push_str(name);
+                        out.push('>');
+                        out.push_str(line);
+                    } else {
+                        out.push_str(line);
+                    }
                 } else {
                     out.push_str(line);
                 }
-            } else {
-                out.push_str(line);
+                out.push_str(eol);
             }
-            out.push_str(eol);
         }
         out.push_str(eol);
     }
@@ -198,6 +294,7 @@ pub fn build_subtitle_cues_from_aligned_words(
             text: word.text.clone(),
             start_ms: word.start_ms,
             end_ms: word.end_ms,
+            confidence: None,
         })
         .collect();
 
@@ -476,11 +573,13 @@ fn cues_from_stt_segment(
             } else {
                 seg_start + duration * best_end as u64 / total_words as u64
             };
-            cues.push(SubtitleCue::new(
-                cue_start,
-                cue_end.max(cue_start),
+            cues.push(SubtitleCue {
+                start_ms: cue_start,
+                end_ms: cue_end.max(cue_start),
                 lines,
-            ));
+                speaker_id: None,
+                words: Vec::new(),
+            });
         }
         word_start = best_end;
     }
@@ -550,11 +649,13 @@ fn cues_from_timed_words(
         if !lines.is_empty() {
             let cue_start = slice.first().map(|w| w.start_ms).unwrap_or(0);
             let cue_end = slice.last().map(|w| w.end_ms).unwrap_or(cue_start);
-            cues.push(SubtitleCue::new(
-                cue_start,
-                cue_end.max(cue_start),
+            cues.push(SubtitleCue {
+                start_ms: cue_start,
+                end_ms: cue_end.max(cue_start),
                 lines,
-            ));
+                speaker_id: None,
+                words: slice.to_vec(),
+            });
         }
         start_index = best_end;
     }
@@ -928,7 +1029,7 @@ mod tests {
     #[test]
     fn render_vtt_header_and_dot_timestamps() {
         let cues = vec![SubtitleCue::new(1000, 2500, vec!["Hello".to_string()])];
-        let vtt = render_vtt(&cues, |_| None, SubtitleLineEnding::Lf, 0, false);
+        let vtt = render_vtt(&cues, |_| None, SubtitleLineEnding::Lf, 0, false, false);
         assert!(vtt.starts_with("WEBVTT\n\n"));
         assert!(vtt.contains("00:00:01.000 --> 00:00:02.500\nHello\n"));
         assert!(!vtt.contains(','));
@@ -944,8 +1045,96 @@ mod tests {
             SubtitleLineEnding::Lf,
             0,
             false,
+            false,
         );
         assert!(vtt.contains("<v Speaker 1>Hi there\n"));
+    }
+
+    #[test]
+    fn render_vtt_karaoke_inline_timestamps() {
+        let cue = SubtitleCue {
+            start_ms: 1000,
+            end_ms: 4000,
+            lines: vec!["Привет, как дела?".to_string()],
+            speaker_id: None,
+            words: vec![
+                TimedWord {
+                    text: "Привет,".to_string(),
+                    start_ms: 1000,
+                    end_ms: 1500,
+                    confidence: None,
+                },
+                TimedWord {
+                    text: "как".to_string(),
+                    start_ms: 2000,
+                    end_ms: 2500,
+                    confidence: None,
+                },
+                TimedWord {
+                    text: "дела?".to_string(),
+                    start_ms: 3000,
+                    end_ms: 3800,
+                    confidence: None,
+                },
+            ],
+        };
+        let vtt = render_vtt(&[cue], |_| None, SubtitleLineEnding::Lf, 0, false, true);
+        assert!(vtt.contains("Привет,<00:00:02.000> как<00:00:03.000> дела?"));
+    }
+
+    #[test]
+    fn render_vtt_karaoke_with_voice_tag_closed() {
+        let cue = SubtitleCue {
+            start_ms: 0,
+            end_ms: 2000,
+            lines: vec!["Hi there".to_string()],
+            speaker_id: Some(0),
+            words: vec![
+                TimedWord {
+                    text: "Hi".to_string(),
+                    start_ms: 0,
+                    end_ms: 800,
+                    confidence: None,
+                },
+                TimedWord {
+                    text: "there".to_string(),
+                    start_ms: 900,
+                    end_ms: 1800,
+                    confidence: None,
+                },
+            ],
+        };
+        let vtt = render_vtt(
+            &[cue],
+            |id| Some(format!("Speaker {}", id + 1)),
+            SubtitleLineEnding::Lf,
+            0,
+            false,
+            true,
+        );
+        assert!(vtt.contains("<v Speaker 1>Hi<00:00:00.900> there</v>"));
+    }
+
+    #[test]
+    fn merge_short_words_joins_neighbors() {
+        let words = vec![
+            TimedWord {
+                text: "a".to_string(),
+                start_ms: 0,
+                end_ms: 50,
+                confidence: None,
+            },
+            TimedWord {
+                text: "b".to_string(),
+                start_ms: 50,
+                end_ms: 200,
+                confidence: None,
+            },
+        ];
+        let merged = merge_short_words(&words, 90);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].text, "ab");
+        assert_eq!(merged[0].end_ms, 200);
     }
 
     #[test]
@@ -1193,11 +1382,13 @@ mod tests {
                 text: "alpha".to_string(),
                 start_ms: 1_000,
                 end_ms: 1_400,
+                confidence: None,
             },
             TimedWord {
                 text: "beta".to_string(),
                 start_ms: 1_900,
                 end_ms: 2_300,
+                confidence: None,
             },
         ];
         let segments = vec![seg_with_words("alpha beta", 1_000, 2_300, words)];
