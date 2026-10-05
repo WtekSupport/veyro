@@ -5,6 +5,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(() => ({
   clearScreen: false,
+  base: "./",
   build: {
     rollupOptions: {
       input: {

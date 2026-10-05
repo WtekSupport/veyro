@@ -1,5 +1,5 @@
-# Bundle installers from an existing release binary (no extra `cargo build`).
-# Run Invoke-VeyroFrontendBuild before the last `cargo build` — tauri embeds `dist` at compile time.
+# Release packaging via `tauri build` (embeds frontendDist + NSIS). Do not use `tauri bundle`
+# on a raw `cargo build` — that skips the CLI embed path installers expect.
 
 function Invoke-VeyroFrontendBuild {
     npm run build
@@ -8,20 +8,38 @@ function Invoke-VeyroFrontendBuild {
     }
 }
 
-function Invoke-VeyroTauriBundle {
+function Invoke-VeyroTauriReleaseBuild {
     param(
         [AllowEmptyString()]
         [string]$Features
     )
 
-    $bundleArgs = @("exec", "tauri", "--", "bundle", "--ci")
+    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+    $releaseConfig = Join-Path $repoRoot "src-tauri/tauri.release.conf.json"
+
+    $buildArgs = @(
+        "exec", "tauri", "--", "build",
+        "--bundles", "nsis",
+        "--ci",
+        "--no-binary-patching",
+        "--config", $releaseConfig
+    )
     if ($Features) {
-        $bundleArgs += @("--features", $Features)
+        $buildArgs += @("--features", $Features)
     } else {
-        $bundleArgs += @("--no-default-features")
+        $buildArgs += @("--no-default-features")
     }
-    npm @bundleArgs
+    npm @buildArgs
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
+}
+
+# Backward-compatible name used by bundle-only script.
+function Invoke-VeyroTauriBundle {
+    param(
+        [AllowEmptyString()]
+        [string]$Features
+    )
+    Invoke-VeyroTauriReleaseBuild -Features $Features
 }

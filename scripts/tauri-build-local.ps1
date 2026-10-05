@@ -220,33 +220,7 @@ if ($syncWindowsBundle) {
 
 
 
-$bundleArtifactDir = Join-Path $env:CARGO_TARGET_DIR "release"
-
-if ($releaseOutputName -ne "release") {
-
-    New-Item -ItemType Directory -Force -Path $bundleArtifactDir | Out-Null
-
-    $builtExe = Join-Path $releaseDir "veyro.exe"
-
-    if (-not (Test-Path -LiteralPath $builtExe)) {
-
-        Write-Error "Missing release binary: $builtExe"
-
-    }
-
-    Copy-Item -LiteralPath $builtExe -Destination (Join-Path $bundleArtifactDir "veyro.exe") -Force
-
-    Get-ChildItem -LiteralPath $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue |
-
-        Copy-Item -Destination $bundleArtifactDir -Force
-
-    Write-Host "Copied $($releaseLayout.ProfileName) artifacts into release/ for tauri bundle."
-
-}
-
-
-
-Write-Host "Bundling installer (tauri bundle, no extra cargo build)..."
+Write-Host "Release installer via tauri build (embed dist + NSIS; recompiles after DLL staging)..."
 
 if (-not (Set-UpdaterSigningEnv)) {
 
@@ -254,7 +228,16 @@ if (-not (Set-UpdaterSigningEnv)) {
 
 }
 
-Invoke-VeyroTauriBundle -Features $features
+Invoke-VeyroTauriReleaseBuild -Features $features
+
+$builtExe = Join-Path (Join-Path $env:CARGO_TARGET_DIR "release") "veyro.exe"
+if (-not (Test-Path -LiteralPath $builtExe)) {
+    Write-Error "Missing release binary after tauri build: $builtExe"
+}
+$embedCheck = & findstr /M /C:"init.html" $builtExe 2>$null
+if (-not $embedCheck) {
+    Write-Error "Release veyro.exe does not contain embedded UI (init.html). Aborting."
+}
 
 
 
