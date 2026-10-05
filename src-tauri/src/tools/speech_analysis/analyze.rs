@@ -36,7 +36,7 @@ use super::ensure_models::ensure_plan_models;
 use super::model_plan::{resolve_plan, SpeechAnalysisModelPolicy};
 use super::summary::{build_empty_summary, build_summary, caveat_export_keys};
 use super::transcript_qc::analyze_transcript_quality;
-use crate::transcription::sherpa::merge_transcript_pieces;
+use crate::transcription::offline_decode::{merge_transcript_pieces, max_offline_audio_ms};
 use super::types::{
     SpeechAnalysisAccumulation, SpeechAnalysisMeta, SpeechAnalysisOptions, SpeechAnalysisReport,
     SpeechRegisterHint,
@@ -170,9 +170,7 @@ pub async fn analyze_speech_analysis_file(
     let speech_regions_for_stt = detect_speech_regions(&prepared.segment, &vad_config)
         .map_err(|error| error.to_string())?;
     let max_chunk_ms = settings.vad_config().maximum_segment_ms as u64;
-    let max_chunk_ms = max_chunk_ms.min(crate::transcription::sherpa::max_offline_audio_ms(
-        &settings,
-    ));
+    let max_chunk_ms = max_chunk_ms.min(max_offline_audio_ms(&settings));
     let raw_stt_regions: Vec<(u64, crate::audio::segment::AudioSegment)> =
         if speech_regions_for_stt.is_empty() {
             vec![(0, prepared.segment.clone())]
@@ -544,9 +542,7 @@ async fn transcribe_for_analysis(
             .collect()
     };
     let max_chunk_ms = settings.vad_config().maximum_segment_ms as u64;
-    let max_chunk_ms = max_chunk_ms.min(crate::transcription::sherpa::max_offline_audio_ms(
-        settings,
-    ));
+    let max_chunk_ms = max_chunk_ms.min(max_offline_audio_ms(settings));
     let regions = expand_stt_chunks(raw_regions, max_chunk_ms);
 
     let total_ms = regions

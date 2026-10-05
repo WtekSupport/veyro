@@ -554,7 +554,7 @@ async fn transcribe_speech_regions(
             .collect()
     };
     let max_chunk_ms = settings.vad_config().maximum_segment_ms as u64;
-    let max_chunk_ms = max_chunk_ms.min(crate::transcription::sherpa::max_offline_audio_ms(
+    let max_chunk_ms = max_chunk_ms.min(crate::transcription::offline_decode::max_offline_audio_ms(
         settings,
     ));
     let regions = expand_stt_chunks(raw_regions, max_chunk_ms);
