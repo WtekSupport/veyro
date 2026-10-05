@@ -72,34 +72,42 @@ pub fn merge_short_words(words: &[TimedWord], min_duration_ms: u64) -> Vec<Timed
     let mut merged: Vec<TimedWord> = Vec::new();
     for word in words {
         let duration = word.end_ms.saturating_sub(word.start_ms);
-        if duration >= min_duration_ms {
-            merged.push(word.clone());
-            continue;
-        }
-        if let Some(last) = merged.last_mut() {
-            if !last.text.is_empty() && !word.text.is_empty() {
-                let last_char = last.text.chars().last();
-                let next_char = word.text.chars().next();
-                let needs_space = matches!(
-                    (last_char, next_char),
-                    (Some(c), Some(n))
-                        if c.is_alphanumeric() && n.is_alphanumeric()
-                            && last.text.len() > 1
-                            && word.text.len() > 1
-                );
-                if needs_space {
-                    last.text.push(' ');
-                }
-                last.text.push_str(&word.text);
+        let last_short = merged
+            .last()
+            .map(|w| w.end_ms.saturating_sub(w.start_ms) < min_duration_ms)
+            .unwrap_or(false);
+        if duration < min_duration_ms || last_short {
+            if let Some(last) = merged.last_mut() {
+                append_timed_word_text(last, word);
+                last.end_ms = word.end_ms.max(last.end_ms);
             } else {
-                last.text.push_str(&word.text);
+                merged.push(word.clone());
             }
-            last.end_ms = word.end_ms.max(last.end_ms);
         } else {
             merged.push(word.clone());
         }
     }
     merged
+}
+
+fn append_timed_word_text(last: &mut TimedWord, word: &TimedWord) {
+    if !last.text.is_empty() && !word.text.is_empty() {
+        let last_char = last.text.chars().last();
+        let next_char = word.text.chars().next();
+        let needs_space = matches!(
+            (last_char, next_char),
+            (Some(c), Some(n))
+                if c.is_alphanumeric() && n.is_alphanumeric()
+                    && last.text.len() > 1
+                    && word.text.len() > 1
+        );
+        if needs_space {
+            last.text.push(' ');
+        }
+        last.text.push_str(&word.text);
+    } else {
+        last.text.push_str(&word.text);
+    }
 }
 
 pub fn cues_have_karaoke_word_timings(cues: &[SubtitleCue]) -> bool {
@@ -131,12 +139,15 @@ fn format_karaoke_line(words: &[TimedWord], global_offset_ms: i64) -> String {
     for (index, word) in words.iter().enumerate() {
         if index > 0 {
             out.push(' ');
-            out.push_str(&format!(
-                "<{}>",
-                format_vtt_timestamp(global_offset_ms + word.start_ms as i64)
-            ));
         }
         out.push_str(&word.text);
+        if index + 1 < words.len() {
+            let next = &words[index + 1];
+            out.push_str(&format!(
+                "<{}>",
+                format_vtt_timestamp(global_offset_ms + next.start_ms as i64)
+            ));
+        }
     }
     out
 }

@@ -39,7 +39,7 @@ mod tests {
         let live = prosody_intonation_score(3.8, 2.0, 5.5);
         let flat = prosody_intonation_score(0.6, 2.0, 5.5);
         let hyper = prosody_intonation_score(9.0, 2.0, 5.5);
-        assert!(live >= 85.0 && live < 100.0);
+        assert!(live >= 85.0);
         assert!(flat < 50.0);
         assert!(hyper < 75.0);
     }

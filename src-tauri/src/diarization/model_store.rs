@@ -407,9 +407,13 @@ mod speakrs_bundle_tests {
     }
 
     fn temp_speakrs_cache() -> (PathBuf, impl Drop) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let base = std::env::temp_dir().join(format!(
-            "veyro-speakrs-test-{}",
-            std::process::id()
+            "veyro-speakrs-test-{}-{}",
+            std::process::id(),
+            n
         ));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).expect("temp cache");

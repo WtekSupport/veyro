@@ -162,7 +162,7 @@ mod tests {
     fn pause_repeat_not_stutter() {
         let config = SpeechAnalysisConfig::default();
         assert_eq!(
-            classify_word_repeat("есть", "есть", 400, &config),
+            classify_word_repeat("есть", "есть", config.long_pause_ms, &config),
             Some(RepetitionKind::PossibleDeliberate)
         );
     }

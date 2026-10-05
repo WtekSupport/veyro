@@ -1,4 +1,5 @@
 # Extra inflected forms (tongue twisters, build script output). One word per line.
+говорил
 лигурийский
 лигурийского
 лигурийском
