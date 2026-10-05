@@ -1,5 +1,5 @@
-# Bundle installers from an existing release binary (no extra `cargo build`).
-# Run Invoke-VeyroFrontendBuild before the last `cargo build` — tauri embeds `dist` at compile time.
+# Bundle NSIS from a release `cargo build`. Frontend must be built before `cargo build`
+# (tauri-build embeds `frontendDist` at compile time).
 
 function Invoke-VeyroFrontendBuild {
     npm run build
@@ -14,7 +14,7 @@ function Invoke-VeyroTauriBundle {
         [string]$Features
     )
 
-    $bundleArgs = @("exec", "tauri", "--", "bundle", "--ci")
+    $bundleArgs = @("exec", "tauri", "--", "bundle", "--bundles", "nsis", "--ci", "--no-binary-patching")
     if ($Features) {
         $bundleArgs += @("--features", $Features)
     } else {

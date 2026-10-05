@@ -244,9 +244,7 @@ if ($releaseOutputName -ne "release") {
 
 }
 
-
-
-Write-Host "Bundling installer (tauri bundle, no extra cargo build)..."
+Write-Host "Bundling NSIS (tauri bundle)..."
 
 if (-not (Set-UpdaterSigningEnv)) {
 
@@ -255,6 +253,19 @@ if (-not (Set-UpdaterSigningEnv)) {
 }
 
 Invoke-VeyroTauriBundle -Features $features
+
+$builtExe = Join-Path $bundleArtifactDir "veyro.exe"
+if (-not (Test-Path -LiteralPath $builtExe)) {
+    Write-Error "Missing release binary: $builtExe"
+}
+$embedCheck = & findstr /M /C:"init.html" $builtExe 2>$null
+if (-not $embedCheck) {
+    Write-Error "Release veyro.exe does not contain embedded UI (init.html). Aborting."
+}
+$devUrlCheck = & findstr /M /C:"localhost:1420" $builtExe 2>$null
+if ($devUrlCheck) {
+    Write-Error "Release binary still contains localhost:1420 (devUrl). Rebuild after removing devUrl from tauri.conf.json."
+}
 
 
 

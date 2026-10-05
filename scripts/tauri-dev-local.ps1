@@ -148,7 +148,8 @@ if ($features -match "silero-te") {
 }
 
 $nodeExe = (Get-Command node -ErrorAction Stop).Source
-& $nodeExe $tauriJs dev --features $features -- -j $cargoJobs
+$devConfig = Join-Path $repoRoot "src-tauri/tauri.dev.conf.json"
+& $nodeExe $tauriJs dev --config $devConfig --features $features -- -j $cargoJobs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

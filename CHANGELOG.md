@@ -12,6 +12,12 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.10.35] — 2026-10-05
+
+### Fixed
+
+- **Windows release UI:** `devUrl` moved to `tauri.dev.conf.json` only (not embedded in release builds), Vite uses relative asset paths, and the release script verifies embedded UI before publishing.
+
 ## [1.10.34] — 2026-10-05
 
 ### Fixed

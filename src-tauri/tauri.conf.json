@@ -1,11 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Veyro",
-  "version": "1.10.34",
+  "version": "1.10.35",
   "identifier": "com.mkdee.veyro",
   "build": {
-    "beforeDevCommand": "node scripts/tauri-before-dev.mjs",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
