@@ -4,8 +4,6 @@
   "version": "1.10.35",
   "identifier": "com.mkdee.veyro",
   "build": {
-    "beforeDevCommand": "node scripts/tauri-before-dev.mjs",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
