@@ -616,6 +616,7 @@ export const ru: Record<MessageKey, string> = {
   "tools.voiceFiles.silenceOnly.detail":
     "После декодирования уровень сигнала слишком низкий или дорожка фактически без звука. Проверьте громкость, настройки нормализации или выберите другой файл.",
   "tools.voiceFiles.rewriteFallback": "ИИ-переписывание недоступно — применена базовая очистка.",
+  "tools.voiceFiles.status.indexed": "В списке",
   "tools.voiceFiles.status.pending": "Ожидание",
   "tools.voiceFiles.status.processing": "Обработка…",
   "tools.voiceFiles.stage.decoding": "Декодирование аудио…",
@@ -946,6 +947,24 @@ export const ru: Record<MessageKey, string> = {
   "tools.speechAnalysis.advanced.hint":
     "Влияет только на анализ речи; глобальное STT в настройках не меняется.",
   "tools.speechAnalysis.advanced.llmCoach": "Пояснение ИИ (если доступно)",
+  "tools.speechAnalysis.advanced.speechRegister": "Тип речи",
+  "tools.speechAnalysis.advanced.speechRegisterAuto": "Авто (чтение / спонтанная)",
+  "tools.speechAnalysis.advanced.speechRegisterReading": "Чтение вслух",
+  "tools.speechAnalysis.advanced.speechRegisterSpontaneous": "Спонтанная речь",
+  "tools.speechAnalysis.advanced.accumulateSpeaker":
+    "Накапливать чистую речь в профиле одного диктора",
+  "tools.speechAnalysis.advanced.speakerProfile": "Профиль диктора",
+  "tools.speechAnalysis.advanced.speakerProfileNew": "Новый профиль…",
+  "tools.speechAnalysis.advanced.newProfileLabel": "Имя нового профиля",
+  "tools.speechAnalysis.advanced.newProfilePlaceholder": "Например: я",
+  "tools.speechAnalysis.meta.registerAuto.reading": "Режим: чтение (авто)",
+  "tools.speechAnalysis.meta.registerAuto.spontaneous": "Режим: спонтанная речь (авто)",
+  "tools.speechAnalysis.meta.registerManual.reading": "Режим: чтение",
+  "tools.speechAnalysis.meta.registerManual.spontaneous": "Режим: спонтанная речь",
+  "tools.speechAnalysis.meta.accumulation":
+    "Профиль «{label}»: {combinedSec} с чистой речи (этот файл {fileSec} с, ранее {priorSec} с)",
+  "tools.speechAnalysis.caveat.speakerProfileAccumulated":
+    "Порог артикуляции считается по накопленной чистой речи профиля диктора",
   "tools.speechAnalysis.status.pending": "В очереди",
   "tools.speechAnalysis.status.processing": "Обработка…",
   "tools.speechAnalysis.status.done": "Готово",
@@ -988,6 +1007,10 @@ export const ru: Record<MessageKey, string> = {
     "Нужна более длинная речь для полной оценки согласованности CTC",
   "tools.speechAnalysis.summary.label.full": "Оценка дикции",
   "tools.speechAnalysis.summary.label.preliminary": "Предварительная оценка (беглость и выразительность)",
+  "tools.speechAnalysis.summary.label.preliminaryAxes":
+    "Предварительная оценка ({axes})",
+  "tools.speechAnalysis.summary.label.insufficientData":
+    "Недостаточно данных для оценки (речь {speechSec} с)",
   "tools.speechAnalysis.summary.label.hidden": "Оценка недоступна",
   "tools.speechAnalysis.summary.badgePreliminary": "предварительно",
   "tools.speechAnalysis.summary.badgeFull": "полная",
@@ -1013,6 +1036,9 @@ export const ru: Record<MessageKey, string> = {
   "tools.speechAnalysis.summary.fluencyMetric.fillers": "Паразиты на 100 слов:",
   "tools.speechAnalysis.summary.fluencyMetric.reps": "Запинки:",
   "tools.speechAnalysis.summary.prosodyF0ChartCaption": "Контур F0 (voiced-кадры)",
+  "tools.speechAnalysis.summary.f0Expand": "Увеличить график F0",
+  "tools.speechAnalysis.summary.f0ExpandHint": "нажмите для увеличения",
+  "tools.speechAnalysis.summary.f0ExpandClose": "Закрыть",
   "tools.speechAnalysis.summary.reason.needsLongerRecording":
     "Нужна более длинная запись речи для этой метрики",
   "tools.speechAnalysis.summary.reason.needsLongerRecording.howTo":
@@ -1094,6 +1120,31 @@ export const ru: Record<MessageKey, string> = {
   "tools.speechAnalysis.problems.repetitionCount": "Подряд идущих повторов слов: {count}",
   "tools.speechAnalysis.problems.lowConfidence": "низкая уверенность STT",
   "tools.speechAnalysis.problems.suspiciousWord": "подозрительное слово в транскрипте",
+  "tools.speechAnalysis.problems.notInDictionary": "нет в словаре (возможная ошибка STT)",
+  "tools.speechAnalysis.problems.mixedAlphanumeric": "смешаны буквы и цифры",
+  "tools.speechAnalysis.problems.mixedScript": "смешанная латиница и кириллица",
+  "tools.speechAnalysis.problems.garbageCyrillic": "подозрительная кириллическая форма",
+  "tools.speechAnalysis.problems.repeatedChars": "повтор символов",
+  "tools.speechAnalysis.problems.abbreviation": "подозрительное сокращение",
+  "tools.speechAnalysis.problems.repetitionDeliberate": "возможно намеренный повтор",
+  "tools.speechAnalysis.summary.label.readAloud": "Оценка чтения по тексту",
+  "tools.speechAnalysis.summary.detail.fluencyReadAloud":
+    "Темп не оценивается в режиме чтения по эталону",
+  "tools.speechAnalysis.summary.reason.readAloudNoTempo":
+    "Для скороговорок и чтения вслух темп не входит в балл",
+  "tools.speechAnalysis.summary.detail.intelligibilitySuspiciousWords":
+    "Есть подозрительные слова в транскрипте — см. блок «Внимание»",
+  "tools.speechAnalysis.advanced.readAloud": "Чтение по эталону (WER/CER)",
+  "tools.speechAnalysis.advanced.tongueTwister": "Скороговорка",
+  "tools.speechAnalysis.advanced.tongueTwisterNone": "Свой текст ниже",
+  "tools.speechAnalysis.advanced.referenceText": "Эталонный текст",
+  "tools.speechAnalysis.meta.referenceEval": "WER {wer}% · CER {cer}%",
+  "tools.speechAnalysis.qc.snrCapped": "SNR > 40 dB",
+  "tools.speechAnalysis.qc.possibly_processed": "возможно, обработанная запись",
+  "tools.speechAnalysis.caveat.transcriptSuspiciousWords":
+    "Подозрительные слова в транскрипте: {suspicious} из {total} (балл не снижен на короткой записи).",
+  "tools.speechAnalysis.caveat.possiblyProcessedRecording":
+    "Очень высокий SNR — возможно синтез или сильная обработка; оценка шума завышена.",
   "tools.speechAnalysis.problems.lowGop": "слабое согласование звуков (GOP по транскрипту)",
   "tools.speechAnalysis.transcript.clickHint":
     "Нажмите на слово, чтобы прослушать фрагмент. Подсветка — подозрительные места.",
@@ -1126,11 +1177,11 @@ export const ru: Record<MessageKey, string> = {
   "tools.speechAnalysis.summary.detail.prosody":
     "F0: σ (в semitones), доля voiced и диапазон — не полная интонация",
   "tools.speechAnalysis.summary.detail.prosodyValues":
-    "Разброс F0: {std} st (ориентир ~2–5); voiced-кадры (справка): {voiced}%; p5–p95: {range} st",
+    "Разброс F0 p10–p90: {std} st (ориентир ~2–5); voiced среди речевых кадров: {voiced}%; p5–p95: {range} st",
   "tools.speechAnalysis.summary.detail.fluencyValues":
     "Темп: {sylPerSec} сл/с, {wpm} сл/мин · паузы ≥{minPauseMs} мс: {pauseCount} (ср. {meanPauseMs} мс), длинных: {longPauses} · паразиты: {fillers}/100 сл · запинки: {reps}",
   "tools.speechAnalysis.summary.detail.intelligibilityMerged":
-    "Доля слов с низкой уверенностью распознавания; средняя уверенность — на карточке технических данных",
+    "Балл — по уверенности модели STT; список «на что обратить внимание» использует словарь и порог по словам отдельно",
   "tools.speechAnalysis.summary.detail.prosodyLow": "Мало voiced-участков для надёжной оценки F0",
   "tools.speechAnalysis.technical.words": "{count} слов",
   "tools.speechAnalysis.technical.longPauses": "{count} длинных пауз",

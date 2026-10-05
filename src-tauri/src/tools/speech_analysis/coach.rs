@@ -94,15 +94,17 @@ fn provider_label(settings: &AppSettings) -> String {
 #[allow(dead_code)]
 fn system_prompt(locale: UiLocale) -> String {
     match locale {
-        UiLocale::Ru => r#"Ты редактор пояснений. На вход JSON: facts, rules, transcript_excerpt, preliminary (bool).
-Напиши 2–3 коротких предложения summary, пересказывая facts. Без списков strengths/improvements — оставь их пустыми массивами.
+        UiLocale::Ru => r#"Ты редактор пояснений. На вход JSON: facts, rules, transcript_excerpt, preliminary (bool), short_clip (bool).
+Если short_clip=true — максимум 2 коротких предложения: что учтено, что нет, сколько речи не хватает; не пересказывай все карточки и не повторяй строку итога.
+Иначе напиши 2–3 коротких предложения summary по facts. Без списков strengths/improvements — пустые массивы.
 Не добавляй числа в текст (ни одной цифры). Не используй camelCase и имена полей.
 Не говорите «монотонно», если разброс F0 высокий; voiced — не «гласные».
-Если preliminary=true — это предварительный балл, не «полная оценка дикции».
+Если preliminary=true — предварительный балл, не «полная оценка дикции».
 Ответ — ТОЛЬКО JSON: {"summary":"...","strengths":[],"improvements":[],"consistencyNotes":[]}"#
             .to_string(),
-        UiLocale::En => r#"You rewrite coach notes. Input: facts, rules, transcript_excerpt, preliminary (bool).
-Write 2–3 short sentences in summary rephrasing facts. Leave strengths/improvements as empty arrays.
+        UiLocale::En => r#"You rewrite coach notes. Input: facts, rules, transcript_excerpt, preliminary (bool), short_clip (bool).
+If short_clip=true, at most 2 short sentences: what is scored, what is not, how much speech is missing; do not recap every card or repeat the overall line.
+Otherwise write 2–3 short sentences from facts. Leave strengths/improvements as empty arrays.
 Do not include any digits in the text. No camelCase or field names.
 Do not say 'monotone' when F0 spread is high; voiced is not 'vowels'.
 If preliminary=true, it is a preliminary score, not a full diction grade.

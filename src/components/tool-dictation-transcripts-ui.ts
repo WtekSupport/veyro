@@ -4,11 +4,30 @@ import {
   EVENTS,
   listDictationTranscripts,
   removeDictationTranscript,
+  removeVoiceIndexEntry,
   type DictationTranscriptEntry,
+  type VoiceFileProgressPhase,
 } from "../api";
-import { iconCopy, iconSidebarCollapse, iconSidebarExpand } from "./icons";
+import { iconCopy } from "./icons";
+import {
+  loadToolBrowserSidebarCollapsed,
+  renderToolBrowserSidebar,
+  saveToolBrowserSidebarCollapsed,
+  toolBrowserShellClass,
+  type ToolBrowserSidebarLabels,
+} from "../lib/tool-browser-sidebar";
 import { escapeHtml } from "../lib/html";
+import {
+  fetchVoiceIndex,
+  getVoiceIndexSelection,
+  setVoiceIndexSelection,
+  subscribeVoiceIndex,
+  voiceIndexStatusLabel,
+  type VoiceIndexEntry,
+} from "../lib/tool-voice-index";
 import { t } from "../i18n";
+
+type SidebarPanel = "session" | "file";
 
 function formatSessionLabel(entry: DictationTranscriptEntry): string {
   const d = new Date(entry.startedAtMs);
@@ -37,70 +56,153 @@ function statusLabel(status: DictationTranscriptEntry["status"]): string {
     : t("tools.dictationTranscripts.status.done");
 }
 
-function renderSidebar(
-  entries: DictationTranscriptEntry[],
+function renderVoiceFileRows(
+  entries: VoiceIndexEntry[],
   selectedId: string | null,
+  progressByPath: Map<string, { phase: VoiceFileProgressPhase; percent: number | null }>,
+): string {
+  if (entries.length === 0) {
+    return `<li class="voice-files-browser-empty muted">${escapeHtml(t("tools.voiceFiles.indexEmpty"))}</li>`;
+  }
+  return entries
+    .map((entry) => {
+      const selected = entry.id === selectedId;
+      const prog = progressByPath.get(entry.path);
+      const statusText = voiceIndexStatusLabel(
+        entry.status,
+        prog?.phase ?? null,
+        prog?.percent ?? null,
+      );
+      const canRemove = entry.status !== "processing";
+      return `
+            <li class="voice-files-browser-row${selected ? " voice-files-browser-row--selected" : ""} voice-files-browser-row--${escapeHtml(entry.status)}"
+                data-voice-file-id="${escapeHtml(entry.id)}">
+              <button type="button" class="voice-files-browser-main" data-select-voice-file="${escapeHtml(entry.id)}">
+                <span class="voice-files-browser-name">${escapeHtml(entry.fileName)}</span>
+                <span class="voice-files-browser-status">${escapeHtml(statusText)}</span>
+              </button>
+              <button type="button" class="voice-files-browser-remove" data-remove-voice-file="${escapeHtml(entry.id)}"
+                ${canRemove ? "" : "disabled"}
+                aria-label="${escapeHtml(t("tools.voiceWatch.removeFromIndex"))}"
+                title="${escapeHtml(t("tools.voiceWatch.removeFromIndex"))}">×</button>
+            </li>`;
+    })
+    .join("");
+}
+
+const DICTATION_SIDEBAR_TOOL_ID = "dictation-transcripts";
+
+function dictationSidebarLabels(): ToolBrowserSidebarLabels {
+  return {
+    ariaLabel: t("tools.dictationTranscripts.sidebarTitle"),
+    title: t("tools.dictationTranscripts.sidebarTitle"),
+    collapseLabel: t("tools.dictationTranscripts.sidebarCollapse"),
+    expandLabel: t("tools.dictationTranscripts.sidebarExpand"),
+  };
+}
+
+function renderSidebar(
+  sessions: DictationTranscriptEntry[],
+  selectedSessionId: string | null,
+  voiceFiles: VoiceIndexEntry[],
+  selectedVoiceFileId: string | null,
+  activePanel: SidebarPanel,
+  progressByPath: Map<string, { phase: VoiceFileProgressPhase; percent: number | null }>,
   collapsed: boolean,
 ): string {
-  if (collapsed) {
-    return `
-      <aside class="voice-files-sidebar voice-files-sidebar--collapsed" aria-label="${escapeHtml(t("tools.dictationTranscripts.sidebarTitle"))}">
-        <button type="button" class="icon-btn voice-files-sidebar-toggle" data-toggle-sidebar
-          aria-label="${escapeHtml(t("tools.dictationTranscripts.sidebarExpand"))}"
-          title="${escapeHtml(t("tools.dictationTranscripts.sidebarExpand"))}">${iconSidebarExpand()}</button>
-      </aside>`;
-  }
-
-  const rows =
-    entries.length === 0
+  const sessionRows =
+    sessions.length === 0
       ? `<li class="voice-files-browser-empty muted">${escapeHtml(t("tools.dictationTranscripts.emptyList"))}</li>`
-      : entries
+      : sessions
           .map((entry) => {
-            const selected = entry.id === selectedId;
+            const selected =
+              activePanel === "session" && entry.id === selectedSessionId;
             return `
             <li class="voice-files-browser-row${selected ? " voice-files-browser-row--selected" : ""} voice-files-browser-row--${escapeHtml(entry.status)}"
-                data-index-id="${escapeHtml(entry.id)}">
-              <button type="button" class="voice-files-browser-main" data-select-index="${escapeHtml(entry.id)}">
+                data-session-id="${escapeHtml(entry.id)}">
+              <button type="button" class="voice-files-browser-main" data-select-session="${escapeHtml(entry.id)}">
                 <span class="voice-files-browser-name">${escapeHtml(formatSessionLabel(entry))}</span>
                 <span class="voice-files-browser-status">${escapeHtml(statusLabel(entry.status))} · ${escapeHtml(previewLine(entry.text))}</span>
               </button>
-              <button type="button" class="voice-files-browser-remove" data-remove-index="${escapeHtml(entry.id)}"
+              <button type="button" class="voice-files-browser-remove" data-remove-session="${escapeHtml(entry.id)}"
                 aria-label="${escapeHtml(t("tools.dictationTranscripts.delete"))}"
                 title="${escapeHtml(t("tools.dictationTranscripts.delete"))}">×</button>
             </li>`;
           })
           .join("");
 
-  return `
-    <aside class="voice-files-sidebar" aria-label="${escapeHtml(t("tools.dictationTranscripts.sidebarTitle"))}">
-      <div class="voice-files-sidebar-head">
-        <span class="voice-files-sidebar-title">${escapeHtml(t("tools.dictationTranscripts.sidebarTitle"))}</span>
-        <button type="button" class="icon-btn" data-toggle-sidebar
-          aria-label="${escapeHtml(t("tools.dictationTranscripts.sidebarCollapse"))}"
-          title="${escapeHtml(t("tools.dictationTranscripts.sidebarCollapse"))}">${iconSidebarCollapse()}</button>
+  const fileRows = renderVoiceFileRows(
+    voiceFiles,
+    activePanel === "file" ? selectedVoiceFileId : null,
+    progressByPath,
+  );
+
+  const body = `
+      <div class="voice-files-sidebar-section">
+        <p class="voice-files-sidebar-section-title">${escapeHtml(t("tools.dictationTranscripts.sidebarTitle"))}</p>
+        <ul class="voice-files-browser" role="list">${sessionRows}</ul>
       </div>
-      <ul class="voice-files-browser" role="list">${rows}</ul>
-    </aside>`;
+      <div class="voice-files-sidebar-section">
+        <p class="voice-files-sidebar-section-title">${escapeHtml(t("tools.voiceFiles.sidebarTitle"))}</p>
+        <ul class="voice-files-browser" role="list">${fileRows}</ul>
+      </div>`;
+
+  return renderToolBrowserSidebar(dictationSidebarLabels(), collapsed, body);
 }
 
-function renderTool(
-  entries: DictationTranscriptEntry[],
-  selectedId: string | null,
-  copyHint: string | null,
-  sidebarCollapsed: boolean,
-): string {
-  const selected =
-    entries.find((e) => e.id === selectedId) ??
-    entries.find((e) => e.status === "active") ??
-    entries[0] ??
+function renderTool(args: {
+  sessions: DictationTranscriptEntry[];
+  selectedSessionId: string | null;
+  voiceFiles: VoiceIndexEntry[];
+  selectedVoiceFileId: string | null;
+  activePanel: SidebarPanel;
+  progressByPath: Map<string, { phase: VoiceFileProgressPhase; percent: number | null }>;
+  copyHint: string | null;
+  sidebarCollapsed: boolean;
+}): string {
+  const {
+    sessions,
+    selectedSessionId,
+    voiceFiles,
+    selectedVoiceFileId,
+    activePanel,
+    progressByPath,
+    copyHint,
+    sidebarCollapsed,
+  } = args;
+
+  const selectedSession =
+    sessions.find((e) => e.id === selectedSessionId) ??
+    sessions.find((e) => e.status === "active") ??
+    sessions[0] ??
     null;
-  const displayText = selected?.text ?? "";
+  const selectedFile =
+    voiceFiles.find((e) => e.id === selectedVoiceFileId) ?? null;
+
+  let displayText = "";
+  let hintLine = "";
+  if (activePanel === "file" && selectedFile) {
+    displayText = selectedFile.text;
+    hintLine = `${voiceIndexStatusLabel(selectedFile.status, null, null)} · ${selectedFile.fileName}`;
+  } else if (selectedSession) {
+    displayText = selectedSession.text;
+    hintLine = `${statusLabel(selectedSession.status)} · ${formatSessionLabel(selectedSession)}`;
+  }
+
   const canCopy = Boolean(displayText.trim());
   const copyTitle = copyHint ?? t("tools.dictationTranscripts.copy");
 
   return `
-    <div class="voice-files-tool voice-files-tool--with-browser${sidebarCollapsed ? " voice-files-tool--sidebar-collapsed" : ""}">
-      ${renderSidebar(entries, selected?.id ?? null, sidebarCollapsed)}
+    <div class="${toolBrowserShellClass(sidebarCollapsed)}">
+      ${renderSidebar(
+        sessions,
+        selectedSession?.id ?? null,
+        voiceFiles,
+        selectedVoiceFileId,
+        activePanel,
+        progressByPath,
+        sidebarCollapsed,
+      )}
       <div class="voice-files-main">
         <div class="voice-files-text-stack" aria-live="polite">
           <div class="voice-files-text-wrap">
@@ -114,11 +216,7 @@ function renderTool(
               placeholder="${escapeHtml(t("tools.dictationTranscripts.emptyResult"))}"
             >${escapeHtml(displayText)}</textarea>
           </div>
-          ${
-            selected
-              ? `<p class="voice-files-stage-hint">${escapeHtml(statusLabel(selected.status))} · ${escapeHtml(formatSessionLabel(selected))}</p>`
-              : ""
-          }
+          ${hintLine ? `<p class="voice-files-stage-hint">${escapeHtml(hintLine)}</p>` : ""}
           ${copyHint ? `<p class="voice-files-copy-hint">${escapeHtml(copyHint)}</p>` : ""}
         </div>
       </div>
@@ -127,66 +225,149 @@ function renderTool(
 }
 
 export function createDictationTranscriptsController(root: HTMLElement): void {
-  let entries: DictationTranscriptEntry[] = [];
-  let selectedId: string | null = null;
+  let sessions: DictationTranscriptEntry[] = [];
+  let voiceFiles: VoiceIndexEntry[] = [];
+  let selectedSessionId: string | null = null;
+  let selectedVoiceFileId: string | null = null;
+  let activePanel: SidebarPanel = "session";
   let copyHint: string | null = null;
-  let sidebarCollapsed = false;
+  let sidebarCollapsed = loadToolBrowserSidebarCollapsed(DICTATION_SIDEBAR_TOOL_ID);
   let copyHintTimer: number | null = null;
+  const progressByPath = new Map<
+    string,
+    { phase: VoiceFileProgressPhase; percent: number | null }
+  >();
   const unlisteners: UnlistenFn[] = [];
+  let indexUnsubscribe: (() => void) | null = null;
+
+  const refreshVoiceFiles = async (): Promise<void> => {
+    try {
+      const snapshot = await fetchVoiceIndex();
+      voiceFiles = snapshot.index;
+      if (
+        selectedVoiceFileId &&
+        !voiceFiles.some((e) => e.id === selectedVoiceFileId)
+      ) {
+        selectedVoiceFileId = null;
+        if (activePanel === "file") {
+          activePanel = "session";
+        }
+      }
+    } catch {
+      voiceFiles = [];
+    }
+  };
 
   const paint = (): void => {
-    root.innerHTML = renderTool(entries, selectedId, copyHint, sidebarCollapsed);
+    root.innerHTML = renderTool({
+      sessions,
+      selectedSessionId,
+      voiceFiles,
+      selectedVoiceFileId,
+      activePanel,
+      progressByPath,
+      copyHint,
+      sidebarCollapsed,
+    });
     bind();
   };
 
-  const selectBest = (): void => {
-    if (selectedId && entries.some((e) => e.id === selectedId)) {
+  const selectBestSession = (): void => {
+    if (selectedSessionId && sessions.some((e) => e.id === selectedSessionId)) {
       return;
     }
-    selectedId =
-      entries.find((e) => e.status === "active")?.id ?? entries[0]?.id ?? null;
+    selectedSessionId =
+      sessions.find((e) => e.status === "active")?.id ?? sessions[0]?.id ?? null;
+  };
+
+  const refreshSessions = async (): Promise<void> => {
+    try {
+      sessions = await listDictationTranscripts();
+    } catch (error) {
+      console.error("list dictation transcripts", error);
+      sessions = [];
+    }
+    selectBestSession();
   };
 
   const refresh = async (): Promise<void> => {
-    try {
-      entries = await listDictationTranscripts();
-    } catch (error) {
-      console.error("list dictation transcripts", error);
-      entries = [];
+    await Promise.all([refreshSessions(), refreshVoiceFiles()]);
+    const persisted = getVoiceIndexSelection();
+    if (persisted && voiceFiles.some((e) => e.id === persisted)) {
+      selectedVoiceFileId = persisted;
+      activePanel = "file";
     }
-    selectBest();
     paint();
   };
 
   const bind = (): void => {
     root.querySelector("[data-toggle-sidebar]")?.addEventListener("click", () => {
       sidebarCollapsed = !sidebarCollapsed;
+      saveToolBrowserSidebarCollapsed(DICTATION_SIDEBAR_TOOL_ID, sidebarCollapsed);
       paint();
     });
 
-    root.querySelectorAll<HTMLButtonElement>("[data-select-index]").forEach((btn) => {
+    root.querySelectorAll<HTMLButtonElement>("[data-select-session]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        selectedId = btn.dataset.selectIndex ?? null;
+        selectedSessionId = btn.dataset.selectSession ?? null;
+        activePanel = "session";
         paint();
       });
     });
 
-    root.querySelectorAll<HTMLButtonElement>("[data-remove-index]").forEach((btn) => {
+    root.querySelectorAll<HTMLButtonElement>("[data-select-voice-file]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const id = btn.dataset.removeIndex;
+        const id = btn.dataset.selectVoiceFile ?? null;
+        selectedVoiceFileId = id;
+        activePanel = "file";
+        if (id) {
+          setVoiceIndexSelection(id);
+        }
+        paint();
+      });
+    });
+
+    root.querySelectorAll<HTMLButtonElement>("[data-remove-session]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.removeSession;
         if (!id) {
           return;
         }
         void (async () => {
           try {
-            entries = await removeDictationTranscript(id);
-            if (selectedId === id) {
-              selectedId = null;
+            sessions = await removeDictationTranscript(id);
+            if (selectedSessionId === id) {
+              selectedSessionId = null;
             }
-            selectBest();
+            selectBestSession();
             paint();
           } catch (error) {
             console.error("remove dictation transcript", error);
+          }
+        })();
+      });
+    });
+
+    root.querySelectorAll<HTMLButtonElement>("[data-remove-voice-file]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.removeVoiceFile;
+        if (!id) {
+          return;
+        }
+        void (async () => {
+          try {
+            await removeVoiceIndexEntry(id);
+            if (selectedVoiceFileId === id) {
+              selectedVoiceFileId = null;
+              if (activePanel === "file") {
+                activePanel = "session";
+              }
+              setVoiceIndexSelection(null);
+            }
+            await refreshVoiceFiles();
+            paint();
+          } catch (error) {
+            console.error("remove voice index entry", error);
           }
         })();
       });
@@ -219,19 +400,36 @@ export function createDictationTranscriptsController(root: HTMLElement): void {
 
   void refresh();
 
+  indexUnsubscribe = subscribeVoiceIndex(
+    () => {
+      void refreshVoiceFiles().then(paint);
+    },
+    (id) => {
+      void refreshVoiceFiles().then(() => {
+        if (!id || !voiceFiles.some((e) => e.id === id)) {
+          return;
+        }
+        selectedVoiceFileId = id;
+        activePanel = "file";
+        paint();
+      });
+    },
+  );
+
   void listen<DictationTranscriptEntry>(EVENTS.dictationTranscriptUpdated, (event) => {
     const updated = event.payload;
-    const idx = entries.findIndex((e) => e.id === updated.id);
+    const idx = sessions.findIndex((e) => e.id === updated.id);
     if (idx >= 0) {
-      entries[idx] = updated;
+      sessions[idx] = updated;
     } else {
-      entries.unshift(updated);
+      sessions.unshift(updated);
     }
-    entries.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+    sessions.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
     if (updated.status === "active") {
-      selectedId = updated.id;
-    } else if (!selectedId) {
-      selectedId = updated.id;
+      selectedSessionId = updated.id;
+      activePanel = "session";
+    } else if (!selectedSessionId) {
+      selectedSessionId = updated.id;
     }
     paint();
   }).then((unlisten) => {
@@ -239,6 +437,7 @@ export function createDictationTranscriptsController(root: HTMLElement): void {
   });
 
   window.addEventListener("beforeunload", () => {
+    indexUnsubscribe?.();
     for (const unlisten of unlisteners) {
       unlisten();
     }

@@ -8,7 +8,7 @@
 # Pauses (energy RMS vs speech peak):
 #   pause_energy_db_below_peak = 38  (~−38 dB from peak speech frame)
 #   min_pause_ms = 200
-#   long_ms = 250
+#   long_ms = 600  (mid-phrase pause; shorter gaps are normal word spacing)
 #   very_long_ms = 1500
 #
 # Reference corpus (optional WAV paths): see calibration_corpus.toml and
@@ -21,5 +21,23 @@ spread_ideal_hi = 5.5
 [pause]
 energy_db_below_peak = 38.0
 min_ms = 200
-long_ms = 250
+long_ms = 600
 very_long_ms = 1500
+
+[reading]
+wpm_ideal_lo = 128.0
+wpm_ideal_hi = 172.0
+wpm_soft_edge = 32.0
+long_pause_ms = 500
+min_speech_ms_articulation = 45000
+spread_ideal_lo = 2.2
+spread_ideal_hi = 5.0
+
+[spontaneous]
+wpm_ideal_lo = 92.0
+wpm_ideal_hi = 138.0
+wpm_soft_edge = 38.0
+long_pause_ms = 700
+min_speech_ms_articulation = 45000
+spread_ideal_lo = 2.0
+spread_ideal_hi = 6.0

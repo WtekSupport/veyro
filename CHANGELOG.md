@@ -12,6 +12,23 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.10.33] — 2026-10-05
+
+### Added
+
+- **Tools — Speech analysis:** Scoring gates (overall score needs two axes), read-aloud mode with reference text and tongue-twister presets, WER/CER and word substitutions vs reference, speaker profile accumulation, and expanded transcript QC (reasons per flagged word).
+- **Tools — Dictation:** Session mixdown to `ses*.wav` in shared voice files; transcript buffers and completion flow wired from PTT/runtime.
+- **Lexicon:** Extra Russian word forms for speech QC (`ru_lexicon_forms.txt`); optional `tools/speech_analysis/expand_ru_lexicon.py` (pymorphy3) for regeneration.
+
+### Changed
+
+- **Speech analysis:** No numeric score on insufficient data; articulation self-consistency no longer shows false 100 on short clips; intelligibility cap from suspicious words only on long transcripts; comma-separated repeats treated as deliberate; contextual filler detection for «да».
+- **QC:** High SNR flagged as possibly processed; reliability capped on short speech; prosody expressiveness hidden in technical panel when sample is too short.
+
+### Fixed
+
+- **Speech analysis:** False stutter/filler hits on tongue twisters; merged problem fragments limited to a few words; coach facts aligned with included axes.
+
 ## [1.9.32] — 2026-10-01
 
 ### Added

@@ -19,8 +19,10 @@ use crate::tools::voice_file::{transcribe_voice_file, VoiceFileOptions};
 use crate::tools::voice_watch::history::{
     self, HistoryEntry, HistoryStatus, new_history_id, touch_now_ms, upsert_history_entry,
 };
+use crate::tools::voice_watch::paths::paths_equal;
 use crate::tools::voice_watch::presets::guess_messenger;
 use crate::tools::voice_watch::registry::DedupRegistry;
+use crate::tools::voice_watch::voice_records::{ingest_voice_source, IngestedVoice};
 
 pub const VOICE_QUEUE_CHANGED: &str = "app://voice-queue-changed";
 pub const VOICE_HISTORY_CHANGED: &str = "app://voice-history-changed";
@@ -192,6 +194,113 @@ fn emit_history(app: &AppHandle) {
     let _ = app.emit(VOICE_HISTORY_CHANGED, &entries);
 }
 
+struct PreparedImport {
+    ingested: IngestedVoice,
+    prior: Option<HistoryEntry>,
+    history_id: String,
+}
+
+fn prepare_import(source_path: &str) -> Result<PreparedImport, String> {
+    let source_trimmed = source_path.trim();
+    let ingested = ingest_voice_source(source_trimmed)?;
+    let entries = history::load_history();
+    let prior = entries
+        .iter()
+        .find(|e| {
+            e.content_sha256.as_deref() == Some(&ingested.sha256)
+                || paths_equal(&e.path, &ingested.canonical_path)
+                || paths_equal(&e.path, source_trimmed)
+        })
+        .cloned();
+    let history_id = prior
+        .as_ref()
+        .map(|e| e.id.clone())
+        .unwrap_or_else(new_history_id);
+    Ok(PreparedImport {
+        ingested,
+        prior,
+        history_id,
+    })
+}
+
+fn history_entry_from_import(
+    prepared: &PreparedImport,
+    status: HistoryStatus,
+    source_label: &str,
+) -> HistoryEntry {
+    let now = touch_now_ms();
+    let path_ref = Path::new(&prepared.ingested.canonical_path);
+    let appeared_at_ms = prepared
+        .prior
+        .as_ref()
+        .map(|e| e.appeared_at_ms)
+        .unwrap_or(now);
+    HistoryEntry {
+        id: prepared.history_id.clone(),
+        path: prepared.ingested.canonical_path.clone(),
+        file_name: prepared.ingested.display_file_name.clone(),
+        source: source_label.to_string(),
+        messenger: prepared
+            .prior
+            .as_ref()
+            .and_then(|e| e.messenger.clone())
+            .or_else(|| guess_messenger(path_ref)),
+        appeared_at_ms,
+        updated_at_ms: now,
+        duration_secs: prepared.prior.as_ref().and_then(|e| e.duration_secs),
+        status,
+        text: prepared.prior.as_ref().map(|e| e.text.clone()).unwrap_or_default(),
+        error_key: prepared.prior.as_ref().and_then(|e| e.error_key.clone()),
+        content_sha256: Some(prepared.ingested.sha256.clone()),
+    }
+}
+
+/// Add paths to the shared file index without enqueueing STT (speech analysis, cross-tool sync).
+pub fn register_index_paths(
+    app: &AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<HistoryEntry>, String> {
+    let mut touched = Vec::new();
+    for path in paths {
+        let path = path.trim().to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let prepared = prepare_import(&path)?;
+        let status = prepared
+            .prior
+            .as_ref()
+            .map(|e| e.status)
+            .unwrap_or(HistoryStatus::Indexed);
+        let entry = history_entry_from_import(&prepared, status, "manual");
+        let entry = upsert_history_entry(entry)?;
+        touched.push(entry);
+    }
+    if !touched.is_empty() {
+        emit_history(app);
+    }
+    Ok(touched)
+}
+
+/// Dictation session mixdown: indexed as **done** with transcript text (no STT queue).
+pub fn register_dictation_session_recording(
+    app: &AppHandle,
+    source_wav_path: &str,
+    transcript_text: &str,
+    appeared_at_ms: u64,
+    duration_secs: f64,
+) -> Result<(), String> {
+    let prepared = prepare_import(source_wav_path)?;
+    let mut entry = history_entry_from_import(&prepared, HistoryStatus::Done, "dictation");
+    entry.text = transcript_text.to_string();
+    entry.appeared_at_ms = appeared_at_ms;
+    entry.duration_secs = Some(duration_secs);
+    entry.updated_at_ms = touch_now_ms();
+    let _ = upsert_history_entry(entry)?;
+    emit_history(app);
+    Ok(())
+}
+
 pub fn enqueue_paths(
     app: &AppHandle,
     ctx: Arc<AppContext>,
@@ -207,52 +316,47 @@ pub fn enqueue_paths(
             if path.is_empty() {
                 continue;
             }
-            // Debounce: skip if already pending/active with same path
+            let prepared = prepare_import(&path)?;
+            let ingested = &prepared.ingested;
             let dup = state
                 .pending
                 .iter()
                 .chain(state.active.iter())
-                .any(|j| j.path == path);
+                .any(|j| {
+                    j.meta.content_sha256.as_deref() == Some(&ingested.sha256)
+                        || paths_equal(&j.path, &ingested.canonical_path)
+                });
             if dup {
                 continue;
             }
-            let file_name = Path::new(&path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(&path)
-                .to_string();
             let mut job_meta = meta.clone();
+            job_meta.content_sha256 = Some(ingested.sha256.clone());
             if job_meta.messenger.is_none() {
-                job_meta.messenger = guess_messenger(Path::new(&path));
+                job_meta.messenger = guess_messenger(Path::new(&ingested.canonical_path));
             }
             if job_meta.appeared_at_ms.is_none() {
                 job_meta.appeared_at_ms = Some(touch_now_ms());
             }
-            let id = new_history_id();
+            let id = prepared.history_id.clone();
             let job = VoiceJob {
                 id: id.clone(),
-                path: path.clone(),
-                file_name: file_name.clone(),
+                path: ingested.canonical_path.clone(),
+                file_name: ingested.display_file_name.clone(),
                 status: VoiceJobStatus::Pending,
                 meta: job_meta.clone(),
-                text: String::new(),
-                error_key: None,
-                duration_secs: None,
+                text: prepared
+                    .prior
+                    .as_ref()
+                    .map(|e| e.text.clone())
+                    .unwrap_or_default(),
+                error_key: prepared.prior.as_ref().and_then(|e| e.error_key.clone()),
+                duration_secs: prepared.prior.as_ref().and_then(|e| e.duration_secs),
             };
-            let entry = HistoryEntry {
-                id: id.clone(),
-                path: path.clone(),
-                file_name,
-                source: job_meta.source.as_str().to_string(),
-                messenger: job_meta.messenger.clone(),
-                appeared_at_ms: job_meta.appeared_at_ms.unwrap_or_else(touch_now_ms),
-                updated_at_ms: touch_now_ms(),
-                duration_secs: None,
-                status: HistoryStatus::Pending,
-                text: String::new(),
-                error_key: None,
-                content_sha256: job_meta.content_sha256.clone(),
-            };
+            let entry = history_entry_from_import(
+                &prepared,
+                HistoryStatus::Pending,
+                job_meta.source.as_str(),
+            );
             let _ = upsert_history_entry(entry);
             state.pending.push_back(job.clone());
             created.push(job);

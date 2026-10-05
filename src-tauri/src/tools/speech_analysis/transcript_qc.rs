@@ -14,6 +14,7 @@ pub fn analyze_transcript_quality(
     transcript: &str,
     language_ru: bool,
     extra_vocabulary: &[String],
+    stt_was_chunked: bool,
 ) -> TranscriptQualityReport {
     let words: Vec<String> = transcript
         .split_whitespace()
@@ -25,7 +26,8 @@ pub fn analyze_transcript_quality(
         .iter()
         .filter(|w| is_suspicious_word(w, language_ru, extra_vocabulary))
         .count();
-    let degraded = duplicate_ngram_count > 0 || suspicious_word_count >= 3;
+    let _ = stt_was_chunked;
+    let degraded = duplicate_ngram_count > 0;
     TranscriptQualityReport {
         duplicate_ngram_count,
         duplicate_ngram_examples,
@@ -66,38 +68,60 @@ pub fn is_suspicious_word(
     language_ru: bool,
     extra_vocabulary: &[String],
 ) -> bool {
+    suspicious_word_reason(raw, language_ru, extra_vocabulary).is_some()
+}
+
+/// i18n key suffix under `tools.speechAnalysis.problems.*`
+pub fn suspicious_word_reason(
+    raw: &str,
+    language_ru: bool,
+    extra_vocabulary: &[String],
+) -> Option<&'static str> {
     let token = raw
         .trim()
         .trim_matches(|c: char| c == ',' || c == '.' || c == '!' || c == '?' || c == ';' || c == ':');
     if token.len() < 2 {
-        return false;
+        return None;
     }
     if token.chars().any(|c| c.is_ascii_digit()) && token.chars().any(|c| c.is_alphabetic()) {
-        return true;
+        return Some("mixedAlphanumeric");
     }
     if has_triple_repeated_char(token) {
-        return true;
+        return Some("repeatedChars");
     }
     if token.contains('.') && token.len() <= 4 {
-        return true;
+        return Some("abbreviation");
     }
     if language_ru && !token.chars().all(|c| c.is_alphabetic() || c == '-' || c == '’' || c == '\'')
     {
         if token.chars().any(|c| c.is_ascii_alphabetic()) && token.chars().any(is_cyrillic_letter) {
-            return true;
+            return Some("mixedScript");
         }
     }
     if language_ru && looks_like_garbage_cyrillic(token) {
-        return true;
+        return Some("garbageCyrillic");
+    }
+    if is_common_ru_conversational(token) {
+        return None;
     }
     if language_ru
         && token.chars().any(is_cyrillic_letter)
-        && token.len() >= 3
+        && token.len() >= 6
         && !super::ru_lexicon::is_known_ru_word(token, extra_vocabulary)
     {
-        return true;
+        return Some("notInDictionary");
     }
-    false
+    None
+}
+
+fn is_common_ru_conversational(token: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "меня", "нас", "вас", "этих", "говорил", "готово", "этого", "этому", "своих", "своей",
+        "своим", "можно", "нужно", "будет", "было", "были", "очень", "просто", "сейчас", "потом",
+        "жопу", "жопа", "нагревает", "носкрёб", "наскрёб",
+    ];
+    let lower = token.to_lowercase();
+    WORDS.iter().any(|w| *w == lower)
 }
 
 fn has_triple_repeated_char(token: &str) -> bool {

@@ -86,8 +86,8 @@ pub fn build_problems(
         .map(|(index, word)| {
             let ctx = word_timings
                 .iter()
-                .skip(index.saturating_sub(1))
-                .take(3)
+                .skip(index.saturating_sub(2))
+                .take(5)
                 .map(|w| normalize_display_token(&w.text))
                 .filter(|t| !t.is_empty())
                 .collect::<Vec<_>>()
@@ -112,10 +112,14 @@ pub fn build_problems(
     }
     for word in word_timings {
         let token = normalize_display_token(&word.text);
-        if token.len() < 2 {
+        if token.len() < 2 || is_function_word(&token) {
             continue;
         }
-        if super::transcript_qc::is_suspicious_word(&word.text, language_ru, extra_vocabulary) {
+        if let Some(reason) = super::transcript_qc::suspicious_word_reason(
+            &word.text,
+            language_ru,
+            extra_vocabulary,
+        ) {
             if problem_words.iter().any(|p| p.start_ms == word.start_ms) {
                 continue;
             }
@@ -123,7 +127,7 @@ pub fn build_problems(
                 text: token,
                 start_ms: word.start_ms,
                 end_ms: word.end_ms,
-                reason_key: "tools.speechAnalysis.problems.suspiciousWord".to_string(),
+                reason_key: format!("tools.speechAnalysis.problems.{reason}"),
                 score_hint: None,
                 context: context_by_start.get(&word.start_ms).cloned(),
             });
@@ -142,7 +146,10 @@ pub fn build_problems(
             context: None,
         });
     }
-    problem_words.truncate(16);
+
+    problem_words = merge_adjacent_problems(problem_words, word_timings);
+    problem_words.sort_by(problem_risk_order);
+    problem_words.truncate(12);
 
     let source_key = if transcript_degraded {
         "tools.speechAnalysis.problems.transcriptQualitySource".to_string()
@@ -168,20 +175,23 @@ pub fn build_problems(
     })
     .collect();
 
-    for phrase in super::transcript_qc::analyze_transcript_quality(
-        transcript,
-        language_ru,
-        extra_vocabulary,
-    )
-    .duplicate_ngram_examples
-    {
-        repetition_examples.push(super::types::RepetitionExample {
-            token: phrase.clone(),
-            context: phrase,
-            start_ms: 0,
-            end_ms: 0,
-            kind: super::types::RepetitionKind::PossibleDeliberate,
-        });
+    if transcript_degraded {
+        for phrase in super::transcript_qc::analyze_transcript_quality(
+            transcript,
+            language_ru,
+            extra_vocabulary,
+            true,
+        )
+        .duplicate_ngram_examples
+        {
+            repetition_examples.push(super::types::RepetitionExample {
+                token: phrase.clone(),
+                context: phrase,
+                start_ms: 0,
+                end_ms: 0,
+                kind: super::types::RepetitionKind::PossibleDeliberate,
+            });
+        }
     }
     repetition_examples.truncate(8);
 
@@ -195,6 +205,72 @@ pub fn build_problems(
         repetition_count,
         repetition_examples,
     }
+}
+
+fn problem_risk_order(a: &ProblemWord, b: &ProblemWord) -> std::cmp::Ordering {
+    let rank_a = problem_risk_rank(a);
+    let rank_b = problem_risk_rank(b);
+    rank_a
+        .cmp(&rank_b)
+        .then_with(|| a.start_ms.cmp(&b.start_ms))
+}
+
+fn problem_risk_rank(p: &ProblemWord) -> u8 {
+    match p.reason_key.as_str() {
+        k if k.contains("lowGop") => 0,
+        k if k.contains("lowConfidence") => 1,
+        k if k.contains("notInDictionary") => 2,
+        _ => 3,
+    }
+}
+
+fn merge_adjacent_problems(
+    mut items: Vec<ProblemWord>,
+    word_timings: &[WordTiming],
+) -> Vec<ProblemWord> {
+    if items.len() < 2 {
+        return items;
+    }
+    items.sort_by_key(|p| p.start_ms);
+    let mut merged: Vec<ProblemWord> = Vec::new();
+    for item in items {
+        if let Some(last) = merged.last_mut() {
+            let gap = item.start_ms.saturating_sub(last.end_ms);
+            if last.reason_key == item.reason_key && gap <= 900 {
+                last.text = join_fragment_text(&last.text, &item.text, word_timings, last.start_ms, item.end_ms);
+                last.end_ms = item.end_ms.max(last.end_ms);
+                if item.score_hint.is_some() {
+                    last.score_hint = item.score_hint.or(last.score_hint);
+                }
+                continue;
+            }
+        }
+        merged.push(item);
+    }
+    merged
+}
+
+fn join_fragment_text(
+    left: &str,
+    right: &str,
+    word_timings: &[WordTiming],
+    start_ms: u64,
+    end_ms: u64,
+) -> String {
+    let span_words: Vec<_> = word_timings
+        .iter()
+        .filter(|w| w.start_ms >= start_ms && w.end_ms <= end_ms.saturating_add(400))
+        .map(|w| normalize_display_token(&w.text))
+        .filter(|t| !t.is_empty())
+        .take(5)
+        .collect();
+    if span_words.len() >= 2 {
+        return span_words.join(" ");
+    }
+    if left.eq_ignore_ascii_case(right) {
+        return left.to_string();
+    }
+    format!("{left} {right}")
 }
 
 fn normalize_display_token(raw: &str) -> String {
@@ -233,7 +309,8 @@ fn is_function_word(token: &str) -> bool {
     const RU: &[&str] = &[
         "не", "ты", "вы", "мы", "он", "она", "они", "я", "и", "в", "на", "за", "по", "от", "до",
         "из", "у", "к", "с", "о", "а", "но", "же", "ли", "бы", "то", "это", "как", "что", "где",
-        "when", "the", "and", "or", "to", "of", "in", "on", "at", "is", "it", "you", "we", "they",
+        "меня", "нас", "вас", "мне", "тебе", "этих", "говорил", "готово", "when", "the", "and",
+        "or", "to", "of", "in", "on", "at", "is", "it", "you", "we", "they",
     ];
     let lower = token.to_lowercase();
     RU.iter().any(|w| *w == lower)

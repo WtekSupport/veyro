@@ -8,11 +8,23 @@ static CORE_LEXICON: OnceLock<HashSet<String>> = OnceLock::new();
 
 fn core_lexicon() -> &'static HashSet<String> {
     CORE_LEXICON.get_or_init(|| {
-        let raw = include_str!("../../../resources/speech_analysis/ru_lexicon.txt");
-        raw.lines()
-            .map(|line| normalize_lexeme(line.trim()))
-            .filter(|w| w.len() >= 2)
-            .collect()
+        let mut set: HashSet<String> = HashSet::new();
+        for raw in [
+            include_str!("../../../resources/speech_analysis/ru_lexicon.txt"),
+            include_str!("../../../resources/speech_analysis/ru_lexicon_forms.txt"),
+        ] {
+            for line in raw.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let w = normalize_lexeme(line);
+                if w.len() >= 2 {
+                    set.insert(w);
+                }
+            }
+        }
+        set
     })
 }
 

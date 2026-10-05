@@ -25,8 +25,14 @@ pub fn classify_word_repeat(
     if raw_a.contains('-') || raw_b.contains('-') {
         return Some(RepetitionKind::Emphasis);
     }
-    if ends_sentence_boundary(raw_a) || gap_ms >= config.long_pause_ms {
+    if ends_clause_boundary(raw_a) || gap_ms >= config.long_pause_ms {
         return Some(RepetitionKind::PossibleDeliberate);
+    }
+    if gap_ms <= 2500 && !ends_sentence_boundary(raw_a) {
+        return Some(RepetitionKind::Stutter);
+    }
+    if ends_sentence_boundary(raw_a) && gap_ms <= 1200 {
+        return Some(RepetitionKind::Stutter);
     }
     Some(RepetitionKind::Stutter)
 }
@@ -113,6 +119,16 @@ fn ends_sentence_boundary(raw: &str) -> bool {
         .is_some_and(|ch| matches!(ch, '.' | '!' | '?' | '…' | ':' | ';'))
 }
 
+fn ends_clause_boundary(raw: &str) -> bool {
+    if ends_sentence_boundary(raw) {
+        return true;
+    }
+    raw.trim_end()
+        .chars()
+        .last()
+        .is_some_and(|ch| ch == ',')
+}
+
 fn normalize_token(raw: &str) -> String {
     raw.trim()
         .trim_matches(|ch: char| !ch.is_alphanumeric())
@@ -129,6 +145,15 @@ mod tests {
         let config = SpeechAnalysisConfig::default();
         assert_eq!(
             classify_word_repeat("Есть.", "Есть.", 0, &config),
+            Some(RepetitionKind::PossibleDeliberate)
+        );
+    }
+
+    #[test]
+    fn comma_repeat_not_stutter() {
+        let config = SpeechAnalysisConfig::default();
+        assert_eq!(
+            classify_word_repeat("лавировали,", "лавировали", 100, &config),
             Some(RepetitionKind::PossibleDeliberate)
         );
     }

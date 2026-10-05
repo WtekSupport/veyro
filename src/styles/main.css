@@ -3256,9 +3256,13 @@ body.tool-window {
   overflow: hidden;
 }
 
-#tool-speech-analysis-app .voice-files-sidebar {
+#tool-speech-analysis-app .voice-files-sidebar:not(.voice-files-sidebar--collapsed) {
   flex: 0 0 220px;
   width: 220px;
+}
+
+.voice-files-sidebar-toggle {
+  flex-shrink: 0;
 }
 
 .speech-analysis-advanced {
@@ -3292,13 +3296,31 @@ body.tool-window {
   width: 100%;
   margin-top: 5px;
   box-sizing: border-box;
-  padding: 6px 8px;
+  padding: 6px 1.75rem 6px 8px;
   font-size: 0.68rem;
   line-height: 1.25;
   border-radius: 6px;
   border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
+  color-scheme: dark;
+  appearance: none;
+  background-color: var(--bg-input);
+  color: var(--parchment);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ffc145' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 10px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.speech-analysis-advanced-select:focus {
+  outline: none;
+  border-color: var(--brass);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+
+.speech-analysis-advanced-select option {
+  background-color: var(--bg-input);
+  color: var(--parchment);
 }
 
 .speech-analysis-advanced-hint {
@@ -3421,16 +3443,85 @@ body.tool-window {
 
 .speech-analysis-f0-chart {
   margin-top: 10px;
+  max-width: 100%;
   color: var(--accent, #e8c547);
 }
 
-.speech-analysis-f0-chart--large {
+.speech-analysis-f0-chart-hit {
+  display: block;
   width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.speech-analysis-f0-chart-hit:hover {
+  background: rgba(232, 197, 71, 0.06);
+}
+
+.speech-analysis-f0-chart-hit:focus-visible {
+  outline: 2px solid var(--accent, #e8c547);
+  outline-offset: 2px;
+}
+
+.speech-analysis-f0-svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.speech-analysis-f0-svg--modal {
+  min-height: 200px;
 }
 
 .speech-analysis-f0-chart figcaption {
   font-size: 0.78rem;
   margin-top: 4px;
+  line-height: 1.35;
+}
+
+.speech-analysis-f0-modal {
+  width: min(960px, 96vw);
+  max-width: 96vw;
+  padding: 16px 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: var(--surface-elevated, #1e1c18);
+  color: inherit;
+}
+
+.speech-analysis-f0-modal::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.speech-analysis-f0-modal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.speech-analysis-f0-modal-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.speech-analysis-f0-modal-body {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.speech-analysis-f0-chart--modal {
+  margin: 0;
 }
 
 .speech-analysis-transcript {
@@ -3616,10 +3707,32 @@ body.tool-window {
 }
 
 .speech-analysis-dimension-card {
+  min-width: 0;
   padding: 12px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.speech-analysis-dimension-card--prosody {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 720px) {
+  .speech-analysis-dimension-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  .speech-analysis-dimension-card--prosody {
+    grid-column: span 2;
+  }
+}
+
+@media (min-width: 1100px) {
+  .speech-analysis-dimension-card--prosody {
+    grid-column: 1 / -1;
+  }
 }
 
 .speech-analysis-dimension-title {
@@ -4349,6 +4462,32 @@ body.tool-window {
 .voice-files-sidebar-title {
   font-size: 0.7rem;
   font-weight: 600;
+}
+
+.voice-files-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.voice-files-sidebar-section:last-child {
+  border-bottom: none;
+}
+
+.voice-files-sidebar-section-title {
+  margin: 0;
+  padding: 4px 6px 2px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  opacity: 0.72;
+  letter-spacing: 0.04em;
+}
+
+.voice-files-sidebar-section .voice-files-browser {
+  flex: 0 1 auto;
+  max-height: min(220px, 38vh);
 }
 
 .voice-files-browser {

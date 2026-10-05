@@ -32,6 +32,8 @@ pub fn analyze_qc(
         } else if snr < 15.0 {
             reliability = ReliabilityLevel::Medium;
             flags.push("moderate_snr".to_string());
+        } else if snr > 40.0 {
+            flags.push("possibly_processed".to_string());
         }
     }
 

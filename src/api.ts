@@ -1014,6 +1014,7 @@ export interface DictationTranscriptEntry {
   updatedAtMs: number;
   status: DictationTranscriptStatus;
   text: string;
+  transcriptFile?: string | null;
 }
 
 export async function listDictationTranscripts(): Promise<DictationTranscriptEntry[]> {
@@ -1074,7 +1075,8 @@ export type HistoryStatus =
   | "speech_unrecognized"
   | "too_long"
   | "not_audio"
-  | "skipped";
+  | "skipped"
+  | "indexed";
 
 export interface VoiceHistoryEntry {
   id: string;
@@ -1116,6 +1118,13 @@ export async function enqueueVoiceFiles(
     source,
     stt_language_override: sttLanguageOverride ?? null,
   });
+}
+
+/** Shared file index only — does not enqueue STT (speech analysis / cross-tool sync). */
+export async function registerVoiceIndexPaths(
+  paths: string[],
+): Promise<VoiceHistoryEntry[]> {
+  return invoke<VoiceHistoryEntry[]>("register_voice_index_paths", { paths });
 }
 
 export async function getVoiceQueue(): Promise<VoiceQueueSnapshot> {
@@ -1612,9 +1621,24 @@ export interface SpeechAnalysisReport {
     reliability: "high" | "medium" | "low" | "unavailable";
     flags: string[];
   };
+  meta?: {
+    speechRegister: "reading" | "spontaneous";
+    speechRegisterAuto: boolean;
+    accumulation?: {
+      profileId: string;
+      profileLabel: string;
+      priorNetSpeechDurationMs: number;
+      priorWordCount: number;
+      combinedNetSpeechDurationMs: number;
+      combinedWordCount: number;
+    } | null;
+  };
   fluency: {
     wordCount: number;
     syllableCount: number;
+    netSpeechDurationMs: number;
+    speechRegister?: "reading" | "spontaneous";
+    speechRegisterAuto?: boolean;
     wpmOverall?: number | null;
     wpmPhonation?: number | null;
     phonationRatio: number;
@@ -1694,6 +1718,8 @@ export interface SpeechAnalysisReport {
   summary: SpeechAnalysisSummary;
   limitations: string[];
   coach?: SpeechAnalysisCoach | null;
+  referenceEval?: ReferenceEvalReport | null;
+  referenceText?: string | null;
 }
 
 export interface SpeechAnalysisCaveat {
@@ -1769,6 +1795,7 @@ export interface SpeechAnalysisSummary {
   overallScore?: number | null;
   overallGradeKey: string;
   overallLabelKey: string;
+  overallLabelParam?: string | null;
   overallShowGrade: boolean;
   overallCoverage?: SpeechAnalysisCoverage | null;
   overallWeakSpotId?: string | null;
@@ -1776,6 +1803,17 @@ export interface SpeechAnalysisSummary {
   dimensions: SpeechAnalysisSummaryDimension[];
   caveats: SpeechAnalysisCaveat[];
   problems: SpeechAnalysisProblems;
+}
+
+export type SpeechRegisterHint = "auto" | "reading" | "spontaneous";
+
+export interface SpeakerProfileSummary {
+  id: string;
+  label: string;
+  netSpeechDurationMs: number;
+  wordCount: number;
+  fileCount: number;
+  updatedAtMs: number;
 }
 
 export interface SpeechAnalysisOptions {
@@ -1787,6 +1825,27 @@ export interface SpeechAnalysisOptions {
   cache?: SpeechAnalysisCache | null;
   enableLlmCoach?: boolean | null;
   regenerateCoach?: boolean;
+  speechRegisterHint?: SpeechRegisterHint | null;
+  speakerProfileId?: string | null;
+  accumulateIntoProfile?: boolean;
+  newSpeakerProfileLabel?: string | null;
+  analysisMode?: "free" | "read_aloud";
+  referenceText?: string | null;
+  referencePresetId?: string | null;
+}
+
+export interface TongueTwisterPreset {
+  id: string;
+  title: string;
+  text: string;
+}
+
+export interface ReferenceEvalReport {
+  referenceWordCount: number;
+  hypothesisWordCount: number;
+  werPercent: number;
+  cerPercent: number;
+  substitutions: Array<{ expected: string; observed: string; count: number }>;
 }
 
 export function buildSpeechAnalysisCache(
@@ -1885,6 +1944,26 @@ export async function speechAnalysisLoadDiskCache(
   pathKey: string,
 ): Promise<SpeechAnalysisReport | null> {
   return invoke<SpeechAnalysisReport | null>("speech_analysis_load_disk_cache", { pathKey });
+}
+
+export async function listSpeechAnalysisSpeakerProfiles(): Promise<
+  SpeakerProfileSummary[]
+> {
+  return invoke<SpeakerProfileSummary[]>("list_speech_analysis_speaker_profiles");
+}
+
+export async function createSpeechAnalysisSpeakerProfile(
+  label: string,
+): Promise<SpeakerProfileSummary> {
+  return invoke<SpeakerProfileSummary>("create_speech_analysis_speaker_profile", {
+    label,
+  });
+}
+
+export async function listSpeechAnalysisTongueTwisters(): Promise<
+  TongueTwisterPreset[]
+> {
+  return invoke<TongueTwisterPreset[]>("list_speech_analysis_tongue_twisters");
 }
 
 export async function analyzeSpeechAnalysisFile(

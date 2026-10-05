@@ -613,6 +613,7 @@ export const en = {
   "tools.voiceFiles.silenceOnly.detail":
     "After decoding, the audio level was too low or the track appears silent. Check volume, normalization settings, or pick another file.",
   "tools.voiceFiles.rewriteFallback": "AI rewrite was unavailable — basic cleanup was applied.",
+  "tools.voiceFiles.status.indexed": "In list",
   "tools.voiceFiles.status.pending": "Waiting",
   "tools.voiceFiles.status.processing": "Processing…",
   "tools.voiceFiles.stage.decoding": "Decoding audio…",
@@ -941,6 +942,24 @@ export const en = {
   "tools.speechAnalysis.advanced.policyManual": "Pick model",
   "tools.speechAnalysis.advanced.manualVariant": "Model for this tool",
   "tools.speechAnalysis.advanced.llmCoach": "AI coach (when available)",
+  "tools.speechAnalysis.advanced.speechRegister": "Speech type",
+  "tools.speechAnalysis.advanced.speechRegisterAuto": "Auto (read vs spontaneous)",
+  "tools.speechAnalysis.advanced.speechRegisterReading": "Read aloud",
+  "tools.speechAnalysis.advanced.speechRegisterSpontaneous": "Spontaneous speech",
+  "tools.speechAnalysis.advanced.accumulateSpeaker":
+    "Accumulate clean speech for one speaker profile",
+  "tools.speechAnalysis.advanced.speakerProfile": "Speaker profile",
+  "tools.speechAnalysis.advanced.speakerProfileNew": "New profile…",
+  "tools.speechAnalysis.advanced.newProfileLabel": "New profile name",
+  "tools.speechAnalysis.advanced.newProfilePlaceholder": "e.g. me",
+  "tools.speechAnalysis.meta.registerAuto.reading": "Mode: read aloud (auto)",
+  "tools.speechAnalysis.meta.registerAuto.spontaneous": "Mode: spontaneous (auto)",
+  "tools.speechAnalysis.meta.registerManual.reading": "Mode: read aloud",
+  "tools.speechAnalysis.meta.registerManual.spontaneous": "Mode: spontaneous",
+  "tools.speechAnalysis.meta.accumulation":
+    "Profile “{label}”: {combinedSec}s clean speech (this file {fileSec}s, prior {priorSec}s)",
+  "tools.speechAnalysis.caveat.speakerProfileAccumulated":
+    "Articulation duration gate uses accumulated clean speech from the speaker profile",
   "tools.speechAnalysis.advanced.hint":
     "Only affects speech analysis; global STT in Settings is unchanged.",
   "tools.speechAnalysis.status.pending": "Queued",
@@ -986,6 +1005,10 @@ export const en = {
   "tools.speechAnalysis.summary.label.full": "Diction score",
   "tools.speechAnalysis.summary.label.preliminary":
     "Preliminary score (fluency and expressiveness)",
+  "tools.speechAnalysis.summary.label.preliminaryAxes":
+    "Preliminary score ({axes})",
+  "tools.speechAnalysis.summary.label.insufficientData":
+    "Not enough data to score (speech {speechSec}s)",
   "tools.speechAnalysis.summary.label.hidden": "Score unavailable",
   "tools.speechAnalysis.summary.badgePreliminary": "preliminary",
   "tools.speechAnalysis.summary.badgeFull": "full",
@@ -1011,6 +1034,9 @@ export const en = {
   "tools.speechAnalysis.summary.fluencyMetric.fillers": "Fillers per 100 words:",
   "tools.speechAnalysis.summary.fluencyMetric.reps": "Hesitation repeats:",
   "tools.speechAnalysis.summary.prosodyF0ChartCaption": "F0 contour (voiced frames)",
+  "tools.speechAnalysis.summary.f0Expand": "Enlarge F0 chart",
+  "tools.speechAnalysis.summary.f0ExpandHint": "click to enlarge",
+  "tools.speechAnalysis.summary.f0ExpandClose": "Close",
   "tools.speechAnalysis.summary.reason.needsLongerRecording":
     "Need a longer speech sample for this metric",
   "tools.speechAnalysis.summary.reason.needsLongerRecording.howTo":
@@ -1091,6 +1117,31 @@ export const en = {
   "tools.speechAnalysis.problems.repetitionCount": "Adjacent word repeats: {count}",
   "tools.speechAnalysis.problems.lowConfidence": "low STT confidence",
   "tools.speechAnalysis.problems.suspiciousWord": "suspicious transcript token",
+  "tools.speechAnalysis.problems.notInDictionary": "not in dictionary (possible STT error)",
+  "tools.speechAnalysis.problems.mixedAlphanumeric": "mixed letters and digits",
+  "tools.speechAnalysis.problems.mixedScript": "mixed Latin and Cyrillic",
+  "tools.speechAnalysis.problems.garbageCyrillic": "suspicious Cyrillic form",
+  "tools.speechAnalysis.problems.repeatedChars": "repeated characters",
+  "tools.speechAnalysis.problems.abbreviation": "suspicious abbreviation",
+  "tools.speechAnalysis.problems.repetitionDeliberate": "possibly intentional repeat",
+  "tools.speechAnalysis.summary.label.readAloud": "Read-aloud score vs reference",
+  "tools.speechAnalysis.summary.detail.fluencyReadAloud":
+    "Tempo is not scored in read-aloud reference mode",
+  "tools.speechAnalysis.summary.reason.readAloudNoTempo":
+    "Tempo is excluded for tongue twisters and read-aloud reference mode",
+  "tools.speechAnalysis.summary.detail.intelligibilitySuspiciousWords":
+    "Suspicious transcript tokens — see Attention block",
+  "tools.speechAnalysis.advanced.readAloud": "Read against reference (WER/CER)",
+  "tools.speechAnalysis.advanced.tongueTwister": "Tongue twister",
+  "tools.speechAnalysis.advanced.tongueTwisterNone": "Custom text below",
+  "tools.speechAnalysis.advanced.referenceText": "Reference text",
+  "tools.speechAnalysis.meta.referenceEval": "WER {wer}% · CER {cer}%",
+  "tools.speechAnalysis.qc.snrCapped": "SNR > 40 dB",
+  "tools.speechAnalysis.qc.possibly_processed": "possibly processed recording",
+  "tools.speechAnalysis.caveat.transcriptSuspiciousWords":
+    "Suspicious transcript tokens: {suspicious} of {total} (score not reduced on short clips).",
+  "tools.speechAnalysis.caveat.possiblyProcessedRecording":
+    "Very high SNR — possible synthesis or heavy processing; noise estimate may be optimistic.",
   "tools.speechAnalysis.problems.lowGop": "weak alignment (transcript GOP proxy)",
   "tools.speechAnalysis.transcript.clickHint":
     "Click a word to play that span. Highlighted tokens are flagged issues.",
@@ -1121,11 +1172,11 @@ export const en = {
   "tools.speechAnalysis.summary.detail.prosody":
     "F0 σ (semitones), voiced fraction, range — not full intonation",
   "tools.speechAnalysis.summary.detail.prosodyValues":
-    "F0 spread: {std} st (target ~2–5); voiced frames (info): {voiced}%; p5–p95: {range} st",
+    "F0 spread p10–p90: {std} st (target ~2–5); voiced among speech frames: {voiced}%; p5–p95: {range} st",
   "tools.speechAnalysis.summary.detail.fluencyValues":
     "Pace: {sylPerSec} syl/s, {wpm} wpm · pauses ≥{minPauseMs} ms: {pauseCount} (mean {meanPauseMs} ms), long: {longPauses} · fillers: {fillers}/100 words · repeats: {reps}",
   "tools.speechAnalysis.summary.detail.intelligibilityMerged":
-    "Share of low-confidence words; mean word confidence is in technical details",
+    "Score reflects STT model confidence; the attention list uses separate dictionary/threshold heuristics",
   "tools.speechAnalysis.summary.detail.prosodyLow": "Too few voiced frames for reliable F0",
   "tools.speechAnalysis.technical.words": "{count} words",
   "tools.speechAnalysis.technical.longPauses": "{count} long pauses",

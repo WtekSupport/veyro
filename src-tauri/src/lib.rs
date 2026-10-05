@@ -1806,6 +1806,23 @@ fn speech_analysis_load_disk_cache(
 }
 
 #[tauri::command]
+fn list_speech_analysis_speaker_profiles() -> Vec<tools::SpeakerProfileSummary> {
+    tools::list_speech_analysis_speaker_profiles()
+}
+
+#[tauri::command]
+fn create_speech_analysis_speaker_profile(
+    label: String,
+) -> Result<tools::SpeakerProfileSummary, String> {
+    tools::create_speech_analysis_speaker_profile(label)
+}
+
+#[tauri::command]
+fn list_speech_analysis_tongue_twisters() -> Vec<tools::TongueTwisterPreset> {
+    tools::list_speech_analysis_tongue_twisters()
+}
+
+#[tauri::command]
 fn pick_speech_analysis_save_path(
     default_name: String,
     extension: String,
@@ -1880,6 +1897,14 @@ fn enqueue_voice_file(
         stt_language_override,
     };
     tools::voice_watch::enqueue_paths(&app, Arc::clone(ctx.inner()), paths, meta)
+}
+
+#[tauri::command]
+fn register_voice_index_paths(
+    app: AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<tools::voice_watch::HistoryEntry>, String> {
+    tools::voice_watch::register_index_paths(&app, paths)
 }
 
 #[tauri::command]
@@ -2473,11 +2498,15 @@ pub fn run() {
             speech_analysis_resolve_plan,
             speech_analysis_ensure_models,
             speech_analysis_load_disk_cache,
+            list_speech_analysis_speaker_profiles,
+            create_speech_analysis_speaker_profile,
+            list_speech_analysis_tongue_twisters,
             pick_speech_analysis_save_path,
             export_speech_analysis_report,
             pick_voice_files,
             transcribe_voice_file,
             enqueue_voice_file,
+            register_voice_index_paths,
             get_voice_queue,
             list_voice_history,
             clear_voice_history,

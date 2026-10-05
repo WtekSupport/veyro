@@ -24,6 +24,95 @@ pub struct SpeechAnalysisOptions {
     pub enable_llm_coach: Option<bool>,
     #[serde(default)]
     pub regenerate_coach: bool,
+    #[serde(default)]
+    pub speech_register_hint: Option<SpeechRegisterHint>,
+    #[serde(default)]
+    pub speaker_profile_id: Option<String>,
+    #[serde(default)]
+    pub accumulate_into_profile: bool,
+    #[serde(default)]
+    pub new_speaker_profile_label: Option<String>,
+    #[serde(default)]
+    pub analysis_mode: SpeechAnalysisMode,
+    #[serde(default)]
+    pub reference_text: Option<String>,
+    #[serde(default)]
+    pub reference_preset_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechAnalysisMode {
+    #[default]
+    Free,
+    ReadAloud,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechRegister {
+    Reading,
+    Spontaneous,
+}
+
+impl Default for SpeechRegister {
+    fn default() -> Self {
+        Self::Spontaneous
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechRegisterHint {
+    #[default]
+    Auto,
+    Reading,
+    Spontaneous,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechAnalysisAccumulation {
+    pub profile_id: String,
+    pub profile_label: String,
+    pub prior_net_speech_duration_ms: u64,
+    pub prior_word_count: u64,
+    pub combined_net_speech_duration_ms: u64,
+    pub combined_word_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechAnalysisMeta {
+    pub speech_register: SpeechRegister,
+    pub speech_register_auto: bool,
+    #[serde(default)]
+    pub analysis_mode: SpeechAnalysisMode,
+    #[serde(default)]
+    pub read_aloud: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accumulation: Option<SpeechAnalysisAccumulation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceWordAlignment {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hypothesis: Option<String>,
+    pub matched: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceEvalReport {
+    pub reference_word_count: usize,
+    pub hypothesis_word_count: usize,
+    pub wer_percent: f32,
+    pub cer_percent: f32,
+    pub substitutions: Vec<SubstitutionPair>,
+    pub alignment: Vec<ReferenceWordAlignment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,11 +181,20 @@ pub struct QcReport {
 pub struct FluencyReport {
     pub word_count: usize,
     pub syllable_count: usize,
+    /// VAD speech minus internal pauses (used for tempo and duration gates).
+    #[serde(default)]
+    pub net_speech_duration_ms: u64,
+    #[serde(default)]
+    pub speech_register: SpeechRegister,
+    #[serde(default)]
+    pub speech_register_auto: bool,
     pub wpm_overall: Option<f32>,
     pub wpm_phonation: Option<f32>,
     pub phonation_ratio: f32,
     pub pause_count: usize,
     pub mean_pause_ms: f32,
+    #[serde(default)]
+    pub median_pause_ms: f32,
     pub long_pause_count: usize,
     pub pause_total_ms: u64,
     pub min_pause_ms: u64,
@@ -333,6 +431,8 @@ pub struct SpeechAnalysisSummary {
     pub overall_score: Option<u8>,
     pub overall_grade_key: String,
     pub overall_label_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overall_label_param: Option<String>,
     pub overall_show_grade: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overall_coverage: Option<SpeechAnalysisCoverage>,
@@ -381,4 +481,22 @@ pub struct SpeechAnalysisReport {
     pub limitations: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coach: Option<SpeechAnalysisCoach>,
+    #[serde(default)]
+    pub meta: SpeechAnalysisMeta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_eval: Option<ReferenceEvalReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_text: Option<String>,
+}
+
+impl Default for SpeechAnalysisMeta {
+    fn default() -> Self {
+        Self {
+            speech_register: SpeechRegister::Spontaneous,
+            speech_register_auto: true,
+            analysis_mode: SpeechAnalysisMode::Free,
+            read_aloud: false,
+            accumulation: None,
+        }
+    }
 }

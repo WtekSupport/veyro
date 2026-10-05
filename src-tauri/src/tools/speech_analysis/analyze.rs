@@ -20,7 +20,13 @@ use super::align::{
 use super::articulation::analyze_articulation;
 use super::config::SpeechAnalysisConfig;
 use super::export_md::write_markdown_report;
-use super::fluency::analyze_fluency;
+use super::config::register_norms;
+use super::fluency::{analyze_fluency, apply_register_pause_stats};
+use super::register::resolve_register;
+use super::speaker_profiles::{
+    append_speaker_profile_file, ensure_speaker_profile, get_speaker_profile,
+};
+use super::summary::SummaryBuildContext;
 use super::intelligibility::analyze_intelligibility;
 use super::prosody::analyze_prosody;
 use super::qc::analyze_qc;
@@ -31,7 +37,10 @@ use super::model_plan::{resolve_plan, SpeechAnalysisModelPolicy};
 use super::summary::{build_empty_summary, build_summary, caveat_export_keys};
 use super::transcript_qc::analyze_transcript_quality;
 use crate::transcription::sherpa::merge_transcript_pieces;
-use super::types::{SpeechAnalysisOptions, SpeechAnalysisReport};
+use super::types::{
+    SpeechAnalysisAccumulation, SpeechAnalysisMeta, SpeechAnalysisOptions, SpeechAnalysisReport,
+    SpeechRegisterHint,
+};
 use crate::settings::LocalSttVariant;
 use crate::tools::audio_to_srt_timing::{
     expand_stt_chunks, merge_region_timed_segments, sort_timed_segments_by_start,
@@ -158,6 +167,24 @@ pub async fn analyze_speech_analysis_file(
         )
     };
 
+    let speech_regions_for_stt = detect_speech_regions(&prepared.segment, &vad_config)
+        .map_err(|error| error.to_string())?;
+    let max_chunk_ms = settings.vad_config().maximum_segment_ms as u64;
+    let max_chunk_ms = max_chunk_ms.min(crate::transcription::sherpa::max_offline_audio_ms(
+        &settings,
+    ));
+    let raw_stt_regions: Vec<(u64, crate::audio::segment::AudioSegment)> =
+        if speech_regions_for_stt.is_empty() {
+            vec![(0, prepared.segment.clone())]
+        } else {
+            speech_regions_for_stt
+                .iter()
+                .map(|region| (region.start_ms, region.audio.clone()))
+                .collect()
+        };
+    let stt_was_chunked =
+        expand_stt_chunks(raw_stt_regions, max_chunk_ms).len() > 1;
+
     let (mut timed_segments, detected_language, transcript, transcript_confidence) =
         if options.fill_gaps_only {
             let cache = options
@@ -179,14 +206,12 @@ pub async fn analyze_speech_analysis_file(
             );
             let dictionary = load_dictionary_for_settings(&settings).unwrap_or_default();
             let transcriber = transcriber_for_analysis(&ctx, &settings, &plan);
-            let speech_regions = detect_speech_regions(&prepared.segment, &vad_config)
-                .map_err(|error| error.to_string())?;
             let outcome = transcribe_for_analysis(
                 app.clone(),
                 path_key.clone(),
                 transcriber,
                 &prepared,
-                &speech_regions,
+                &speech_regions_for_stt,
                 &settings,
                 &dictionary.vocabulary,
                 stt_auto_mode,
@@ -266,9 +291,14 @@ pub async fn analyze_speech_analysis_file(
         Some(92),
     );
 
+    let reference_text = resolve_reference_text(&options);
+    let read_aloud = reference_text.is_some();
+
     let audio_for_articulation = prepared.segment.clone();
     let timed_for_articulation = timed_segments.clone();
-    let transcript_for_articulation = transcript.clone();
+    let transcript_for_articulation = reference_text
+        .clone()
+        .unwrap_or_else(|| transcript.clone());
     let settings_for_articulation = settings.clone();
     let language_for_ctc = detected_language.clone();
     let articulation = analyze_articulation(
@@ -286,7 +316,7 @@ pub async fn analyze_speech_analysis_file(
         &prepared.segment.samples,
         prepared.segment.channels,
     );
-    let fluency = analyze_fluency(
+    let (mut fluency, fluency_pauses, fluency_words) = analyze_fluency(
         &timed_segments,
         &speech_spans,
         total_duration_ms,
@@ -294,7 +324,63 @@ pub async fn analyze_speech_analysis_file(
         &config,
         &mono_for_fluency,
         prepared.segment.sample_rate,
+        &prosody.f0_contour,
     );
+    let register_hint = options
+        .speech_register_hint
+        .unwrap_or(SpeechRegisterHint::Auto);
+    let (register, register_auto) = if read_aloud {
+        (super::types::SpeechRegister::Reading, false)
+    } else {
+        resolve_register(register_hint, &fluency, total_duration_ms)
+    };
+    fluency.speech_register = register;
+    fluency.speech_register_auto = register_auto;
+    let norms = register_norms(&config, register);
+    apply_register_pause_stats(
+        &mut fluency,
+        &fluency_pauses,
+        &fluency_words,
+        &prosody.f0_contour,
+        &norms,
+        &config,
+    );
+
+    let mut accumulation: Option<SpeechAnalysisAccumulation> = None;
+    let mut effective_speech_ms = fluency.net_speech_duration_ms;
+    let mut profile_id = options.speaker_profile_id.clone();
+    if options.accumulate_into_profile {
+        if profile_id.is_none() {
+            if let Some(label) = options
+                .new_speaker_profile_label
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                profile_id = Some(ensure_speaker_profile(label)?.id);
+            }
+        }
+        if let Some(ref id) = profile_id {
+            let prior = get_speaker_profile(id);
+            let prior_net = prior.as_ref().map(|p| p.net_speech_duration_ms).unwrap_or(0);
+            let prior_words = prior.as_ref().map(|p| p.word_count).unwrap_or(0);
+            effective_speech_ms = prior_net.saturating_add(fluency.net_speech_duration_ms);
+            accumulation = Some(SpeechAnalysisAccumulation {
+                profile_id: id.clone(),
+                profile_label: prior
+                    .as_ref()
+                    .map(|p| p.label.clone())
+                    .unwrap_or_else(|| id.clone()),
+                prior_net_speech_duration_ms: prior_net,
+                prior_word_count: prior_words,
+                combined_net_speech_duration_ms: effective_speech_ms,
+                combined_word_count: prior_words.saturating_add(fluency.word_count as u64),
+            });
+        }
+    }
+
+    let mut qc = qc;
+    qc.speech_duration_ms = fluency.net_speech_duration_ms;
     emit_phase(
         &app,
         &path_key,
@@ -310,9 +396,23 @@ pub async fn analyze_speech_analysis_file(
     let dictionary_vocab = load_dictionary_for_settings(&settings)
         .map(|d| d.vocabulary)
         .unwrap_or_default();
-    let transcript_qc =
-        analyze_transcript_quality(&transcript, language_ru, &dictionary_vocab);
-    let summary = build_summary(
+    let transcript_qc = analyze_transcript_quality(
+        &transcript,
+        language_ru,
+        &dictionary_vocab,
+        stt_was_chunked,
+    );
+    let reference_eval = reference_text.as_ref().map(|rt| {
+        super::reference_eval::evaluate_reference(rt, &transcript, language_ru)
+    });
+
+    let summary_ctx = SummaryBuildContext {
+        effective_speech_ms,
+        norms,
+        accumulation: accumulation.clone(),
+        read_aloud,
+    };
+    let mut summary = build_summary(
         &qc,
         &fluency,
         &prosody,
@@ -324,8 +424,15 @@ pub async fn analyze_speech_analysis_file(
         language_ru,
         &transcript_qc,
         &dictionary_vocab,
+        &summary_ctx,
     );
+    if let Some(ref ev) = reference_eval {
+        summary.problems.substitutions = ev.substitutions.clone();
+    }
     let limitations = caveat_export_keys(&summary.caveats);
+
+    let file_net_speech_ms = fluency.net_speech_duration_ms;
+    let file_word_count = fluency.word_count;
 
     let mut coach = if options.fill_gaps_only && !options.regenerate_coach {
         options
@@ -350,6 +457,19 @@ pub async fn analyze_speech_analysis_file(
         summary,
         limitations,
         coach: None,
+        meta: SpeechAnalysisMeta {
+            speech_register: register,
+            speech_register_auto: register_auto,
+            analysis_mode: if read_aloud {
+                super::types::SpeechAnalysisMode::ReadAloud
+            } else {
+                super::types::SpeechAnalysisMode::Free
+            },
+            read_aloud,
+            accumulation: accumulation.clone(),
+        },
+        reference_eval,
+        reference_text,
     };
 
     if coach.is_none() && should_run_coach(&options, &settings) {
@@ -362,6 +482,26 @@ pub async fn analyze_speech_analysis_file(
         coach = Some(generate_coach(&ctx, &settings, &options, &report).await);
     }
     report.coach = coach;
+
+    if options.accumulate_into_profile {
+        if let Some(ref id) = profile_id {
+            let _ = append_speaker_profile_file(id, file_net_speech_ms, file_word_count);
+            if let Some(p) = get_speaker_profile(id) {
+                report.meta.accumulation = Some(SpeechAnalysisAccumulation {
+                    profile_id: p.id,
+                    profile_label: p.label,
+                    prior_net_speech_duration_ms: p
+                        .net_speech_duration_ms
+                        .saturating_sub(file_net_speech_ms),
+                    prior_word_count: p
+                        .word_count
+                        .saturating_sub(file_word_count as u64),
+                    combined_net_speech_duration_ms: p.net_speech_duration_ms,
+                    combined_word_count: p.word_count,
+                });
+            }
+        }
+    }
 
     if let Err(error) = super::disk_cache::save_report_snapshot(&settings, &report) {
         tracing::warn!(target: "veyro.tools.heavy", "speech analysis disk cache: {error}");
@@ -511,7 +651,7 @@ fn empty_report(path_key: String, file_name: String) -> SpeechAnalysisReport {
         None,
         16_000,
     );
-    let fluency = analyze_fluency(
+    let (fluency, _, _) = analyze_fluency(
         &[],
         &[],
         0,
@@ -519,6 +659,7 @@ fn empty_report(path_key: String, file_name: String) -> SpeechAnalysisReport {
         &SpeechAnalysisConfig::default(),
         &[],
         16_000,
+        &[],
     );
     let prosody = analyze_prosody(
         &crate::audio::segment::AudioSegment::new(Vec::new(), 16_000, 1),
@@ -557,7 +698,28 @@ fn empty_report(path_key: String, file_name: String) -> SpeechAnalysisReport {
         summary,
         limitations,
         coach: None,
+        meta: SpeechAnalysisMeta::default(),
+        reference_eval: None,
+        reference_text: None,
     }
+}
+
+fn resolve_reference_text(options: &SpeechAnalysisOptions) -> Option<String> {
+    if options.analysis_mode == super::types::SpeechAnalysisMode::ReadAloud {
+        if let Some(text) = options
+            .reference_text
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(text.to_string());
+        }
+        return options
+            .reference_preset_id
+            .as_deref()
+            .and_then(super::reference_presets::preset_text);
+    }
+    None
 }
 
 fn map_decode_percent(local: u8) -> u8 {

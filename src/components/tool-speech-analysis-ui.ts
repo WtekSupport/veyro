@@ -8,7 +8,13 @@ import {
   EVENTS,
   type SpeechAnalysisModelPolicy,
   type SpeechAnalysisOptions,
+  type SpeechRegisterHint,
+  type SpeakerProfileSummary,
   type SpeechModelStatusDto,
+  createSpeechAnalysisSpeakerProfile,
+  listSpeechAnalysisSpeakerProfiles,
+  listSpeechAnalysisTongueTwisters,
+  type TongueTwisterPreset,
   exportSpeechAnalysisReport,
   listSpeechAnalysisModels,
   speechAnalysisResolvePlan,
@@ -17,7 +23,11 @@ import {
   normalizeLocalSttFamily,
   pickSpeechAnalysisSavePath,
   pickVoiceFiles,
+  registerVoiceIndexPaths,
+  removeVoiceIndexEntry,
   type LocalSttFamily,
+  type VoiceHistoryEntry,
+  type VoiceJob,
   type LocalSttQuant,
   type SpeechAnalysisProgressPayload,
   type SpeechAnalysisProgressPhase,
@@ -36,9 +46,35 @@ import {
   renderModelDownloadProgressBlock,
 } from "../lib/model-download-progress";
 import { pathsMatch } from "../lib/tool-file-queue";
+import {
+  buildVoiceIndex,
+  fetchVoiceIndex,
+  getVoiceIndexSelection,
+  setVoiceIndexSelection,
+  subscribeVoiceIndex,
+} from "../lib/tool-voice-index";
 import { ToolDecodeProgressSmoother } from "../lib/tool-decode-progress";
 import { t } from "../i18n";
+import {
+  isSidebarToggleClick,
+  loadToolBrowserSidebarCollapsed,
+  renderToolBrowserSidebar,
+  saveToolBrowserSidebarCollapsed,
+  toolBrowserShellClass,
+  type ToolBrowserSidebarLabels,
+} from "../lib/tool-browser-sidebar";
 import { localSttFamilyPlateName } from "./model-labels";
+
+const SPEECH_ANALYSIS_SIDEBAR_TOOL_ID = "speech-analysis";
+
+function speechAnalysisSidebarLabels(): ToolBrowserSidebarLabels {
+  return {
+    ariaLabel: t("tools.speechAnalysis.sidebarTitle"),
+    title: t("tools.speechAnalysis.sidebarTitle"),
+    collapseLabel: t("tools.voiceFiles.sidebarCollapse"),
+    expandLabel: t("tools.voiceFiles.sidebarExpand"),
+  };
+}
 
 type JobStatus = "pending" | "processing" | "done" | "error";
 
@@ -54,6 +90,26 @@ interface AnalysisJob {
   errorKey: string | null;
 }
 
+type AnalysisOverlay = {
+  status: JobStatus;
+  phase: SpeechAnalysisProgressPhase | null;
+  percent: number | null;
+  report: SpeechAnalysisReport | null;
+  pathKey: string | null;
+  errorKey: string | null;
+};
+
+function defaultAnalysisOverlay(): AnalysisOverlay {
+  return {
+    status: "pending",
+    phase: null,
+    percent: null,
+    report: null,
+    pathKey: null,
+    errorKey: null,
+  };
+}
+
 interface DownloadState {
   family: LocalSttFamily;
   quant: LocalSttQuant;
@@ -65,6 +121,12 @@ const CTC_DOWNLOAD_ATTR = 'data-speech-analysis-ctc-download="active"';
 const MODEL_POLICY_KEY = "speechAnalysis.modelPolicy";
 const MANUAL_VARIANT_KEY = "speechAnalysis.manualVariant";
 const COACH_ENABLED_KEY = "speechAnalysis.enableLlmCoach";
+const SPEECH_REGISTER_KEY = "speechAnalysis.speechRegisterHint";
+const SPEAKER_PROFILE_KEY = "speechAnalysis.speakerProfileId";
+const ACCUMULATE_PROFILE_KEY = "speechAnalysis.accumulateProfile";
+const READ_ALOUD_KEY = "speechAnalysis.readAloud";
+const REFERENCE_TEXT_KEY = "speechAnalysis.referenceText";
+const REFERENCE_PRESET_KEY = "speechAnalysis.referencePresetId";
 
 type ManualVariant = { family: LocalSttFamily; quant: LocalSttQuant };
 
@@ -121,10 +183,78 @@ function modelOptionLabel(entry: SpeechModelStatusDto): string {
   return entry.quant === "legacy" ? name : `${name} (${entry.quant})`;
 }
 
+function loadSpeechRegisterHint(): SpeechRegisterHint {
+  const raw = localStorage.getItem(SPEECH_REGISTER_KEY);
+  if (raw === "reading" || raw === "spontaneous") {
+    return raw;
+  }
+  return "auto";
+}
+
+function saveSpeechRegisterHint(value: SpeechRegisterHint): void {
+  localStorage.setItem(SPEECH_REGISTER_KEY, value);
+}
+
+function loadSpeakerProfileId(): string | null {
+  return localStorage.getItem(SPEAKER_PROFILE_KEY);
+}
+
+function saveSpeakerProfileId(id: string | null): void {
+  if (id) {
+    localStorage.setItem(SPEAKER_PROFILE_KEY, id);
+  } else {
+    localStorage.removeItem(SPEAKER_PROFILE_KEY);
+  }
+}
+
+function loadAccumulateProfile(): boolean {
+  return localStorage.getItem(ACCUMULATE_PROFILE_KEY) === "1";
+}
+
+function saveAccumulateProfile(on: boolean): void {
+  localStorage.setItem(ACCUMULATE_PROFILE_KEY, on ? "1" : "0");
+}
+
+function loadReadAloud(): boolean {
+  return localStorage.getItem(READ_ALOUD_KEY) === "1";
+}
+
+function saveReadAloud(on: boolean): void {
+  localStorage.setItem(READ_ALOUD_KEY, on ? "1" : "0");
+}
+
+function loadReferenceText(): string {
+  return localStorage.getItem(REFERENCE_TEXT_KEY) ?? "";
+}
+
+function saveReferenceText(text: string): void {
+  localStorage.setItem(REFERENCE_TEXT_KEY, text);
+}
+
+function loadReferencePresetId(): string | null {
+  const v = localStorage.getItem(REFERENCE_PRESET_KEY);
+  return v && v.length > 0 ? v : null;
+}
+
+function saveReferencePresetId(id: string | null): void {
+  if (id) {
+    localStorage.setItem(REFERENCE_PRESET_KEY, id);
+  } else {
+    localStorage.removeItem(REFERENCE_PRESET_KEY);
+  }
+}
+
 function analysisOptions(
   policy: SpeechAnalysisModelPolicy,
   manualVariant: ManualVariant | null,
   enableLlmCoach: boolean,
+  speechRegisterHint: SpeechRegisterHint,
+  accumulateIntoProfile: boolean,
+  speakerProfileId: string | null,
+  newSpeakerProfileLabel: string | null,
+  readAloud: boolean,
+  referenceText: string,
+  referencePresetId: string | null,
   extra: Partial<SpeechAnalysisOptions> = {},
 ): SpeechAnalysisOptions {
   return {
@@ -132,6 +262,15 @@ function analysisOptions(
     autoDownloadModels: policy === "auto",
     manualVariant: policy === "manual" ? manualVariant : null,
     enableLlmCoach: enableLlmCoach ? null : false,
+    speechRegisterHint,
+    accumulateIntoProfile,
+    speakerProfileId: accumulateIntoProfile ? speakerProfileId : null,
+    newSpeakerProfileLabel:
+      accumulateIntoProfile && !speakerProfileId ? newSpeakerProfileLabel : null,
+    analysisMode: readAloud ? "read_aloud" : "free",
+    referenceText: readAloud && referenceText.trim() ? referenceText.trim() : null,
+    referencePresetId:
+      readAloud && !referenceText.trim() ? referencePresetId : null,
     ...extra,
   };
 }
@@ -252,12 +391,16 @@ function formatCoverageBreakdown(report: SpeechAnalysisReport): string {
 }
 
 function weakSpotHtml(summary: SpeechAnalysisSummary): string {
+  const included = summary.overallCoverage?.included ?? 0;
+  if (included < 2) {
+    return "";
+  }
   const id = summary.overallWeakSpotId;
   if (!id) {
     return "";
   }
   const dim = summary.dimensions.find((d) => d.id === id);
-  if (dim?.score == null) {
+  if (dim?.score == null || dim.status !== "available") {
     return "";
   }
   const key =
@@ -272,6 +415,50 @@ function weakSpotHtml(summary: SpeechAnalysisSummary): string {
   )}</p>`;
 }
 
+function netSpeechMs(report: SpeechAnalysisReport): number {
+  return report.fluency.netSpeechDurationMs ?? report.qc.speechDurationMs;
+}
+
+function effectiveSpeechMsForGates(report: SpeechAnalysisReport): number {
+  const combined = report.meta?.accumulation?.combinedNetSpeechDurationMs;
+  if (combined != null && combined > 0) {
+    return combined;
+  }
+  return netSpeechMs(report);
+}
+
+function renderAnalysisContextMeta(report: SpeechAnalysisReport): string {
+  const meta = report.meta;
+  if (!meta) {
+    return "";
+  }
+  const register = meta.speechRegister ?? report.fluency.speechRegister ?? "spontaneous";
+  const regKey = meta.speechRegisterAuto
+    ? (`tools.speechAnalysis.meta.registerAuto.${register}` as Parameters<typeof t>[0])
+    : (`tools.speechAnalysis.meta.registerManual.${register}` as Parameters<typeof t>[0]);
+  const parts: string[] = [t(regKey)];
+  const acc = meta.accumulation;
+  if (acc) {
+    parts.push(
+      t("tools.speechAnalysis.meta.accumulation", {
+        label: acc.profileLabel,
+        combinedSec: Math.round(acc.combinedNetSpeechDurationMs / 1000),
+        fileSec: Math.round(netSpeechMs(report) / 1000),
+        priorSec: Math.round(acc.priorNetSpeechDurationMs / 1000),
+      }),
+    );
+  }
+  if (report.referenceEval) {
+    parts.push(
+      t("tools.speechAnalysis.meta.referenceEval", {
+        wer: report.referenceEval.werPercent.toFixed(1),
+        cer: report.referenceEval.cerPercent.toFixed(1),
+      }),
+    );
+  }
+  return `<p class="speech-analysis-context-meta muted">${escapeHtml(parts.join(" · "))}</p>`;
+}
+
 function articulationPendingHero(report: SpeechAnalysisReport): string {
   const art = report.summary.dimensions.find((d) => d.id === "articulation");
   if (
@@ -281,8 +468,8 @@ function articulationPendingHero(report: SpeechAnalysisReport): string {
   ) {
     return "";
   }
-  const actual = Math.round(report.qc.speechDurationMs / 1000);
-  const required = art.reasonRequiredSec ?? 120;
+  const actual = Math.round(effectiveSpeechMsForGates(report) / 1000);
+  const required = art.reasonRequiredSec ?? 45;
   const remaining = Math.max(0, required - actual);
   return `<p class="speech-analysis-articulation-pending muted">${escapeHtml(
     t("tools.speechAnalysis.summary.articulationNotScored", {
@@ -295,11 +482,8 @@ function articulationPendingHero(report: SpeechAnalysisReport): string {
 
 function renderFluencyMetricsList(report: SpeechAnalysisReport): string {
   const f = report.fluency;
-  const speechSec = Math.max(0.1, report.qc.speechDurationMs / 1000);
-  const articulationSec = Math.max(
-    0.1,
-    (report.qc.speechDurationMs - f.pauseTotalMs) / 1000,
-  );
+  const speechSec = Math.max(0.1, netSpeechMs(report) / 1000);
+  const articulationSec = speechSec;
   const meanPause =
     f.pauseCount > 0 ? f.meanPauseMs.toFixed(0) : "—";
   const items: Array<[string, string]> = [
@@ -362,25 +546,31 @@ function renderFluencyMetricsList(report: SpeechAnalysisReport): string {
     .join("")}</ul>`;
 }
 
-function renderF0ContourSvg(report: SpeechAnalysisReport): string {
+function f0ContourSvgMarkup(
+  report: SpeechAnalysisReport,
+  size: "card" | "modal",
+): string {
   const contour = report.prosody.f0Contour ?? [];
   const voiced = contour.filter((p) => p.hz != null && p.hz > 0);
   if (voiced.length < 2) {
     return "";
   }
   const hzValues = voiced.map((p) => p.hz!);
-  const minHz = Math.min(...hzValues);
-  const maxHz = Math.max(...hzValues);
+  const sortedHz = [...hzValues].sort((a, b) => a - b);
+  const pct = (q: number) =>
+    sortedHz[Math.min(sortedHz.length - 1, Math.floor((sortedHz.length - 1) * q))]!;
+  const minHz = pct(0.1);
+  const maxHz = pct(0.9);
   const span = Math.max(maxHz - minHz, 1);
   const t0 = voiced[0].timeMs;
   const t1 = voiced[voiced.length - 1].timeMs;
   const timeSpan = Math.max(t1 - t0, 1);
-  const padL = 36;
-  const padR = 8;
-  const padT = 8;
-  const padB = 22;
+  const padL = 40;
+  const padR = 10;
+  const padT = 10;
+  const padB = 24;
   const w = 640;
-  const h = 140;
+  const h = size === "modal" ? 220 : 140;
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
   const toX = (timeMs: number) =>
@@ -397,21 +587,46 @@ function renderF0ContourSvg(report: SpeechAnalysisReport): string {
       ? (12 * Math.log2(maxHz / minHz)).toFixed(1)
       : "—";
   const xMid = padL + plotW / 2;
-  return `<figure class="speech-analysis-f0-chart speech-analysis-f0-chart--large" aria-label="F0">
-    <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img">
+  const labelX = padL - 4;
+  const svgClass =
+    size === "modal"
+      ? "speech-analysis-f0-svg speech-analysis-f0-svg--modal"
+      : "speech-analysis-f0-svg";
+  return `<svg class="${svgClass}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-hidden="true">
       <line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="currentColor" stroke-opacity="0.25" />
       <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="currentColor" stroke-opacity="0.25" />
-      <text x="${padL}" y="${h - 4}" fill="currentColor" fill-opacity="0.55" font-size="10">${escapeHtml(formatMs(t0))}</text>
-      <text x="${xMid.toFixed(0)}" y="${h - 4}" text-anchor="middle" fill="currentColor" fill-opacity="0.55" font-size="10">${escapeHtml(formatMs(t0 + timeSpan / 2))}</text>
-      <text x="${(padL + plotW).toFixed(0)}" y="${h - 4}" text-anchor="end" fill="currentColor" fill-opacity="0.55" font-size="10">${escapeHtml(formatMs(t1))}</text>
-      <text x="4" y="${toY(maxHz).toFixed(0)}" fill="currentColor" fill-opacity="0.55" font-size="10">${maxHz.toFixed(0)} Hz</text>
-      <text x="4" y="${toY(minHz).toFixed(0)}" fill="currentColor" fill-opacity="0.55" font-size="10">${minHz.toFixed(0)} Hz</text>
-      <text x="4" y="${(padT + 8).toFixed(0)}" fill="currentColor" fill-opacity="0.45" font-size="9">~${stSpan} st</text>
-      <polyline fill="none" stroke="currentColor" stroke-width="1.75" points="${points}" />
+      <text x="${padL}" y="${h - 6}" fill="currentColor" fill-opacity="0.55" font-size="10">${escapeHtml(formatMs(t0))}</text>
+      <text x="${xMid.toFixed(0)}" y="${h - 6}" text-anchor="middle" fill="currentColor" fill-opacity="0.55" font-size="10">${escapeHtml(formatMs(t0 + timeSpan / 2))}</text>
+      <text x="${(padL + plotW).toFixed(0)}" y="${h - 6}" text-anchor="end" fill="currentColor" fill-opacity="0.55" font-size="10">${escapeHtml(formatMs(t1))}</text>
+      <text x="${labelX}" y="${toY(maxHz).toFixed(0)}" text-anchor="end" fill="currentColor" fill-opacity="0.65" font-size="11">${maxHz.toFixed(0)}</text>
+      <text x="${labelX}" y="${toY(minHz).toFixed(0)}" text-anchor="end" fill="currentColor" fill-opacity="0.65" font-size="11">${minHz.toFixed(0)}</text>
+      <text x="${labelX}" y="${(padT + 10).toFixed(0)}" text-anchor="end" fill="currentColor" fill-opacity="0.5" font-size="10">${stSpan} st</text>
+      <polyline fill="none" stroke="currentColor" stroke-width="${size === "modal" ? 2 : 1.75}" vector-effect="non-scaling-stroke" points="${points}" />
       <line x1="${padL}" y1="${toY(median)}" x2="${padL + plotW}" y2="${toY(median)}" stroke="currentColor" stroke-opacity="0.15" stroke-dasharray="4 3" />
-    </svg>
-    <figcaption class="muted">${escapeHtml(t("tools.speechAnalysis.summary.prosodyF0ChartCaption"))}</figcaption>
+    </svg>`;
+}
+
+function renderF0ContourSvg(report: SpeechAnalysisReport): string {
+  const svg = f0ContourSvgMarkup(report, "card");
+  if (!svg) {
+    return "";
+  }
+  return `<figure class="speech-analysis-f0-chart" aria-label="F0">
+    <button type="button" class="speech-analysis-f0-chart-hit" data-f0-expand aria-label="${escapeHtml(t("tools.speechAnalysis.summary.f0Expand"))}">
+      ${svg}
+    </button>
+    <figcaption class="muted">${escapeHtml(t("tools.speechAnalysis.summary.prosodyF0ChartCaption"))} · ${escapeHtml(t("tools.speechAnalysis.summary.f0ExpandHint"))}</figcaption>
   </figure>`;
+}
+
+function renderF0DialogShell(): string {
+  return `<dialog class="speech-analysis-f0-modal" data-f0-dialog>
+    <form method="dialog" class="speech-analysis-f0-modal-toolbar">
+      <h3 class="speech-analysis-f0-modal-title">${escapeHtml(t("tools.speechAnalysis.summary.prosodyF0ChartCaption"))}</h3>
+      <button type="submit" class="btn btn-compact secondary">${escapeHtml(t("tools.speechAnalysis.summary.f0ExpandClose"))}</button>
+    </form>
+    <div class="speech-analysis-f0-modal-body" data-f0-dialog-body></div>
+  </dialog>`;
 }
 
 function renderVoiceQualityBlock(report: SpeechAnalysisReport): string {
@@ -471,6 +686,48 @@ function renderTranscriptSection(report: SpeechAnalysisReport): string {
   </section>`;
 }
 
+function parseSummaryLabelParam(
+  param: string | null | undefined,
+  key: string,
+): string | undefined {
+  if (!param) {
+    return undefined;
+  }
+  for (const part of param.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) {
+      continue;
+    }
+    if (part.slice(0, eq) === key) {
+      return part.slice(eq + 1);
+    }
+  }
+  return undefined;
+}
+
+function overallHeadline(summary: SpeechAnalysisSummary): string {
+  const key = summary.overallLabelKey as Parameters<typeof t>[0];
+  const param = summary.overallLabelParam;
+  if (key.includes("insufficientData")) {
+    const speechSec = parseSummaryLabelParam(param, "speechSec") ?? "—";
+    return t("tools.speechAnalysis.summary.label.insufficientData", { speechSec });
+  }
+  if (key.includes("readAloud")) {
+    return t("tools.speechAnalysis.summary.label.readAloud");
+  }
+  if (key.includes("preliminaryAxes")) {
+    const raw = parseSummaryLabelParam(param, "axes");
+    const axes = raw
+      ? raw
+          .split(",")
+          .map((id) => dimensionTitle(id.trim()))
+          .join(", ")
+      : "—";
+    return t("tools.speechAnalysis.summary.label.preliminaryAxes", { axes });
+  }
+  return gradeLabel(summary.overallLabelKey);
+}
+
 function gradeLabel(gradeKey: string): string {
   const translated = t(gradeKey as Parameters<typeof t>[0]);
   return translated === gradeKey ? gradeKey : translated;
@@ -502,7 +759,7 @@ function dimensionReasonHtml(
       "tools.speechAnalysis.summary.reason.needsLongerRecording" &&
     dimension.reasonRequiredSec != null
   ) {
-    const actual = Math.round(report.qc.speechDurationMs / 1000);
+    const actual = Math.round(effectiveSpeechMsForGates(report) / 1000);
     const remaining = Math.max(0, dimension.reasonRequiredSec - actual);
     main = t("tools.speechAnalysis.summary.reason.articulationAwait", {
       actual,
@@ -517,7 +774,7 @@ function dimensionReasonHtml(
     dimension.reasonRequiredSec != null
   ) {
     main = t("tools.speechAnalysis.summary.reason.recordingDuration", {
-      actual: Math.round(report.qc.speechDurationMs / 1000),
+      actual: Math.round(netSpeechMs(report) / 1000),
       required: dimension.reasonRequiredSec,
     });
   } else if (
@@ -576,7 +833,9 @@ function renderProblemsSection(problems: SpeechAnalysisProblems): string {
                   w.scoreHint != null
                     ? ` <span class="muted">(${(w.scoreHint * 100).toFixed(1)}%)</span>`
                     : ""
-                }${
+                } <span class="muted">${escapeHtml(
+                  t(w.reasonKey as Parameters<typeof t>[0]),
+                )}</span>${
                   w.context
                     ? ` <span class="muted">«${escapeHtml(w.context)}»</span>`
                     : ""
@@ -598,7 +857,9 @@ function renderProblemsSection(problems: SpeechAnalysisProblems): string {
             const kind =
               r.kind === "emphasis"
                 ? t("tools.speechAnalysis.problems.repetitionEmphasis")
-                : t("tools.speechAnalysis.problems.repetitionStutter");
+                : r.kind === "possible_deliberate"
+                  ? t("tools.speechAnalysis.problems.repetitionDeliberate")
+                  : t("tools.speechAnalysis.problems.repetitionStutter");
             const time =
               r.startMs > 0 || r.endMs > 0
                 ? `<span class="speech-analysis-time">${escapeHtml(formatMs(r.startMs))}</span> `
@@ -677,7 +938,9 @@ function renderMetricsTable(report: SpeechAnalysisReport): string {
       t("tools.speechAnalysis.sectionQc"),
       [
         report.qc.snrDbEstimate != null
-          ? `SNR ~${report.qc.snrDbEstimate.toFixed(1)} dB`
+          ? report.qc.snrDbEstimate > 40
+            ? t("tools.speechAnalysis.qc.snrCapped")
+            : `SNR ~${report.qc.snrDbEstimate.toFixed(1)} dB`
           : "SNR —",
         `${(report.qc.clipRatio * 100).toFixed(2)}% clip`,
         report.qc.narrowband
@@ -720,7 +983,9 @@ function renderMetricsTable(report: SpeechAnalysisReport): string {
           ? `F0 ${report.prosody.f0MedianHz.toFixed(0)} Hz`
           : null,
         `σ ${report.prosody.f0StdSemitones.toFixed(2)} st`,
-        expressivenessLabel(report.prosody.expressiveness),
+        netSpeechMs(report) >= 20_000
+          ? expressivenessLabel(report.prosody.expressiveness)
+          : null,
       ]
         .filter(Boolean)
         .join(" · "),
@@ -839,8 +1104,12 @@ function renderDimensionCard(
           : ""
       }`;
   }
+  const cardClass =
+    dimension.id === "prosody"
+      ? "speech-analysis-dimension-card speech-analysis-dimension-card--prosody"
+      : "speech-analysis-dimension-card";
   return `
-    <article class="speech-analysis-dimension-card">
+    <article class="${cardClass}">
       <h4 class="speech-analysis-dimension-title">${escapeHtml(dimensionTitle(dimension.id))}</h4>
       <div class="speech-analysis-dimension-score">${score}</div>
       <p class="speech-analysis-dimension-grade">${escapeHtml(gradeLabel(dimension.gradeKey))}</p>
@@ -922,8 +1191,11 @@ function renderVisualReport(
   modelPolicy: SpeechAnalysisModelPolicy,
 ): string {
   const summary = report.summary;
+  const includedAxes = summary.overallCoverage?.included ?? 0;
   const showScore =
-    summary.overallScoreMode !== "hidden" && summary.overallScore != null;
+    includedAxes >= 2 &&
+    summary.overallScoreMode !== "hidden" &&
+    summary.overallScore != null;
   const scoreMuted =
     summary.overallScoreMode === "preliminary" || !summary.overallShowGrade;
   const overall = showScore
@@ -962,7 +1234,7 @@ function renderVisualReport(
   return `
     <div class="speech-analysis-report">
       <section class="speech-analysis-hero" aria-label="${escapeHtml(t("tools.speechAnalysis.summary.overallTitle"))}">
-        <p class="speech-analysis-hero-label">${escapeHtml(gradeLabel(summary.overallLabelKey))} ${modeBadge}</p>
+        <p class="speech-analysis-hero-label">${escapeHtml(overallHeadline(summary))} ${modeBadge}</p>
         <div class="speech-analysis-overall">${overall}</div>
         ${weakSpot}
         <p class="speech-analysis-overall-grade">${
@@ -973,6 +1245,7 @@ function renderVisualReport(
               : escapeHtml(t("tools.speechAnalysis.summary.hiddenHint"))
         }</p>
         ${coverage}
+        ${renderAnalysisContextMeta(report)}
         ${articulationPendingHero(report)}
         ${reliability}
       </section>
@@ -991,7 +1264,6 @@ function renderVisualReport(
         <summary>${escapeHtml(t("tools.speechAnalysis.technicalDetails"))}</summary>
         ${renderMetricsTable(report)}
         ${renderLetterMismatchTechnical(report)}
-        ${renderTranscriptSection(report)}
       </details>
       <div class="speech-analysis-actions">
         <button type="button" class="btn secondary" data-copy-report>${escapeHtml(t("tools.speechAnalysis.copyMd"))}</button>
@@ -1033,6 +1305,15 @@ function renderAdvancedModelControls(options: {
   speechModels: SpeechModelStatusDto[];
   manualVariant: ManualVariant | null;
   enableLlmCoach: boolean;
+  speechRegisterHint: SpeechRegisterHint;
+  speakerProfiles: SpeakerProfileSummary[];
+  speakerProfileId: string | null;
+  accumulateIntoProfile: boolean;
+  newSpeakerProfileLabel: string;
+  readAloud: boolean;
+  referenceText: string;
+  referencePresetId: string | null;
+  tongueTwisters: TongueTwisterPreset[];
 }): string {
   const manualSelect =
     options.modelPolicy === "manual" && options.speechModels.length > 0
@@ -1063,6 +1344,64 @@ function renderAdvancedModelControls(options: {
             </select>
           </label>
           ${manualSelect}
+          <label class="speech-analysis-advanced-label">
+            ${escapeHtml(t("tools.speechAnalysis.advanced.speechRegister"))}
+            <select data-speech-analysis-register class="speech-analysis-advanced-select">
+              <option value="auto"${options.speechRegisterHint === "auto" ? " selected" : ""}>${escapeHtml(t("tools.speechAnalysis.advanced.speechRegisterAuto"))}</option>
+              <option value="reading"${options.speechRegisterHint === "reading" ? " selected" : ""}>${escapeHtml(t("tools.speechAnalysis.advanced.speechRegisterReading"))}</option>
+              <option value="spontaneous"${options.speechRegisterHint === "spontaneous" ? " selected" : ""}>${escapeHtml(t("tools.speechAnalysis.advanced.speechRegisterSpontaneous"))}</option>
+            </select>
+          </label>
+          <label class="speech-analysis-advanced-label speech-analysis-advanced-check">
+            <input type="checkbox" data-speech-analysis-accumulate${options.accumulateIntoProfile ? " checked" : ""} />
+            ${escapeHtml(t("tools.speechAnalysis.advanced.accumulateSpeaker"))}
+          </label>
+          ${
+            options.accumulateIntoProfile
+              ? `<label class="speech-analysis-advanced-label">
+            ${escapeHtml(t("tools.speechAnalysis.advanced.speakerProfile"))}
+            <select data-speech-analysis-speaker-profile class="speech-analysis-advanced-select">
+              <option value="">${escapeHtml(t("tools.speechAnalysis.advanced.speakerProfileNew"))}</option>
+              ${options.speakerProfiles
+                .map(
+                  (p) =>
+                    `<option value="${escapeHtml(p.id)}"${p.id === options.speakerProfileId ? " selected" : ""}>${escapeHtml(p.label)} (${Math.round(p.netSpeechDurationMs / 1000)}s)</option>`,
+                )
+                .join("")}
+            </select>
+          </label>
+          <label class="speech-analysis-advanced-label">
+            ${escapeHtml(t("tools.speechAnalysis.advanced.newProfileLabel"))}
+            <input type="text" class="speech-analysis-advanced-input" data-speech-analysis-new-profile
+              value="${escapeHtml(options.newSpeakerProfileLabel)}"
+              placeholder="${escapeHtml(t("tools.speechAnalysis.advanced.newProfilePlaceholder"))}" />
+          </label>`
+              : ""
+          }
+          <label class="speech-analysis-advanced-label speech-analysis-advanced-check">
+            <input type="checkbox" data-speech-analysis-read-aloud${options.readAloud ? " checked" : ""} />
+            ${escapeHtml(t("tools.speechAnalysis.advanced.readAloud"))}
+          </label>
+          ${
+            options.readAloud
+              ? `<label class="speech-analysis-advanced-label">
+            ${escapeHtml(t("tools.speechAnalysis.advanced.tongueTwister"))}
+            <select data-speech-analysis-preset class="speech-analysis-advanced-select">
+              <option value="">${escapeHtml(t("tools.speechAnalysis.advanced.tongueTwisterNone"))}</option>
+              ${options.tongueTwisters
+                .map(
+                  (p) =>
+                    `<option value="${escapeHtml(p.id)}"${p.id === options.referencePresetId ? " selected" : ""}>${escapeHtml(p.title)}</option>`,
+                )
+                .join("")}
+            </select>
+          </label>
+          <label class="speech-analysis-advanced-label">
+            ${escapeHtml(t("tools.speechAnalysis.advanced.referenceText"))}
+            <textarea class="speech-analysis-advanced-input" rows="4" data-speech-analysis-reference-text>${escapeHtml(options.referenceText)}</textarea>
+          </label>`
+              : ""
+          }
           <label class="speech-analysis-advanced-label speech-analysis-advanced-check">
             <input type="checkbox" data-speech-analysis-llm-coach${options.enableLlmCoach ? " checked" : ""} />
             ${escapeHtml(t("tools.speechAnalysis.advanced.llmCoach"))}
@@ -1081,6 +1420,16 @@ function render(host: HTMLElement, jobs: AnalysisJob[], selectedId: string | nul
   backfilling: boolean;
   enableLlmCoach: boolean;
   planPreview: SpeechAnalysisPlanDto | null;
+  sidebarCollapsed: boolean;
+  speechRegisterHint: SpeechRegisterHint;
+  speakerProfiles: SpeakerProfileSummary[];
+  speakerProfileId: string | null;
+  accumulateIntoProfile: boolean;
+  newSpeakerProfileLabel: string;
+  readAloud: boolean;
+  referenceText: string;
+  referencePresetId: string | null;
+  tongueTwisters: TongueTwisterPreset[];
 }): void {
   const selected = jobs.find((job) => job.id === selectedId) ?? jobs[0] ?? null;
   const processing = jobs.some((job) => job.status === "processing");
@@ -1100,12 +1449,17 @@ function render(host: HTMLElement, jobs: AnalysisJob[], selectedId: string | nul
               } else if (job.status === "error") {
                 status = t("tools.speechAnalysis.status.error");
               }
+              const canRemove = job.status !== "processing";
               return `
-              <li class="voice-files-browser-row${active ? " voice-files-browser-row--selected" : ""}">
+              <li class="voice-files-browser-row${active ? " voice-files-browser-row--selected" : ""}" data-index-id="${escapeHtml(job.id)}">
                 <button type="button" class="voice-files-browser-main" data-select-job="${escapeHtml(job.id)}">
                   <span class="voice-files-browser-name">${escapeHtml(job.fileName)}</span>
                   <span class="voice-files-browser-status">${escapeHtml(status)}</span>
                 </button>
+                <button type="button" class="voice-files-browser-remove" data-remove-index="${escapeHtml(job.id)}"
+                  ${canRemove ? "" : "disabled"}
+                  aria-label="${escapeHtml(t("tools.voiceWatch.removeFromIndex"))}"
+                  title="${escapeHtml(t("tools.voiceWatch.removeFromIndex"))}">×</button>
               </li>`;
             })
             .join("");
@@ -1132,12 +1486,7 @@ function render(host: HTMLElement, jobs: AnalysisJob[], selectedId: string | nul
   const canAnalyze =
     Boolean(selected) && selected.status !== "processing" && !processing;
 
-  host.innerHTML = `
-    <main class="voice-files-tool voice-files-tool--with-browser">
-      <aside class="voice-files-sidebar" aria-label="${escapeHtml(t("tools.speechAnalysis.sidebarTitle"))}">
-        <div class="voice-files-sidebar-head">
-          <span class="voice-files-sidebar-title">${escapeHtml(t("tools.speechAnalysis.sidebarTitle"))}</span>
-        </div>
+  const sidebarBody = `
         <div
           class="voice-files-dropzone voice-files-dropzone--sidebar${processing ? " voice-files-dropzone--busy" : ""}"
           data-speech-analysis-dropzone
@@ -1161,15 +1510,35 @@ function render(host: HTMLElement, jobs: AnalysisJob[], selectedId: string | nul
           <button type="button" class="btn btn-primary btn-compact" data-run-analysis ${canAnalyze ? "" : "disabled"}>
             ${escapeHtml(t("tools.speechAnalysis.analyze"))}
           </button>
-        </div>
-      </aside>
+        </div>`;
+
+  const sidebar = renderToolBrowserSidebar(
+    speechAnalysisSidebarLabels(),
+    options.sidebarCollapsed,
+    sidebarBody,
+  );
+
+  host.innerHTML = `
+    <main class="${toolBrowserShellClass(options.sidebarCollapsed)}">
+      ${sidebar}
       <div class="voice-files-main">${main}</div>
     </main>`;
+  mountF0Dialog(host);
+}
+
+function mountF0Dialog(host: HTMLElement): void {
+  if (host.querySelector("[data-f0-dialog]")) {
+    return;
+  }
+  host.insertAdjacentHTML("beforeend", renderF0DialogShell());
 }
 
 export function createSpeechAnalysisController(host: HTMLElement) {
-  let jobs: AnalysisJob[] = [];
+  let voiceHistory: VoiceHistoryEntry[] = [];
+  let voiceJobs: VoiceJob[] = [];
+  const analysisOverlays = new Map<string, AnalysisOverlay>();
   let selectedId: string | null = null;
+  let indexUnsubscribe: (() => void) | null = null;
   let unlistenProgress: UnlistenFn | null = null;
   let unlistenDownload: UnlistenFn | null = null;
   let ctcDownloading = false;
@@ -1179,8 +1548,60 @@ export function createSpeechAnalysisController(host: HTMLElement) {
   let speechModels: SpeechModelStatusDto[] = [];
   let backfilling = false;
   let enableLlmCoach = loadLlmCoachEnabled();
+  let speechRegisterHint = loadSpeechRegisterHint();
+  let speakerProfileId = loadSpeakerProfileId();
+  let accumulateIntoProfile = loadAccumulateProfile();
+  let newSpeakerProfileLabel = "";
+  let readAloud = loadReadAloud();
+  let referenceText = loadReferenceText();
+  let referencePresetId = loadReferencePresetId();
+  let tongueTwisters: TongueTwisterPreset[] = [];
+  let speakerProfiles: SpeakerProfileSummary[] = [];
   let planPreview: SpeechAnalysisPlanDto | null = null;
+  let sidebarCollapsed = loadToolBrowserSidebarCollapsed(
+    SPEECH_ANALYSIS_SIDEBAR_TOOL_ID,
+  );
   const decodeProgress = new ToolDecodeProgressSmoother();
+
+  const overlayFor = (id: string): AnalysisOverlay => {
+    let overlay = analysisOverlays.get(id);
+    if (!overlay) {
+      overlay = defaultAnalysisOverlay();
+      analysisOverlays.set(id, overlay);
+    }
+    return overlay;
+  };
+
+  const buildJobs = (): AnalysisJob[] =>
+    buildVoiceIndex(voiceHistory, voiceJobs).map((entry) => {
+      const overlay = overlayFor(entry.id);
+      return {
+        id: entry.id,
+        path: entry.path,
+        fileName: entry.fileName,
+        status: overlay.status,
+        phase: overlay.phase,
+        percent: overlay.percent,
+        report: overlay.report,
+        pathKey: overlay.pathKey,
+        errorKey: overlay.errorKey,
+      };
+    });
+
+  const refreshVoiceIndex = async (): Promise<void> => {
+    const snapshot = await fetchVoiceIndex();
+    voiceHistory = snapshot.history;
+    voiceJobs = snapshot.jobs;
+    const ids = new Set(snapshot.index.map((e) => e.id));
+    for (const id of analysisOverlays.keys()) {
+      if (!ids.has(id)) {
+        analysisOverlays.delete(id);
+      }
+    }
+    if (selectedId && !ids.has(selectedId)) {
+      selectedId = null;
+    }
+  };
 
   const refreshPlanPreview = () => {
     if (modelPolicy !== "auto") {
@@ -1189,12 +1610,39 @@ export function createSpeechAnalysisController(host: HTMLElement) {
       return;
     }
     void speechAnalysisResolvePlan(
-      analysisOptions(modelPolicy, manualVariant, enableLlmCoach),
+      analysisOptions(
+        modelPolicy,
+        manualVariant,
+        enableLlmCoach,
+        speechRegisterHint,
+        accumulateIntoProfile,
+        speakerProfileId,
+        newSpeakerProfileLabel,
+        readAloud,
+        referenceText,
+        referencePresetId,
+      ),
     ).then((plan) => {
       planPreview = plan;
       paint();
     });
   };
+
+  void listSpeechAnalysisSpeakerProfiles().then((profiles) => {
+    speakerProfiles = profiles;
+    paint();
+  });
+
+  void listSpeechAnalysisTongueTwisters().then((presets) => {
+    tongueTwisters = presets;
+    if (!referencePresetId && presets.length > 0 && readAloud && !referenceText.trim()) {
+      referencePresetId = presets[0].id;
+      referenceText = presets[0].text;
+      saveReferencePresetId(referencePresetId);
+      saveReferenceText(referenceText);
+    }
+    paint();
+  });
 
   void listSpeechAnalysisModels("ru").then((models) => {
     speechModels = models;
@@ -1207,6 +1655,7 @@ export function createSpeechAnalysisController(host: HTMLElement) {
   });
 
   const paint = () => {
+    const jobs = buildJobs();
     const selected = jobs.find((job) => job.id === selectedId);
     const backendPercent =
       selected?.status === "processing" ? (selected.percent ?? null) : null;
@@ -1224,12 +1673,23 @@ export function createSpeechAnalysisController(host: HTMLElement) {
       backfilling,
       enableLlmCoach,
       planPreview,
+      sidebarCollapsed,
+      speechRegisterHint,
+      speakerProfiles,
+      speakerProfileId,
+      accumulateIntoProfile,
+      newSpeakerProfileLabel,
+      readAloud,
+      referenceText,
+      referencePresetId,
+      tongueTwisters,
     });
   };
 
   decodeProgress.bindRepaint(paint);
 
   const backfillJobs = async () => {
+    const jobs = buildJobs();
     const targets = jobs.filter(
       (job) =>
         job.status === "done" &&
@@ -1245,29 +1705,42 @@ export function createSpeechAnalysisController(host: HTMLElement) {
       if (!job.report) {
         continue;
       }
-      job.status = "processing";
-      job.phase = "analyzing";
-      job.percent = null;
+      const overlay = overlayFor(job.id);
+      overlay.status = "processing";
+      overlay.phase = "analyzing";
+      overlay.percent = null;
       paint();
       try {
         const report = await runToolWithSttLanguageRecovery(() =>
           analyzeSpeechAnalysisFile(
             job.path,
-            analysisOptions(modelPolicy, manualVariant, enableLlmCoach, {
-              fillGapsOnly: true,
-              cache: buildSpeechAnalysisCache(job.report!),
-            }),
+            analysisOptions(
+              modelPolicy,
+              manualVariant,
+              enableLlmCoach,
+              speechRegisterHint,
+              accumulateIntoProfile,
+              speakerProfileId,
+              newSpeakerProfileLabel,
+              readAloud,
+              referenceText,
+              referencePresetId,
+              {
+                fillGapsOnly: true,
+                cache: buildSpeechAnalysisCache(job.report!),
+              },
+            ),
           ),
         );
-        job.report = report;
-        job.pathKey = report.pathKey;
-        job.status = "done";
-        job.phase = "done";
-        job.percent = 100;
-        job.errorKey = null;
+        overlay.report = report;
+        overlay.pathKey = report.pathKey;
+        overlay.status = "done";
+        overlay.phase = "done";
+        overlay.percent = 100;
+        overlay.errorKey = null;
       } catch (error) {
-        job.status = "error";
-        job.errorKey =
+        overlay.status = "error";
+        overlay.errorKey =
           typeof error === "string"
             ? error
             : "tools.speechAnalysis.readFailed";
@@ -1279,9 +1752,10 @@ export function createSpeechAnalysisController(host: HTMLElement) {
   };
 
   const runJob = async (job: AnalysisJob) => {
-    job.status = "processing";
-    job.phase = "decoding";
-    job.percent = 0;
+    const overlay = overlayFor(job.id);
+    overlay.status = "processing";
+    overlay.phase = "decoding";
+    overlay.percent = 0;
     decodeProgress.reset();
     if (modelPolicy === "auto") {
       refreshPlanPreview();
@@ -1291,63 +1765,108 @@ export function createSpeechAnalysisController(host: HTMLElement) {
       const report = await runToolWithSttLanguageRecovery(() =>
         analyzeSpeechAnalysisFile(
           job.path,
-          analysisOptions(modelPolicy, manualVariant, enableLlmCoach),
+          analysisOptions(
+            modelPolicy,
+            manualVariant,
+            enableLlmCoach,
+            speechRegisterHint,
+            accumulateIntoProfile,
+            speakerProfileId,
+            newSpeakerProfileLabel,
+            readAloud,
+            referenceText,
+            referencePresetId,
+          ),
         ),
       );
-      job.report = report;
-      job.pathKey = report.pathKey;
-      job.status = "done";
-      job.phase = "done";
-      job.percent = 100;
-      job.errorKey = null;
+      overlay.report = report;
+      overlay.pathKey = report.pathKey;
+      overlay.status = "done";
+      overlay.phase = "done";
+      overlay.percent = 100;
+      overlay.errorKey = null;
+      if (accumulateIntoProfile) {
+        void listSpeechAnalysisSpeakerProfiles().then((profiles) => {
+          speakerProfiles = profiles;
+          if (report.meta?.accumulation?.profileId) {
+            speakerProfileId = report.meta.accumulation.profileId;
+            saveSpeakerProfileId(speakerProfileId);
+          }
+          paint();
+        });
+      }
       if (jobNeedsMetricBackfill(report)) {
         await backfillJobs();
       }
     } catch (error) {
-      job.status = "error";
-      job.errorKey =
+      overlay.status = "error";
+      overlay.errorKey =
         typeof error === "string" ? error : "tools.speechAnalysis.readFailed";
     }
     decodeProgress.stop();
     paint();
   };
 
-  const enqueue = (paths: string[]) => {
-    for (const path of paths) {
-      const fileName = path.split(/[/\\]/).pop() ?? path;
-      const id = `${path}-${Date.now()}`;
-      jobs.unshift({
-        id,
-        path,
-        pathKey: null,
-        fileName,
-        status: "pending",
-        phase: null,
-        percent: null,
-        report: null,
-        errorKey: null,
-      });
-      selectedId = id;
+  const applyDiskCache = (path: string, cached: SpeechAnalysisReport): void => {
+    const entry = buildVoiceIndex(voiceHistory, voiceJobs).find((row) =>
+      pathsMatch(row.path, path),
+    );
+    if (!entry) {
+      return;
     }
+    const overlay = overlayFor(entry.id);
+    if (overlay.status === "processing") {
+      return;
+    }
+    overlay.report = cached;
+    overlay.pathKey = cached.pathKey;
+    overlay.status = "done";
+    overlay.phase = "done";
+    overlay.percent = 100;
     paint();
-    for (const path of paths) {
+  };
+
+  const enqueue = (paths: string[]) => {
+    const unique = paths.filter((p) => p.trim().length > 0);
+    if (unique.length === 0) {
+      return;
+    }
+    void registerVoiceIndexPaths(unique).then((created) => {
+      void refreshVoiceIndex().then(() => {
+        const pick = created[0]?.id ?? null;
+        if (pick) {
+          selectedId = pick;
+          setVoiceIndexSelection(pick);
+        }
+        paint();
+      });
+    });
+    for (const path of unique) {
       void speechAnalysisLoadDiskCache(path).then((cached) => {
         if (!cached) {
           return;
         }
-        const job = jobs.find(
-          (entry) => pathsMatch(entry.path, path) || pathsMatch(entry.path, cached.pathKey),
-        );
-        if (!job || job.status === "processing") {
-          return;
-        }
-        job.report = cached;
-        job.pathKey = cached.pathKey;
-        job.status = "done";
-        job.phase = "done";
-        job.percent = 100;
-        paint();
+        void refreshVoiceIndex().then(() => applyDiskCache(path, cached));
       });
+    }
+  };
+
+  const removeFromIndex = async (id: string): Promise<void> => {
+    const overlay = analysisOverlays.get(id);
+    if (overlay?.status === "processing") {
+      return;
+    }
+    try {
+      voiceHistory = await removeVoiceIndexEntry(id);
+      analysisOverlays.delete(id);
+      if (selectedId === id) {
+        selectedId = null;
+        setVoiceIndexSelection(null);
+      }
+      await refreshVoiceIndex();
+      paint();
+    } catch {
+      /* ignore */
     }
   };
 
@@ -1381,6 +1900,38 @@ export function createSpeechAnalysisController(host: HTMLElement) {
   };
 
   host.addEventListener("change", (event) => {
+    const readAloudCheck = (event.target as HTMLElement).closest<HTMLInputElement>(
+      "[data-speech-analysis-read-aloud]",
+    );
+    if (readAloudCheck) {
+      readAloud = readAloudCheck.checked;
+      saveReadAloud(readAloud);
+      paint();
+      return;
+    }
+    const presetSelect = (event.target as HTMLElement).closest<HTMLSelectElement>(
+      "[data-speech-analysis-preset]",
+    );
+    if (presetSelect) {
+      const id = presetSelect.value || null;
+      referencePresetId = id;
+      saveReferencePresetId(id);
+      const preset = tongueTwisters.find((p) => p.id === id);
+      if (preset) {
+        referenceText = preset.text;
+        saveReferenceText(referenceText);
+      }
+      paint();
+      return;
+    }
+    const refText = (event.target as HTMLElement).closest<HTMLTextAreaElement>(
+      "[data-speech-analysis-reference-text]",
+    );
+    if (refText) {
+      referenceText = refText.value;
+      saveReferenceText(referenceText);
+      return;
+    }
     const coachCheck = (event.target as HTMLElement).closest<HTMLInputElement>(
       "[data-speech-analysis-llm-coach]",
     );
@@ -1388,6 +1939,43 @@ export function createSpeechAnalysisController(host: HTMLElement) {
       enableLlmCoach = coachCheck.checked;
       saveLlmCoachEnabled(enableLlmCoach);
       paint();
+      return;
+    }
+    const registerSelect = (event.target as HTMLElement).closest<HTMLSelectElement>(
+      "[data-speech-analysis-register]",
+    );
+    if (registerSelect) {
+      const v = registerSelect.value;
+      if (v === "auto" || v === "reading" || v === "spontaneous") {
+        speechRegisterHint = v;
+        saveSpeechRegisterHint(v);
+        paint();
+      }
+      return;
+    }
+    const accumulateCheck = (event.target as HTMLElement).closest<HTMLInputElement>(
+      "[data-speech-analysis-accumulate]",
+    );
+    if (accumulateCheck) {
+      accumulateIntoProfile = accumulateCheck.checked;
+      saveAccumulateProfile(accumulateIntoProfile);
+      paint();
+      return;
+    }
+    const profileSelect = (event.target as HTMLElement).closest<HTMLSelectElement>(
+      "[data-speech-analysis-speaker-profile]",
+    );
+    if (profileSelect) {
+      speakerProfileId = profileSelect.value || null;
+      saveSpeakerProfileId(speakerProfileId);
+      paint();
+      return;
+    }
+    const newProfileInput = (event.target as HTMLElement).closest<HTMLInputElement>(
+      "[data-speech-analysis-new-profile]",
+    );
+    if (newProfileInput) {
+      newSpeakerProfileLabel = newProfileInput.value;
       return;
     }
     const select = (event.target as HTMLElement).closest<HTMLSelectElement>(
@@ -1422,6 +2010,31 @@ export function createSpeechAnalysisController(host: HTMLElement) {
 
   host.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
+    if (isSidebarToggleClick(target)) {
+      sidebarCollapsed = !sidebarCollapsed;
+      saveToolBrowserSidebarCollapsed(
+        SPEECH_ANALYSIS_SIDEBAR_TOOL_ID,
+        sidebarCollapsed,
+      );
+      paint();
+      return;
+    }
+    const jobs = buildJobs();
+    const f0Expand = target.closest<HTMLElement>("[data-f0-expand]");
+    if (f0Expand) {
+      const job = jobs.find((entry) => entry.id === selectedId);
+      const report = job?.report;
+      const dialog = host.querySelector<HTMLDialogElement>("[data-f0-dialog]");
+      const body = host.querySelector<HTMLElement>("[data-f0-dialog-body]");
+      if (report && dialog && body) {
+        const svg = f0ContourSvgMarkup(report, "modal");
+        if (svg) {
+          body.innerHTML = `<figure class="speech-analysis-f0-chart speech-analysis-f0-chart--modal">${svg}</figure>`;
+          dialog.showModal();
+        }
+      }
+      return;
+    }
     const playBtn = target.closest<HTMLElement>("[data-play-start]");
     if (playBtn?.dataset.playStart != null) {
       const audio = host.querySelector<HTMLAudioElement>("[data-speech-analysis-audio]");
@@ -1454,7 +2067,13 @@ export function createSpeechAnalysisController(host: HTMLElement) {
     const selectBtn = target.closest<HTMLElement>("[data-select-job]");
     if (selectBtn?.dataset.selectJob) {
       selectedId = selectBtn.dataset.selectJob;
+      setVoiceIndexSelection(selectedId);
       paint();
+      return;
+    }
+    const removeBtn = target.closest<HTMLElement>("[data-remove-index]");
+    if (removeBtn?.dataset.removeIndex) {
+      void removeFromIndex(removeBtn.dataset.removeIndex);
       return;
     }
     if (target.closest("[data-download-ctc-model]")) {
@@ -1530,19 +2149,18 @@ export function createSpeechAnalysisController(host: HTMLElement) {
 
   void listen<SpeechAnalysisProgressPayload>(EVENTS.speechAnalysisProgress, (event) => {
     const payload = event.payload;
-    const job = jobs.find(
-      (entry) =>
-        pathsMatch(entry.path, payload.path) ||
-        (entry.pathKey != null && pathsMatch(entry.pathKey, payload.path)),
+    const entry = buildVoiceIndex(voiceHistory, voiceJobs).find((row) =>
+      pathsMatch(row.path, payload.path),
     );
-    if (!job) {
+    if (!entry) {
       return;
     }
-    job.phase = payload.phase;
+    const overlay = overlayFor(entry.id);
+    overlay.phase = payload.phase;
     if (payload.percent != null) {
-      job.percent = payload.percent;
+      overlay.percent = payload.percent;
     }
-    decodeProgress.sync(job.phase, job.percent);
+    decodeProgress.sync(overlay.phase, overlay.percent);
     paint();
   }).then((fn) => {
     unlistenProgress = fn;
@@ -1562,12 +2180,40 @@ export function createSpeechAnalysisController(host: HTMLElement) {
     unlistenDownload = fn;
   });
 
-  paint();
+  void refreshVoiceIndex().then(() => {
+    const persisted = getVoiceIndexSelection();
+    if (
+      persisted &&
+      buildVoiceIndex(voiceHistory, voiceJobs).some((e) => e.id === persisted)
+    ) {
+      selectedId = persisted;
+    }
+    paint();
+  });
+
+  indexUnsubscribe = subscribeVoiceIndex(
+    () => {
+      void refreshVoiceIndex().then(paint);
+    },
+    (id) => {
+      if (!id) {
+        return;
+      }
+      void refreshVoiceIndex().then(() => {
+        if (!buildVoiceIndex(voiceHistory, voiceJobs).some((e) => e.id === id)) {
+          return;
+        }
+        selectedId = id;
+        paint();
+      });
+    },
+  );
 
   return {
     enqueue,
     destroy: () => {
       decodeProgress.dispose();
+      indexUnsubscribe?.();
       void unlistenProgress?.();
       void unlistenDownload?.();
     },

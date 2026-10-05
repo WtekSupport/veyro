@@ -1,4 +1,4 @@
-use super::config::SpeechAnalysisConfig;
+use super::config::{RegisterNorms, SpeechAnalysisConfig};
 use super::transcript_qc::TranscriptQualityReport;
 use crate::word_align::WordTiming;
 
@@ -6,9 +6,18 @@ use super::problems::build_problems;
 use super::scoring::{bell_score, prosody_intonation_score};
 use super::types::{
     ArticulationReport, DimensionStatus, FluencyReport, IntelligibilityReport, OverallScoreMode,
-    ProsodyReport, QcReport, ReliabilityLevel, SpeechAnalysisCaveat, SpeechAnalysisCoverage,
-    SpeechAnalysisReliability, SpeechAnalysisSummary, SummaryDimension,
+    ProsodyReport, QcReport, ReliabilityLevel, SpeechAnalysisAccumulation, SpeechAnalysisCaveat,
+    SpeechAnalysisCoverage, SpeechAnalysisReliability, SpeechAnalysisSummary, SpeechRegister,
+    SummaryDimension,
 };
+
+#[derive(Debug, Clone)]
+pub struct SummaryBuildContext {
+    pub effective_speech_ms: u64,
+    pub norms: RegisterNorms,
+    pub accumulation: Option<SpeechAnalysisAccumulation>,
+    pub read_aloud: bool,
+}
 
 const WEIGHT_CONFIDENCE: f32 = 10.0;
 const WEIGHT_INTELLIGIBILITY: f32 = 20.0;
@@ -36,8 +45,9 @@ pub fn build_summary(
     language_ru: bool,
     transcript_qc: &TranscriptQualityReport,
     extra_vocabulary: &[String],
+    ctx: &SummaryBuildContext,
 ) -> SpeechAnalysisSummary {
-    let speech_ms = qc.speech_duration_ms;
+    let speech_ms = ctx.effective_speech_ms.max(1);
     let reliability = build_reliability(qc);
 
     let signal_quality = dimension_signal_quality(qc);
@@ -45,18 +55,25 @@ pub fn build_summary(
     let mut intelligibility_dim =
         dimension_intelligibility(intelligibility, fluency.word_count, config);
     if transcript_qc.degraded {
-        if let Some(score) = intelligibility_dim.score {
-            intelligibility_dim.score = Some(score.min(85));
-            intelligibility_dim.grade_key = grade_key_for_score(intelligibility_dim.score);
+        if fluency.word_count >= config.min_words_transcript_qc_score {
+            if let Some(score) = intelligibility_dim.score {
+                intelligibility_dim.score = Some(score.min(85));
+                intelligibility_dim.grade_key = grade_key_for_score(intelligibility_dim.score);
+            }
         }
+    } else if transcript_qc.suspicious_word_count > 0 {
+        intelligibility_dim.detail_key = Some(
+            "tools.speechAnalysis.summary.detail.intelligibilitySuspiciousWords".to_string(),
+        );
     }
     if intelligibility_dim.status != DimensionStatus::Unavailable {
         intelligibility_dim.detail_key =
             Some("tools.speechAnalysis.summary.detail.intelligibilityMerged".to_string());
     }
-    let articulation_dim = dimension_articulation(articulation, speech_ms, config);
-    let fluency_dim = dimension_fluency(fluency, speech_ms, config);
-    let prosody_dim = dimension_prosody(prosody, speech_ms, config);
+    let articulation_dim =
+        dimension_articulation(articulation, speech_ms, &ctx.norms, config);
+    let fluency_dim = dimension_fluency(fluency, speech_ms, &ctx.norms, config, ctx.read_aloud);
+    let prosody_dim = dimension_prosody(prosody, speech_ms, &ctx.norms, config);
 
     let show_confidence_card = intelligibility_dim.status == DimensionStatus::Unavailable;
     let mut dimensions = vec![signal_quality];
@@ -75,14 +92,35 @@ pub fn build_summary(
         caveats.push(SpeechAnalysisCaveat {
             code: "transcriptQualityDegraded".to_string(),
             param: Some(format!(
-                "suspicious={};duplicatePhrases={}",
-                transcript_qc.suspicious_word_count, transcript_qc.duplicate_ngram_count
+                "duplicatePhrases={}",
+                transcript_qc.duplicate_ngram_count
             )),
+        });
+    } else if transcript_qc.suspicious_word_count > 0 {
+        caveats.push(SpeechAnalysisCaveat {
+            code: "transcriptSuspiciousWords".to_string(),
+            param: Some(format!(
+                "suspicious={};total={}",
+                transcript_qc.suspicious_word_count,
+                fluency.word_count.max(1)
+            )),
+        });
+    }
+    if ctx.accumulation.is_some() {
+        caveats.push(SpeechAnalysisCaveat {
+            code: "speakerProfileAccumulated".to_string(),
+            param: None,
+        });
+    }
+    if qc.flags.iter().any(|f| f == "possibly_processed") {
+        caveats.push(SpeechAnalysisCaveat {
+            code: "possiblyProcessedRecording".to_string(),
+            param: None,
         });
     }
 
     let articulation_char_proxy = articulation_is_char_level_proxy(&articulation_dim);
-    let (overall_score_mode, overall_score, overall_label_key, coverage, weak_spot_id) =
+    let (overall_score_mode, overall_score, overall_label_key, overall_label_param, coverage, weak_spot_id) =
         compute_overall(
             &confidence,
             &intelligibility_dim,
@@ -91,12 +129,15 @@ pub fn build_summary(
             &prosody_dim,
             articulation_char_proxy,
             transcript_qc.degraded,
+            speech_ms,
+            config,
+            ctx.read_aloud,
         );
 
     if overall_score_mode == OverallScoreMode::Preliminary {
         caveats.push(SpeechAnalysisCaveat {
             code: "preliminaryScore".to_string(),
-            param: None,
+            param: overall_label_param.clone(),
         });
     }
 
@@ -125,6 +166,7 @@ pub fn build_summary(
         overall_score,
         overall_grade_key,
         overall_label_key,
+        overall_label_param,
         overall_show_grade,
         overall_coverage: coverage,
         overall_weak_spot_id: weak_spot_id,
@@ -150,15 +192,19 @@ pub fn build_empty_summary(no_speech: bool, transcript: &str) -> SpeechAnalysisS
     let fluency = FluencyReport {
         word_count: 0,
         syllable_count: 0,
+        net_speech_duration_ms: 0,
+        speech_register: SpeechRegister::Spontaneous,
+        speech_register_auto: true,
         wpm_overall: None,
         wpm_phonation: None,
         phonation_ratio: 0.0,
         pause_count: 0,
         mean_pause_ms: 0.0,
+        median_pause_ms: 0.0,
         long_pause_count: 0,
         pause_total_ms: 0,
         min_pause_ms: 200,
-        long_pause_ms: 250,
+        long_pause_ms: 600,
         very_long_pause_ms: 1500,
         pause_count_punctuation: 0,
         pause_count_mid_phrase: 0,
@@ -200,6 +246,13 @@ pub fn build_empty_summary(no_speech: bool, transcript: &str) -> SpeechAnalysisS
         word_gop_hits: Vec::new(),
     };
     let config = SpeechAnalysisConfig::default();
+    let norms = super::config::register_norms(&config, SpeechRegister::Spontaneous);
+    let summary_ctx = SummaryBuildContext {
+        effective_speech_ms: 0,
+        norms,
+        accumulation: None,
+        read_aloud: false,
+    };
     let mut summary = build_summary(
         &qc,
         &fluency,
@@ -212,6 +265,7 @@ pub fn build_empty_summary(no_speech: bool, transcript: &str) -> SpeechAnalysisS
         true,
         &TranscriptQualityReport::default(),
         &[],
+        &summary_ctx,
     );
     if no_speech {
         summary.caveats.push(SpeechAnalysisCaveat {
@@ -232,7 +286,7 @@ pub fn caveat_export_keys(caveats: &[SpeechAnalysisCaveat]) -> Vec<String> {
 fn build_reliability(qc: &QcReport) -> SpeechAnalysisReliability {
     let mut score = 100.0f32;
     if let Some(snr) = qc.snr_db_estimate {
-        score = score.min(snr_to_score(snr));
+        score = score.min(snr_to_score(snr.min(40.0)));
     }
     score = score.min((1.0 - qc.clip_ratio.min(1.0)) * 100.0);
     if qc.clip_ratio > 0.001 {
@@ -243,6 +297,12 @@ fn build_reliability(qc: &QcReport) -> SpeechAnalysisReliability {
     }
     if qc.snr_db_estimate.is_none() {
         score = score.min(85.0);
+    }
+    if qc.flags.iter().any(|f| f == "short_speech") {
+        score = score.min(88.0);
+    }
+    if qc.flags.iter().any(|f| f == "possibly_processed") {
+        score = score.min(92.0);
     }
     let score = score.clamp(0.0, 100.0).round() as u8;
     let level = match qc.reliability {
@@ -308,7 +368,7 @@ fn dimension_signal_quality(qc: &QcReport) -> SummaryDimension {
     }
     let mut score = 100.0f32;
     if let Some(snr) = qc.snr_db_estimate {
-        score = score.min(snr_to_score(snr));
+        score = score.min(snr_to_score(snr.min(40.0)));
     }
     score = score.min((1.0 - qc.clip_ratio.min(1.0)) * 100.0);
     if qc.clip_ratio > 0.001 {
@@ -319,6 +379,9 @@ fn dimension_signal_quality(qc: &QcReport) -> SummaryDimension {
     }
     if qc.snr_db_estimate.is_none() {
         score = score.min(85.0);
+    }
+    if qc.flags.iter().any(|f| f == "possibly_processed") {
+        score = score.min(92.0);
     }
     let score = score.clamp(0.0, 100.0).round() as u8;
     SummaryDimension {
@@ -335,19 +398,7 @@ fn dimension_signal_quality(qc: &QcReport) -> SummaryDimension {
 }
 
 fn snr_to_score(snr: f32) -> f32 {
-    if snr >= 30.0 {
-        100.0
-    } else if snr >= 25.0 {
-        92.0
-    } else if snr >= 20.0 {
-        85.0
-    } else if snr >= 15.0 {
-        75.0
-    } else if snr >= 10.0 {
-        55.0
-    } else {
-        35.0
-    }
+    (snr * 2.8 + 18.0).clamp(35.0, 100.0)
 }
 
 fn dimension_confidence(
@@ -410,6 +461,7 @@ fn dimension_intelligibility(
 fn dimension_articulation(
     articulation: &ArticulationReport,
     speech_ms: u64,
+    norms: &RegisterNorms,
     config: &SpeechAnalysisConfig,
 ) -> SummaryDimension {
     if articulation.missing_ctc_download.is_some() {
@@ -431,7 +483,7 @@ fn dimension_articulation(
             Some("tools.speechAnalysis.summary.reason.articulationUnavailable".to_string()),
         );
     }
-    let Some(score) = articulation_proxy_score(articulation) else {
+    let Some(score) = articulation_proxy_score(articulation, config) else {
         if articulation.alignment_token_count < config.min_tokens_articulation {
             return insufficient_tokens(
                 "articulation",
@@ -441,8 +493,8 @@ fn dimension_articulation(
         return unavailable_dimension("articulation", None);
     };
 
-    if speech_ms < config.min_speech_ms_articulation {
-        let min_sec = (config.min_speech_ms_articulation / 1000) as u32;
+    if speech_ms < norms.min_speech_ms_articulation {
+        let min_sec = (norms.min_speech_ms_articulation / 1000) as u32;
         return SummaryDimension {
             id: "articulation".to_string(),
             status: DimensionStatus::InsufficientData,
@@ -458,11 +510,9 @@ fn dimension_articulation(
         };
     }
     if articulation.alignment_token_count < config.min_tokens_articulation {
-        return insufficient_tokens_with_score(
+        return insufficient_tokens(
             "articulation",
             config.min_tokens_articulation as u32,
-            score,
-            Some("tools.speechAnalysis.summary.detail.articulationProxy".to_string()),
         );
     }
     available_dimension(
@@ -472,7 +522,17 @@ fn dimension_articulation(
     )
 }
 
-fn articulation_proxy_score(articulation: &ArticulationReport) -> Option<u8> {
+fn articulation_proxy_score(
+    articulation: &ArticulationReport,
+    config: &SpeechAnalysisConfig,
+) -> Option<u8> {
+    if let Some(per) = articulation.per {
+        if per <= config.articulation_per_saturated_max
+            && articulation.alignment_token_count < config.min_tokens_articulation
+        {
+            return None;
+        }
+    }
     let mut parts = Vec::new();
     if let Some(per) = articulation.per {
         parts.push((1.0 - per.clamp(0.0, 1.0)) * 100.0);
@@ -490,8 +550,23 @@ fn articulation_proxy_score(articulation: &ArticulationReport) -> Option<u8> {
 fn dimension_fluency(
     fluency: &FluencyReport,
     speech_ms: u64,
+    norms: &RegisterNorms,
     config: &SpeechAnalysisConfig,
+    read_aloud: bool,
 ) -> SummaryDimension {
+    if read_aloud {
+        return SummaryDimension {
+            id: "fluency".to_string(),
+            status: DimensionStatus::InsufficientData,
+            score: None,
+            grade_key: "tools.speechAnalysis.summary.grade.unavailable".to_string(),
+            detail_key: Some("tools.speechAnalysis.summary.detail.fluencyReadAloud".to_string()),
+            reason_key: Some("tools.speechAnalysis.summary.reason.readAloudNoTempo".to_string()),
+            reason_required_sec: None,
+            reason_required_words: None,
+            reason_required_tokens: None,
+        };
+    }
     if fluency.word_count == 0 {
         return unavailable_dimension(
             "fluency",
@@ -524,7 +599,13 @@ fn dimension_fluency(
     score -= (fluency.long_pause_count as f32 * 2.0).min(15.0);
     score -= (fluency.repetition_count as f32 * 3.0).min(20.0);
     if let Some(wpm) = fluency.wpm_phonation {
-        score = score * 0.4 + bell_score(wpm, 120.0, 160.0, 35.0) * 0.6;
+        score = score * 0.4
+            + bell_score(
+                wpm,
+                norms.wpm_ideal_lo,
+                norms.wpm_ideal_hi,
+                norms.wpm_soft_edge,
+            ) * 0.6;
     }
     let score = score.clamp(0.0, 100.0).round() as u8;
     available_dimension(
@@ -534,7 +615,12 @@ fn dimension_fluency(
     )
 }
 
-fn dimension_prosody(prosody: &ProsodyReport, speech_ms: u64, config: &SpeechAnalysisConfig) -> SummaryDimension {
+fn dimension_prosody(
+    prosody: &ProsodyReport,
+    speech_ms: u64,
+    norms: &RegisterNorms,
+    config: &SpeechAnalysisConfig,
+) -> SummaryDimension {
     if speech_ms < config.min_speech_ms_prosody {
         let min_sec = (config.min_speech_ms_prosody / 1000) as u32;
         return insufficient_duration("prosody", min_sec);
@@ -554,14 +640,10 @@ fn dimension_prosody(prosody: &ProsodyReport, speech_ms: u64, config: &SpeechAna
     }
     let spread_score = prosody_intonation_score(
         prosody.f0_std_semitones,
-        config.prosody_spread_ideal_lo,
-        config.prosody_spread_ideal_hi,
+        norms.prosody_spread_ideal_lo,
+        norms.prosody_spread_ideal_hi,
     );
-    let range_bonus = prosody
-        .f0_range_semitones
-        .map(|range| bell_score(range, 4.0, 14.0, 8.0))
-        .unwrap_or(90.0);
-    let score = (spread_score * 0.85 + range_bonus * 0.15).round() as u8;
+    let score = spread_score.round().clamp(0.0, 100.0) as u8;
     available_dimension(
         "prosody",
         score,
@@ -609,27 +691,6 @@ fn insufficient_duration_with_score(
         reason_required_sec: Some(min_sec),
         reason_required_words: None,
         reason_required_tokens: None,
-    }
-}
-
-fn insufficient_tokens_with_score(
-    id: &str,
-    min_tokens: u32,
-    score: u8,
-    detail_key: Option<String>,
-) -> SummaryDimension {
-    SummaryDimension {
-        id: id.to_string(),
-        status: DimensionStatus::InsufficientData,
-        score: Some(score),
-        grade_key: grade_key_for_score(Some(score)),
-        detail_key,
-        reason_key: Some(
-            "tools.speechAnalysis.summary.reason.needsMoreArticulationTokens".to_string(),
-        ),
-        reason_required_sec: None,
-        reason_required_words: None,
-        reason_required_tokens: Some(min_tokens),
     }
 }
 
@@ -716,10 +777,14 @@ fn compute_overall(
     prosody: &SummaryDimension,
     articulation_char_proxy: bool,
     transcript_degraded: bool,
+    speech_ms: u64,
+    config: &SpeechAnalysisConfig,
+    read_aloud: bool,
 ) -> (
     OverallScoreMode,
     Option<u8>,
     String,
+    Option<String>,
     Option<SpeechAnalysisCoverage>,
     Option<String>,
 ) {
@@ -747,27 +812,6 @@ fn compute_overall(
 
     let included = weights.len() as u8;
     let total = DICTION_AXIS_IDS.len() as u8;
-    if weights.is_empty() {
-        return (
-            OverallScoreMode::Hidden,
-            None,
-            "tools.speechAnalysis.summary.label.hidden".to_string(),
-            Some(SpeechAnalysisCoverage {
-                included: 0,
-                total,
-                included_ids: Vec::new(),
-                missing_ids: DICTION_AXIS_IDS.iter().map(|s| s.to_string()).collect(),
-            }),
-            None,
-        );
-    }
-
-    let score = weighted_overall(
-        &weights
-            .iter()
-            .map(|(s, w, _)| (*s, *w))
-            .collect::<Vec<_>>(),
-    );
 
     let included_ids: Vec<String> = weights
         .iter()
@@ -782,24 +826,55 @@ fn compute_overall(
         .map(|s| (*s).to_string())
         .collect();
 
+    let coverage = SpeechAnalysisCoverage {
+        included,
+        total,
+        included_ids: included_ids.clone(),
+        missing_ids,
+    };
+
+    let speech_sec = (speech_ms / 1000).max(1);
+    let insufficient_param = Some(format!("speechSec={speech_sec}"));
+
+    if weights.is_empty() || included < config.min_axes_for_overall {
+        return (
+            OverallScoreMode::Hidden,
+            None,
+            "tools.speechAnalysis.summary.label.insufficientData".to_string(),
+            insufficient_param,
+            Some(coverage),
+            None,
+        );
+    }
+
+    let score = weighted_overall(
+        &weights
+            .iter()
+            .map(|(s, w, _)| (*s, *w))
+            .collect::<Vec<_>>(),
+    );
+
     let weak_spot_id = weights
         .iter()
         .filter_map(|(score, _, axis)| score.map(|s| (s, *axis)))
         .min_by_key(|(score, _)| *score)
         .map(|(_, axis)| axis.to_string());
 
-    let coverage = SpeechAnalysisCoverage {
-        included,
-        total,
-        included_ids,
-        missing_ids,
+    let (label_key, label_param) = if read_aloud {
+        (
+            "tools.speechAnalysis.summary.label.readAloud".to_string(),
+            None,
+        )
+    } else {
+        preliminary_label(&included_ids)
     };
 
-    if articulation_ok && intelligibility_ok && !transcript_degraded {
+    if articulation_ok && intelligibility_ok && !transcript_degraded && !read_aloud {
         (
             OverallScoreMode::Full,
             score,
             "tools.speechAnalysis.summary.label.full".to_string(),
+            None,
             Some(coverage),
             weak_spot_id,
         )
@@ -807,11 +882,26 @@ fn compute_overall(
         (
             OverallScoreMode::Preliminary,
             score,
-            "tools.speechAnalysis.summary.label.preliminary".to_string(),
+            label_key,
+            label_param,
             Some(coverage),
             weak_spot_id,
         )
     }
+}
+
+fn preliminary_label(included_ids: &[String]) -> (String, Option<String>) {
+    if included_ids.is_empty() {
+        return (
+            "tools.speechAnalysis.summary.label.insufficientData".to_string(),
+            None,
+        );
+    }
+    let axes = included_ids.join(",");
+    (
+        "tools.speechAnalysis.summary.label.preliminaryAxes".to_string(),
+        Some(format!("axes={axes}")),
+    )
 }
 
 fn weighted_overall(parts: &[(Option<u8>, f32)]) -> Option<u8> {
@@ -827,4 +917,58 @@ fn weighted_overall(parts: &[(Option<u8>, f32)]) -> Option<u8> {
         return None;
     }
     Some((sum / weight).round().clamp(0.0, 100.0) as u8)
+}
+
+#[cfg(test)]
+mod overall_tests {
+    use super::*;
+
+    fn dim(id: &str, available: bool, score: u8) -> SummaryDimension {
+        if available {
+            available_dimension(id, score, String::new())
+        } else {
+            insufficient_duration(id, 25)
+        }
+    }
+
+    #[test]
+    fn overall_hidden_when_only_one_axis() {
+        let config = SpeechAnalysisConfig::default();
+        let conf = unavailable_dimension("confidence", None);
+        let intel = dim("intelligibility", true, 85);
+        let art = insufficient_duration("articulation", 45);
+        let flu = insufficient_duration("fluency", 25);
+        let pro = insufficient_duration("prosody", 20);
+        let (mode, score, _, _, cov, weak) = compute_overall(
+            &conf, &intel, &art, &flu, &pro, true, false, 10_000, &config, false,
+        );
+        assert_eq!(mode, OverallScoreMode::Hidden);
+        assert!(score.is_none());
+        assert!(weak.is_none());
+        assert_eq!(cov.as_ref().map(|c| c.included), Some(1));
+    }
+
+    #[test]
+    fn articulation_insufficient_has_no_score() {
+        let config = SpeechAnalysisConfig::default();
+        let norms = super::super::config::register_norms(&config, SpeechRegister::Spontaneous);
+        let art = ArticulationReport {
+            reliability: ReliabilityLevel::High,
+            unavailable_reason_key: None,
+            ctc_variant_used: Some("v2".to_string()),
+            missing_ctc_download: None,
+            mean_gop: Some(-0.05),
+            per: Some(0.0),
+            low_gop_token_count: 0,
+            alignment_token_count: 50,
+            letter_baseline_error_rate_percent: None,
+            weak_symbols: Vec::new(),
+            top_substitutions: Vec::new(),
+            phoneme_segments: Vec::new(),
+            word_gop_hits: Vec::new(),
+        };
+        let dim = dimension_articulation(&art, 10_000, &norms, &config);
+        assert_eq!(dim.status, DimensionStatus::InsufficientData);
+        assert!(dim.score.is_none());
+    }
 }

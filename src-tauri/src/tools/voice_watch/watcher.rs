@@ -331,6 +331,14 @@ fn handle_candidate(
         return;
     }
 
+    if crate::tools::voice_watch::history::load_history()
+        .iter()
+        .any(|e| e.content_sha256.as_deref() == Some(&sha))
+    {
+        info!("voice watch dedup skip (indexed) {}", path.display());
+        return;
+    }
+
     // Light audio probe: try opening via decode path existence; mark not-audio on hard fail later.
     // Duration gate: estimate from file — skip if we can probe; otherwise enqueue and let pipeline handle.
     if let Some(secs) = probe_duration_secs(path) {

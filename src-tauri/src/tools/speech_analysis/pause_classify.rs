@@ -1,6 +1,8 @@
 use crate::timed_text::TimedWord;
 
 use super::pause_energy::PauseInterval;
+use super::phrase_boundaries::pause_is_prosodic_phrase_boundary;
+use super::types::F0ContourPoint;
 
 const PUNCT_END: &[char] = &['.', '!', '?', '…', ':', ';'];
 
@@ -14,6 +16,8 @@ pub fn classify_pauses(
     pauses: &[PauseInterval],
     words: &[TimedWord],
     very_long_ms: u64,
+    f0_contour: &[F0ContourPoint],
+    long_pause_ms: u64,
 ) -> ClassifiedPauses {
     let mut punctuation = 0usize;
     let mut mid_phrase = 0usize;
@@ -23,7 +27,8 @@ pub fn classify_pauses(
         if pause.duration_ms >= very_long_ms {
             very_long += 1;
         }
-        if pause_follows_punctuation(pause.start_ms, words) {
+        let prosodic = pause_is_prosodic_phrase_boundary(pause, f0_contour, long_pause_ms);
+        if prosodic || pause_follows_punctuation(pause.start_ms, words) {
             punctuation += 1;
         } else {
             mid_phrase += 1;
@@ -76,7 +81,7 @@ mod tests {
             start_ms: 420,
             duration_ms: 300,
         }];
-        let c = classify_pauses(&pauses, &words, 1500);
+        let c = classify_pauses(&pauses, &words, 1500, &[], 600);
         assert_eq!(c.punctuation, 1);
         assert_eq!(c.mid_phrase, 0);
     }

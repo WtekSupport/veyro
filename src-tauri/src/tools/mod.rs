@@ -2,6 +2,7 @@ pub mod audio_to_srt;
 
 pub mod audio_to_srt_timing;
 
+pub mod dictation_session_audio;
 pub mod dictation_transcripts;
 
 pub mod docx_export;
@@ -38,11 +39,13 @@ pub use voice_file::{
 
 pub use speech_analysis::{
 
-    analyze_speech_analysis_file, export_markdown, list_speech_analysis_models,
-    pick_export_path, speech_analysis_ensure_models, speech_analysis_load_disk_cache,
-    speech_analysis_resolve_plan,
-    SpeechAnalysisOptions, SpeechAnalysisPlan,
-    SpeechAnalysisReport, SpeechModelStatusDto,
+    analyze_speech_analysis_file, create_speech_analysis_speaker_profile, export_markdown,
+    list_speech_analysis_models, list_speech_analysis_speaker_profiles,
+    list_speech_analysis_tongue_twisters, pick_export_path,
+    speech_analysis_ensure_models, speech_analysis_load_disk_cache, speech_analysis_resolve_plan,
+    SpeakerProfileSummary, SpeechAnalysisOptions, SpeechAnalysisPlan, SpeechAnalysisReport,
+    TongueTwisterPreset,
+    SpeechModelStatusDto,
 
 };
 

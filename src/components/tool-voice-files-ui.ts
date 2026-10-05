@@ -28,106 +28,29 @@ import {
   iconFolder,
   iconList,
   iconSettings,
-  iconSidebarCollapse,
-  iconSidebarExpand,
   iconTrash,
 } from "./icons";
 import { ToolDecodeProgressSmoother } from "../lib/tool-decode-progress";
 import { formatToolErrorForResultField } from "../lib/tool-error-display";
 import { escapeHtml } from "../lib/html";
 import { pathsMatch } from "../lib/tool-file-queue";
+import {
+  loadToolBrowserSidebarCollapsed,
+  renderToolBrowserSidebar,
+  saveToolBrowserSidebarCollapsed,
+  toolBrowserShellClass,
+  type ToolBrowserSidebarLabels,
+} from "../lib/tool-browser-sidebar";
+import {
+  buildVoiceIndex,
+  getVoiceIndexSelection,
+  setVoiceIndexSelection,
+  subscribeVoiceIndex,
+  voiceIndexStatusLabel,
+  type VoiceIndexEntry,
+} from "../lib/tool-voice-index";
 import { promptSttLanguageSelection } from "./stt-language-dialog";
 import { t } from "../i18n";
-
-type IndexEntry = {
-  id: string;
-  path: string;
-  fileName: string;
-  status: string;
-  text: string;
-  errorKey: string | null;
-  processing: boolean;
-};
-
-function stageLabel(phase: VoiceFileProgressPhase | null): string {
-  switch (phase) {
-    case "decoding":
-      return t("tools.voiceFiles.stage.decoding");
-    case "transcribing":
-      return t("tools.voiceFiles.stage.transcribing");
-    case "text_cleanup":
-      return t("tools.voiceFiles.stage.textCleanup");
-    case "ai_rewrite":
-      return t("tools.voiceFiles.stage.aiRewrite");
-    case "done":
-    case null:
-      return t("tools.voiceFiles.status.processing");
-  }
-}
-
-function statusLabelFor(
-  status: string,
-  phase: VoiceFileProgressPhase | null,
-  percent: number | null,
-): string {
-  switch (status) {
-    case "pending":
-      return t("tools.voiceFiles.status.pending");
-    case "processing": {
-      const stage = stageLabel(phase);
-      if (percent !== null && percent >= 0) {
-        return `${stage} ${percent}%`;
-      }
-      return stage;
-    }
-    case "done":
-      return t("tools.voiceFiles.status.done");
-    case "speech_unrecognized":
-      return t("tools.voiceWatch.status.speechUnrecognized");
-    case "too_long":
-      return t("tools.voiceWatch.status.tooLong");
-    case "not_audio":
-      return t("tools.voiceWatch.status.notAudio");
-    case "skipped":
-      return t("tools.voiceWatch.status.skipped");
-    case "error":
-      return t("tools.voiceFiles.status.error");
-    default:
-      return status;
-  }
-}
-
-/** Merge persisted history (index) with live queue jobs — real paths + live status. */
-function buildIndex(
-  history: VoiceHistoryEntry[],
-  jobs: VoiceJob[],
-): IndexEntry[] {
-  const byId = new Map<string, IndexEntry>();
-  for (const entry of history) {
-    byId.set(entry.id, {
-      id: entry.id,
-      path: entry.path,
-      fileName: entry.fileName,
-      status: entry.status,
-      text: entry.text,
-      errorKey: entry.errorKey ?? null,
-      processing: entry.status === "processing",
-    });
-  }
-  for (const job of jobs) {
-    const prev = byId.get(job.id);
-    byId.set(job.id, {
-      id: job.id,
-      path: job.path,
-      fileName: job.fileName,
-      status: job.status,
-      text: job.text || prev?.text || "",
-      errorKey: job.errorKey ?? prev?.errorKey ?? null,
-      processing: job.status === "processing",
-    });
-  }
-  return Array.from(byId.values());
-}
 
 function renderExpertFields(watch: VoiceWatchSettings, expert: boolean): string {
   const notifyField = `
@@ -246,8 +169,19 @@ function renderWatchCompact(
   `;
 }
 
+const VOICE_FILES_SIDEBAR_TOOL_ID = "voice-files";
+
+function voiceFilesSidebarLabels(): ToolBrowserSidebarLabels {
+  return {
+    ariaLabel: t("tools.voiceFiles.sidebarTitle"),
+    title: t("tools.voiceFiles.sidebarTitle"),
+    collapseLabel: t("tools.voiceFiles.sidebarCollapse"),
+    expandLabel: t("tools.voiceFiles.sidebarExpand"),
+  };
+}
+
 function renderFileBrowser(
-  entries: IndexEntry[],
+  entries: VoiceIndexEntry[],
   selectedId: string | null,
   progressByPath: Map<string, { phase: VoiceFileProgressPhase; percent: number | null }>,
   collapsed: boolean,
@@ -256,15 +190,6 @@ function renderFileBrowser(
   cloudPaused: boolean,
   foldersOpen: boolean,
 ): string {
-  if (collapsed) {
-    return `
-      <aside class="voice-files-sidebar voice-files-sidebar--collapsed" aria-label="${escapeHtml(t("tools.voiceFiles.sidebarTitle"))}">
-        <button type="button" class="icon-btn voice-files-sidebar-toggle" data-toggle-sidebar
-          aria-label="${escapeHtml(t("tools.voiceFiles.sidebarExpand"))}"
-          title="${escapeHtml(t("tools.voiceFiles.sidebarExpand"))}">${iconSidebarExpand()}</button>
-      </aside>`;
-  }
-
   const rows =
     entries.length === 0
       ? `<li class="voice-files-browser-empty muted">${escapeHtml(t("tools.voiceFiles.indexEmpty"))}</li>`
@@ -272,7 +197,7 @@ function renderFileBrowser(
           .map((entry) => {
             const selected = entry.id === selectedId;
             const prog = progressByPath.get(entry.path);
-            const statusText = statusLabelFor(
+            const statusText = voiceIndexStatusLabel(
               entry.status,
               prog?.phase ?? null,
               prog?.percent ?? null,
@@ -295,14 +220,7 @@ function renderFileBrowser(
           })
           .join("");
 
-  return `
-    <aside class="voice-files-sidebar" aria-label="${escapeHtml(t("tools.voiceFiles.sidebarTitle"))}">
-      <div class="voice-files-sidebar-head">
-        <span class="voice-files-sidebar-title">${escapeHtml(t("tools.voiceFiles.sidebarTitle"))}</span>
-        <button type="button" class="icon-btn" data-toggle-sidebar
-          aria-label="${escapeHtml(t("tools.voiceFiles.sidebarCollapse"))}"
-          title="${escapeHtml(t("tools.voiceFiles.sidebarCollapse"))}">${iconSidebarCollapse()}</button>
-      </div>
+  const body = `
       <div
         class="voice-files-dropzone voice-files-dropzone--sidebar${processing ? " voice-files-dropzone--busy" : ""}"
         data-voice-files-dropzone
@@ -315,8 +233,9 @@ function renderFileBrowser(
         </button>
       </div>
       <ul class="voice-files-browser" role="list">${rows}</ul>
-      ${renderWatchCompact(watch, cloudPaused, foldersOpen)}
-    </aside>`;
+      ${renderWatchCompact(watch, cloudPaused, foldersOpen)}`;
+
+  return renderToolBrowserSidebar(voiceFilesSidebarLabels(), collapsed, body);
 }
 function renderTool(args: {
   jobs: VoiceJob[];
@@ -349,7 +268,7 @@ function renderTool(args: {
     selectedHistoryId,
   } = args;
 
-  const index = buildIndex(history, jobs);
+  const index = buildVoiceIndex(history, jobs);
   const selectedEntry =
     index.find((e) => e.id === selectedHistoryId) ??
     index.find((e) => e.id === selectedId) ??
@@ -365,7 +284,7 @@ function renderTool(args: {
     isInfo = !isError && selectedEntry.status !== "done";
   } else if (selectedJob?.status === "processing") {
     const prog = progressByPath.get(selectedJob.path);
-    displayText = `${stageLabel(prog?.phase ?? null)} — ${selectedJob.fileName}`;
+    displayText = `${voiceIndexStatusLabel("processing", prog?.phase ?? null, null)} — ${selectedJob.fileName}`;
     isInfo = true;
   } else if (selectedEntry?.status === "pending") {
     displayText = `${t("tools.voiceFiles.status.pending")} ${selectedEntry.fileName}`;
@@ -378,7 +297,7 @@ function renderTool(args: {
     isError = selectedEntry.status === "error";
     isInfo = !isError;
   } else if (selectedEntry) {
-    displayText = statusLabelFor(selectedEntry.status, null, null);
+    displayText = voiceIndexStatusLabel(selectedEntry.status, null, null);
     isInfo = true;
   }
 
@@ -400,7 +319,7 @@ function renderTool(args: {
     selectedEntry?.errorKey === "tools.stt.selectLanguage";
 
   return `
-    <main class="voice-files-tool voice-files-tool--with-browser${sidebarCollapsed ? " voice-files-tool--sidebar-collapsed" : ""}">
+    <main class="${toolBrowserShellClass(sidebarCollapsed)}">
       ${renderFileBrowser(
         index,
         selectedEntry?.id ?? null,
@@ -460,7 +379,7 @@ export function createVoiceFilesController(root: HTMLElement): {
   let cloudPaused = false;
   let foldersOpen = false;
   let expertOpen = false;
-  let sidebarCollapsed = false;
+  let sidebarCollapsed = loadToolBrowserSidebarCollapsed(VOICE_FILES_SIDEBAR_TOOL_ID);
   let expertKeyHandler: ((event: KeyboardEvent) => void) | null = null;
   const progressByPath = new Map<
     string,
@@ -547,7 +466,7 @@ export function createVoiceFilesController(root: HTMLElement): {
   };
 
   const removeFromIndex = async (id: string): Promise<void> => {
-    const entry = buildIndex(history, jobs).find((e) => e.id === id);
+    const entry = buildVoiceIndex(history, jobs).find((e) => e.id === id);
     if (!entry || entry.processing) {
       return;
     }
@@ -573,6 +492,7 @@ export function createVoiceFilesController(root: HTMLElement): {
       if (created[0]) {
         selectedId = created[0].id;
         selectedHistoryId = created[0].id;
+        setVoiceIndexSelection(created[0].id);
       }
       void refreshQueue().then(paint);
       void refreshHistory().then(paint);
@@ -625,6 +545,7 @@ export function createVoiceFilesController(root: HTMLElement): {
     if (!id) return;
     selectedId = id;
     selectedHistoryId = id;
+    setVoiceIndexSelection(id);
     copyHint = null;
     paint();
   };
@@ -632,6 +553,7 @@ export function createVoiceFilesController(root: HTMLElement): {
   const bind = (): void => {
     root.querySelector("[data-toggle-sidebar]")?.addEventListener("click", () => {
       sidebarCollapsed = !sidebarCollapsed;
+      saveToolBrowserSidebarCollapsed(VOICE_FILES_SIDEBAR_TOOL_ID, sidebarCollapsed);
       paint();
     });
 
@@ -814,7 +736,7 @@ export function createVoiceFilesController(root: HTMLElement): {
 
     root.querySelector("[data-save-docx]")?.addEventListener("click", () => {
       void (async () => {
-        const entry = buildIndex(history, jobs).find(
+        const entry = buildVoiceIndex(history, jobs).find(
           (e) => e.id === selectedHistoryId || e.id === selectedId,
         );
         const text = entry?.text?.trim() ?? "";
@@ -895,6 +817,11 @@ export function createVoiceFilesController(root: HTMLElement): {
     await refreshSettings();
     await refreshQueue();
     await refreshHistory();
+    const persisted = getVoiceIndexSelection();
+    if (persisted && buildVoiceIndex(history, jobs).some((e) => e.id === persisted)) {
+      selectedId = persisted;
+      selectedHistoryId = persisted;
+    }
     paint();
 
     unlistens.push(
@@ -914,20 +841,25 @@ export function createVoiceFilesController(root: HTMLElement): {
     );
 
     unlistens.push(
-      await listen(EVENTS.voiceQueueChanged, () => {
-        void refreshQueue().then(paint);
-      }),
-    );
-    unlistens.push(
-      await listen(EVENTS.voiceHistoryChanged, () => {
-        void refreshHistory().then(paint);
-      }),
+      subscribeVoiceIndex(
+        () => {
+          void refreshQueue().then(() => refreshHistory().then(paint));
+        },
+        (id) => {
+          if (!id) return;
+          if (!buildVoiceIndex(history, jobs).some((e) => e.id === id)) return;
+          selectedId = id;
+          selectedHistoryId = id;
+          paint();
+        },
+      ),
     );
     unlistens.push(
       await listen<string>(EVENTS.voiceHistoryOpen, (event) => {
         selectedHistoryId = event.payload;
         selectedId = event.payload;
         sidebarCollapsed = false;
+        saveToolBrowserSidebarCollapsed(VOICE_FILES_SIDEBAR_TOOL_ID, false);
         void refreshHistory().then(paint);
       }),
     );

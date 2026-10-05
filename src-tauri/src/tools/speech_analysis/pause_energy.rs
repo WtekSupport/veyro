@@ -50,21 +50,7 @@ pub fn detect_pauses_from_energy(
             measurement_reliable: false,
         };
     }
-    let frame_samples = ((sample_rate as u64 * FRAME_MS) / 1000).max(1) as usize;
-    let mut rms_frames: Vec<(u64, f32)> = Vec::new();
-    let mut pos = 0usize;
-    while pos < mono.len() {
-        let end = (pos + frame_samples).min(mono.len());
-        let slice = &mono[pos..end];
-        let rms = if slice.is_empty() {
-            0.0
-        } else {
-            (slice.iter().map(|s| s * s).sum::<f32>() / slice.len() as f32).sqrt()
-        };
-        let time_ms = (pos as u64 * 1000) / sample_rate as u64;
-        rms_frames.push((time_ms, rms));
-        pos += frame_samples;
-    }
+    let rms_frames = frame_rms_series(mono, sample_rate);
     if rms_frames.is_empty() {
         return EnergyPauseMetrics {
             pauses: Vec::new(),

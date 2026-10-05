@@ -36,22 +36,34 @@ pub fn build_coach_facts(report: &SpeechAnalysisReport, locale: UiLocale) -> Coa
 
 
 
+    let axes_in_overall = report
+        .summary
+        .overall_coverage
+        .as_ref()
+        .map(|c| c.included)
+        .unwrap_or(0);
+
     if let Some(coverage) = &report.summary.overall_coverage {
-
-        facts.push(coverage_fact(coverage, report, locale));
-
+        if axes_in_overall >= 2 {
+            facts.push(coverage_fact(coverage, report, locale));
+        } else if axes_in_overall > 0 {
+            facts.push(insufficient_overall_fact(report, locale));
+        }
     }
 
-    if let Some(score) = report.summary.overall_score {
+    if axes_in_overall >= 2 {
+        if let Some(score) = report.summary.overall_score {
+            facts.push(overall_score_fact(
+                score,
+                report.summary.overall_score_mode,
+                &report.summary.overall_coverage,
+                locale,
+            ));
+        }
 
-        facts.push(overall_score_fact(score, report.summary.overall_score_mode, locale));
-
-    }
-
-    if let Some(weak) = &report.summary.overall_weak_spot_id {
-
-        facts.push(weak_spot_fact(weak, report, locale));
-
+        if let Some(weak) = &report.summary.overall_weak_spot_id {
+            facts.push(weak_spot_fact(weak, report, locale));
+        }
     }
 
 
@@ -282,7 +294,7 @@ fn fact_for_dimension(
 
                 UiLocale::Ru => format!(
 
-                    "{title}: {score}/100 — {} ({express}). Разброс F0 (робастный): {spread:.2} st (ориентир живой речи ~2–5). Диапазон p5–p95: {range}. Voiced-кадры (справка): {voiced:.0}%.",
+                    "{title}: {score}/100 — {} ({express}). Разброс F0 p10–p90: {spread:.2} st (ориентир ~2–5). Диапазон p5–p95: {range}. Voiced среди речевых кадров: {voiced:.0}%.",
 
                     grade_word(dim.grade_key.as_str(), locale),
 
@@ -304,7 +316,7 @@ fn fact_for_dimension(
 
                 UiLocale::En => format!(
 
-                    "{title}: {score}/100 — {} ({express}). Robust F0 spread: {spread:.2} st (live speech ~2–5). p5–p95 range: {range}. Voiced frames (info): {voiced:.0}%.",
+                    "{title}: {score}/100 — {} ({express}). F0 spread p10–p90: {spread:.2} st (target ~2–5). p5–p95 range: {range}. Voiced among speech frames: {voiced:.0}%.",
 
                     grade_word(dim.grade_key.as_str(), locale),
 
@@ -470,40 +482,51 @@ fn fact_for_dimension(
 
 
 
-fn overall_score_fact(score: u8, mode: OverallScoreMode, locale: UiLocale) -> String {
+fn insufficient_overall_fact(report: &SpeechAnalysisReport, locale: UiLocale) -> String {
+    let speech_sec = (report.fluency.net_speech_duration_ms / 1000).max(1);
+    match locale {
+        UiLocale::Ru => format!(
+            "Недостаточно данных для общего балла (речь ~{speech_sec} с): учтена меньше двух осей дикции."
+        ),
+        UiLocale::En => format!(
+            "Not enough data for an overall score (~{speech_sec}s speech): fewer than two diction axes included."
+        ),
+    }
+}
+
+fn overall_score_fact(
+    score: u8,
+    mode: OverallScoreMode,
+    coverage: &Option<super::types::SpeechAnalysisCoverage>,
+    locale: UiLocale,
+) -> String {
+    let axes = coverage
+        .as_ref()
+        .map(|c| {
+            c.included_ids
+                .iter()
+                .map(|id| dimension_title(id, locale))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
 
     match (mode, locale) {
-
         (OverallScoreMode::Full, UiLocale::Ru) => {
-
-            format!("Общий балл: {score}/100 (основные оси учтены, включая чёткость звуков).")
-
+            format!("Общий балл: {score}/100 (оси: {axes}).")
         }
-
         (OverallScoreMode::Full, UiLocale::En) => {
-
-            format!("Overall diction score: {score}/100 (main axes included).")
-
+            format!("Overall diction score: {score}/100 (axes: {axes}).")
         }
-
         (OverallScoreMode::Preliminary, UiLocale::Ru) => format!(
-
-            "Предварительный балл (беглость и выразительность): {score}/100 — чёткость звуков не оценена; артикуляция не в расчёте."
-
+            "Предварительный балл по осям ({axes}): {score}/100 — полная оценка дикции ещё недоступна."
         ),
-
         (OverallScoreMode::Preliminary, UiLocale::En) => format!(
-
-            "Preliminary score (fluency and expressiveness): {score}/100 — sound articulation not scored yet."
-
+            "Preliminary score on axes ({axes}): {score}/100 — full diction grade not available yet."
         ),
-
-        (_, UiLocale::Ru) => format!("Балл дикции недоступен."),
-
+        (_, UiLocale::Ru) => "Балл дикции недоступен.".to_string(),
         (_, UiLocale::En) => "Diction score unavailable.".to_string(),
-
     }
-
 }
 
 

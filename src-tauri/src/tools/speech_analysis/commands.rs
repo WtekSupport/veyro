@@ -9,6 +9,9 @@ use super::ensure_models::ensure_plan_models;
 use super::model_plan::{resolve_plan, SpeechAnalysisPlan};
 use super::model_registry::{list_model_statuses, SpeechModelStatusDto};
 use super::disk_cache;
+use super::speaker_profiles::{
+    ensure_speaker_profile, list_speaker_profiles, SpeakerProfileSummary,
+};
 use super::types::{SpeechAnalysisOptions, SpeechAnalysisReport};
 
 fn settings_from_ctx(ctx: &AppContext) -> Result<AppSettings, String> {
@@ -69,4 +72,17 @@ pub fn speech_analysis_load_disk_cache(
 ) -> Result<Option<SpeechAnalysisReport>, String> {
     let settings = settings_from_ctx(ctx.inner())?;
     disk_cache::load_report_snapshot(&settings, &path_key)
+}
+
+pub fn list_speech_analysis_speaker_profiles() -> Vec<SpeakerProfileSummary> {
+    list_speaker_profiles()
+}
+
+pub fn create_speech_analysis_speaker_profile(label: String) -> Result<SpeakerProfileSummary, String> {
+    ensure_speaker_profile(&label)
+}
+
+pub fn list_speech_analysis_tongue_twisters(
+) -> Vec<super::reference_presets::TongueTwisterPreset> {
+    super::reference_presets::list_tongue_twister_presets()
 }

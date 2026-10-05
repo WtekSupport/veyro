@@ -180,7 +180,7 @@ mod tests {
             0,
             10_000,
         );
-        let fluency = analyze_fluency(
+        let (fluency, _, _) = analyze_fluency(
             &segments,
             &[(0, 10_000)],
             10_000,
@@ -188,6 +188,7 @@ mod tests {
             &super::super::config::SpeechAnalysisConfig::default(),
             &[],
             16_000,
+            &[],
         );
         assert!(fluency.word_count >= 4);
     }
