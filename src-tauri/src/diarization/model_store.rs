@@ -395,13 +395,12 @@ mod speakrs_bundle_tests {
         fs::create_dir_all(dir).expect("bundle dir");
         for name in SPEAKRS_CPU_BUNDLE_FILES {
             let path = dir.join(name);
-            if *name == "wespeaker-voxceleb-resnet34.onnx.data" {
-                let file = fs::File::create(&path).expect("data file");
-                file.set_len(25 * 1024 * 1024).expect("data len");
-            } else if name.ends_with(".onnx") {
-                fs::write(&path, vec![0_u8; 600_000]).expect("onnx");
+            let min_len = speakrs_file_min_bytes(name);
+            if min_len > 1024 * 1024 {
+                let file = fs::File::create(&path).expect("model file");
+                file.set_len(min_len).expect("model len");
             } else {
-                fs::write(&path, b"x").expect("small file");
+                fs::write(&path, vec![0_u8; min_len as usize]).expect("small file");
             }
         }
     }
