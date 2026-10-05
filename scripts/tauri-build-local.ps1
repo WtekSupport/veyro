@@ -124,6 +124,10 @@ $featureArgs = Get-CargoFeatureArgs -Features $features
 
 Enable-DiarizationBlasLink -RepoRoot $repoRoot -Features $features -CargoProfile $diarizationProfile
 
+# Frontend must exist before `cargo build`: tauri-build embeds `dist` at compile time.
+Write-Host "Building frontend (required before Rust release compile)..."
+Invoke-VeyroFrontendBuild
+
 
 
 function Invoke-ReleaseBuild {
@@ -242,15 +246,13 @@ if ($releaseOutputName -ne "release") {
 
 
 
-Write-Host "Bundling installer (frontend + tauri bundle, no extra cargo build)..."
+Write-Host "Bundling installer (tauri bundle, no extra cargo build)..."
 
 if (-not (Set-UpdaterSigningEnv)) {
 
     Write-Error "Updater signing env missing before bundle. Run scripts/ensure-updater-keys.ps1"
 
 }
-
-Invoke-VeyroFrontendBuild
 
 Invoke-VeyroTauriBundle -Features $features
 

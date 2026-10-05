@@ -12,6 +12,12 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.10.34] — 2026-10-05
+
+### Fixed
+
+- **Windows installer (1.10.33):** Main window could show “localhost refused to connect” because the release pipeline compiled Rust before `npm run build`, so the UI bundle was not embedded. Build order is corrected.
+
 ## [1.10.33] — 2026-10-05
 
 ### Added
