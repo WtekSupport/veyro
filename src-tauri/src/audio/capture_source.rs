@@ -85,4 +85,63 @@ impl CaptureSource {
     pub fn includes_loopback(&self) -> bool {
         matches!(self, Self::MicrophoneAndLoopback { .. })
     }
+
+    /// Whether two sources match for dedicated handoff.
+    pub fn capture_format(&self) -> Result<(u32, u16), crate::error::AudioError> {
+        match self {
+            Self::Microphone { device_id } => {
+                crate::audio::warmup::query_device_format(device_id.as_deref())
+            }
+            Self::MicrophoneAndLoopback { .. } => Ok((16_000, 1)),
+        }
+    }
+
+    pub fn same_effective_capture(&self, other: &CaptureSource) -> bool {
+        match (self, other) {
+            (
+                Self::Microphone { device_id: left },
+                Self::Microphone { device_id: right },
+            ) => left == right,
+            (
+                Self::MicrophoneAndLoopback {
+                    device_id: left_mic,
+                    process_id: left_pid,
+                    ..
+                },
+                Self::MicrophoneAndLoopback {
+                    device_id: right_mic,
+                    process_id: right_pid,
+                    ..
+                },
+            ) => left_mic == right_mic && left_pid == right_pid,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_effective_capture_matches_mic_device() {
+        let left = CaptureSource::Microphone {
+            device_id: Some("id".into()),
+        };
+        let right = CaptureSource::Microphone {
+            device_id: Some("id".into()),
+        };
+        assert!(left.same_effective_capture(&right));
+    }
+
+    #[test]
+    fn same_effective_capture_rejects_mic_vs_loopback() {
+        let mic = CaptureSource::Microphone { device_id: None };
+        let loopback = CaptureSource::MicrophoneAndLoopback {
+            device_id: None,
+            process_id: 1,
+            label: "x".into(),
+        };
+        assert!(!mic.same_effective_capture(&loopback));
+    }
 }

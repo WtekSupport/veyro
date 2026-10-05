@@ -1,14 +1,7 @@
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 
 const STORAGE_KEY = "veyro.standard.onboarding.dismissed";
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 export function isStandardOnboardingDismissed(): boolean {
   try {

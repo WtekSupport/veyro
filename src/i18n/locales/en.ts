@@ -400,8 +400,17 @@ export const en = {
   "update.downloading": "Downloading update… {percent}%",
   "update.installing": "Installing update… Veyro will restart.",
   "update.failed": "Update failed. Try again later or download from GitHub Releases.",
+  "update.checkFailed":
+    "Could not check for updates. Try again later or download the latest build from GitHub Releases.",
+  "update.checkFailedNetwork":
+    "Could not reach the update server. Check your internet connection or firewall, or download the build from GitHub Releases.",
+  "update.checkFailedNotFound":
+    "Update information was not found on the server. The app may be up to date, or the release is not published yet.",
+  "update.downloadFailedNetwork":
+    "Could not download the update. Check your connection and try again, or download from GitHub Releases.",
   "update.install": "Update",
   "update.later": "Later",
+  "update.dismiss": "Dismiss",
   "settings.uiLocale": "Interface language",
   "settings.uiLocaleEn": "English",
   "settings.uiLocaleRu": "Russian",
@@ -536,6 +545,14 @@ export const en = {
     "Catalog install tokens are temporarily unavailable. Try again later",
   "errors.deeplink_catalog_not_found": "Skill was not found in the catalog",
   "errors.settings": "Failed to save settings",
+  "errors.audio": "Audio is unavailable.",
+  "errors.configuration": "Settings could not be applied.",
+  "errors.transcription": "Speech recognition failed.",
+  "errors.injection": "Text could not be inserted.",
+  "errors.network": "Network connection failed.",
+  "errors.hotkey": "The hotkey could not be set.",
+  "errors.state": "That action is not available right now.",
+  "errors.internal": "Something went wrong inside the app.",
   "errors.bootstrap": "Failed to load application",
   "errors.recoverOk": "OK",
   "errors.recoverAction": "Recover",
@@ -596,6 +613,7 @@ export const en = {
   "tools.voiceFiles.silenceOnly.detail":
     "After decoding, the audio level was too low or the track appears silent. Check volume, normalization settings, or pick another file.",
   "tools.voiceFiles.rewriteFallback": "AI rewrite was unavailable — basic cleanup was applied.",
+  "tools.voiceFiles.status.indexed": "In list",
   "tools.voiceFiles.status.pending": "Waiting",
   "tools.voiceFiles.status.processing": "Processing…",
   "tools.voiceFiles.stage.decoding": "Decoding audio…",
@@ -702,7 +720,7 @@ export const en = {
   "activity.voiceWatch.tooLong": "Voice watch: file too long for auto mode",
 
   "tools.audioSrt.windowLoading": "Loading",
-  "tools.audioSrt.title": "Audio to Subtitles (SRT)",
+  "tools.audioSrt.title": "Audio to Subtitles",
   "tools.audioSrt.description": "Transcribe audio with timestamps and export .srt / .vtt subtitles.",
   "tools.audioSrt.dropHint": "Drop audio files here or choose from disk",
   "tools.audioSrt.pickFiles": "Choose files…",
@@ -758,6 +776,13 @@ export const en = {
     "Writes a UTF-8 byte-order mark at the start of the file for players or editors that require it.",
   "tools.audioSrt.hint.useDictationTextSettings":
     "Runs the same text cleanup and optional AI rewrite as live dictation, separately for each speech segment so timings stay aligned.",
+  "tools.audioSrt.karaokeWordHighlight": "Karaoke word highlight",
+  "tools.audioSrt.hint.karaokeWordHighlight":
+    "Adds per-word timestamps inside .vtt cues for players that support WebVTT karaoke. Applies to VTT export and preview only, not .srt.",
+  "tools.audioSrt.karaokeUnavailable":
+    "Word-level timings are not available for this file (engine did not return word timestamps, or subtitle layout dropped them). Try again with local Whisper or OpenAI STT.",
+  "tools.audioSrt.karaokeUnavailableAi":
+    "Karaoke needs word timestamps tied to the transcript. Turn off AI text rewrite for this run (karaoke mode uses basic cleanup only) and transcribe again.",
   "tools.audioSrt.status.pending": "Waiting",
   "tools.audioSrt.status.processing": "Processing…",
   "tools.audioSrt.status.done": "Done",
@@ -773,7 +798,14 @@ export const en = {
   "tools.audioSrt.stage.diarizing": "Speaker diarization…",
   "tools.audioSrt.speakerDiarization": "Speaker diarization",
   "tools.audioSrt.hint.speakerDiarization":
-    "Detect who spoke when and label subtitle cues. Uses a small local model (~12 MB). Off by default.",
+    "Detect who spoke when and label subtitle cues. Downloads a local model (size depends on quality). Off by default.",
+  "tools.audioSrt.diarizationQuality": "Diarization quality",
+  "tools.audioSrt.diarizationQualityFast": "Fast (polyvoice)",
+  "tools.audioSrt.diarizationQualityAccurate": "Accurate (speakrs)",
+  "tools.audioSrt.hint.diarizationQuality":
+    "Fast — polyvoice INT8 (~12 MB). Accurate uses that same polyvoice path when speakrs is not in the build.",
+  "tools.audioSrt.hint.diarizationQualitySpeakrs":
+    "Fast — polyvoice INT8 (~12 MB). Accurate — speakrs: pyannote segmentation 3.0 and WeSpeaker FP32 (~60 MB). The sensitivity slider applies only to Accurate.",
   "tools.audioSrt.speakerCountMode": "Speaker count",
   "tools.audioSrt.hint.speakerCountMode":
     "Auto picks a count from the audio. Exact forces a fixed number. Range limits the search.",
@@ -792,23 +824,38 @@ export const en = {
     "Ignore speech blobs shorter than this. Higher values reduce noise; lower catches short replies.",
   "tools.audioSrt.diarizationSensitivity": "Clustering sensitivity",
   "tools.audioSrt.hint.diarizationSensitivity":
-    "Higher is stricter (more speakers). Lower merges similar voices more aggressively.",
+    "Accurate only. The scale is already shifted into the range where speakrs separates voices: the middle is the working point, higher is stricter. Fast ignores this slider.",
   "tools.audioSrt.speakersTitle": "Speakers",
   "tools.audioSrt.renameSpeaker": "Rename speaker",
   "tools.audioSrt.mergeSpeaker": "Merge",
   "tools.audioSrt.mergeInto": "Merge into…",
   "tools.audioSrt.diarizationDownloadConfirm":
     "Speaker diarization needs a local model (~{size} MB). Download now?",
+  "tools.audioSrt.diarizationDownloadConfirmAccurate":
+    "Accurate mode uses speakrs (~{size} MB) under models/diarization/speakrs. Download now?",
   "tools.audioSrt.diarizationDownload": "Download",
+  "tools.audioSrt.diarizationDownloadSizeUnit": "MB",
+  "tools.audioSrt.diarizationDownloadHintFast":
+    "Polyvoice weights required for Fast mode (or VBx when speakrs is not in the build).",
+  "tools.audioSrt.diarizationDownloadHintAccurate":
+    "Speakrs weights required for Accurate mode (models/diarization/speakrs).",
+  "tools.audioSrt.diarizationSpeakrsNotInBuild":
+    "This build has no speakrs — Accurate uses VBx/polyvoice only (~12 MB). Rebuild with local-diarization-speakrs for pyannote-class quality.",
+  "tools.audioSrt.diarizationModelRequiredDownload":
+    "Download the diarization model with the button below the quality selector first.",
   "tools.audioSrt.diarizationDownloading": "Downloading diarization model…",
   "tools.audioSrt.diarizationUnavailable":
     "Speaker diarization is not available in this build. Rebuild with local-diarization.",
   "tools.audioSrt.diarizationFailed": "Speaker diarization failed.",
   "tools.audioSrt.diarizationFailed.detail":
     "Recognition may still have produced text, but speakers could not be assigned. Try again or turn diarization off.",
+  "tools.audioSrt.diarizationNoSegments":
+    "Accurate diarization returned no speaker segments.",
+  "tools.audioSrt.diarizationNoSegments.detail":
+    "Check that the speakrs bundle downloaded fully (bundle folder ~60 MB), restart the app, or switch to Fast mode.",
   "tools.audioSrt.diarizationDownloadFailed": "Could not download the diarization model.",
   "tools.audioSrt.diarizationDownloadFailed.detail":
-    "Check your network connection and disk space, then try again.",
+    "Check your network connection and disk space. For certificate errors, install your VPN/proxy or antivirus root CA into the system trust store.",
   "tools.audioSrt.diarizationModelRequired": "Diarization model is required.",
   "tools.audioSrt.readFailed": "Could not read or decode this audio file.",
   "tools.audioSrt.unsupportedFormat": "This audio format is not supported.",
@@ -829,6 +876,332 @@ export const en = {
     "The file path is invalid. Choose the file again from disk.",
   "tools.audioSrt.failed.detail":
     "The subtitle pipeline failed before writing SRT. Check technical details and recognition settings.",
+
+  "tools.speechAnalysis.windowLoading": "Loading",
+  "tools.speechAnalysis.windowTitle": "Speech analysis",
+  "tools.speechAnalysis.title": "Speech analysis",
+  "tools.speechAnalysis.description":
+    "Upload audio for QC, fluency, prosody, and articulation metrics (with a local CTC model when available).",
+  "tools.speechAnalysis.sidebarTitle": "Files",
+  "tools.speechAnalysis.pickFiles": "Choose file…",
+  "tools.speechAnalysis.analyze": "Analyze",
+  "tools.speechAnalysis.exportMd": "Save report (Markdown)",
+  "tools.speechAnalysis.exportDone": "Report saved",
+  "tools.speechAnalysis.copyMd": "Copy report",
+  "tools.speechAnalysis.sectionQc": "Recording quality",
+  "tools.speechAnalysis.sectionFluency": "Fluency",
+  "tools.speechAnalysis.sectionProsody": "Prosody (F0)",
+  "tools.speechAnalysis.sectionIntelligibility": "Intelligibility",
+  "tools.speechAnalysis.sectionArticulation": "Articulation (CTC)",
+  "tools.speechAnalysis.sectionTranscript": "Transcript",
+  "tools.speechAnalysis.sectionLimitations": "Limitations",
+  "tools.speechAnalysis.noJobs": "Choose an audio file to analyze.",
+  "tools.speechAnalysis.articulationNeedsCtc":
+    "Download the local GigaAM CTC model for GOP/PER articulation metrics.",
+  "tools.speechAnalysis.ctcDecodeFailed": "CTC decode failed for articulation metrics.",
+  "tools.speechAnalysis.ctcUnavailable": "CTC model is not available.",
+  "tools.speechAnalysis.noSpeech": "No speech detected.",
+  "tools.speechAnalysis.expressiveness.monotone": "Mostly monotone",
+  "tools.speechAnalysis.expressiveness.moderate": "Moderate",
+  "tools.speechAnalysis.expressiveness.expressive": "Expressive",
+  "tools.speechAnalysis.stage.decoding": "Decoding…",
+  "tools.speechAnalysis.stage.downloadingModel": "Downloading scoring component…",
+  "tools.speechAnalysis.stage.transcribing": "Transcribing…",
+  "tools.speechAnalysis.stage.analyzing": "Metrics…",
+  "tools.speechAnalysis.stage.interpreting": "Interpreting…",
+  "tools.speechAnalysis.docs.metricsVsCoach":
+    "Scores come from acoustics and STT; the coach section is AI interpretation, not a replacement for the numbers.",
+  "tools.speechAnalysis.coach.title": "Coach notes",
+  "tools.speechAnalysis.coach.expand": "AI explanation (from verified facts)",
+  "tools.speechAnalysis.coach.disclaimer":
+    "AI-generated from metrics and transcript; do not treat coach text as additional scores.",
+  "tools.speechAnalysis.coach.strengths": "Strengths",
+  "tools.speechAnalysis.coach.improvements": "Improvements",
+  "tools.speechAnalysis.coach.consistency": "Consistency with metrics",
+  "tools.speechAnalysis.coach.unavailable":
+    "AI coach is unavailable — configure a local model or OpenAI API in text rewrite settings.",
+  "tools.speechAnalysis.coach.failed": "Could not generate AI coach notes.",
+  "tools.speechAnalysis.coach.noApiKey": "OpenAI API key is missing.",
+  "tools.speechAnalysis.coach.empty": "Empty model response.",
+  "tools.speechAnalysis.coach.parseFailed": "Could not parse model response.",
+  "tools.speechAnalysis.coach.rawResponse": "Model response (excerpt)",
+  "tools.speechAnalysis.models.autoDownloadHint":
+    "A missing scoring component will download automatically and metrics will refresh.",
+  "tools.speechAnalysis.models.downloading":
+    "Downloading {name} (~{size} MB)…",
+  "tools.speechAnalysis.models.backfill":
+    "Updating metrics for completed files…",
+  "tools.speechAnalysis.models.failed": "Could not download a scoring component.",
+  "tools.speechAnalysis.models.verifyFailed": "Download finished but the model could not be verified.",
+  "tools.speechAnalysis.fillGapsMissingCache":
+    "Cannot refresh metrics — run full analysis again for this file.",
+  "tools.speechAnalysis.advanced.title": "Advanced",
+  "tools.speechAnalysis.advanced.modelPolicy": "Recognition model",
+  "tools.speechAnalysis.advanced.policyAuto": "Auto (recommended)",
+  "tools.speechAnalysis.advanced.policyFollowGlobal": "Same as Settings",
+  "tools.speechAnalysis.advanced.policyManual": "Pick model",
+  "tools.speechAnalysis.advanced.manualVariant": "Model for this tool",
+  "tools.speechAnalysis.advanced.llmCoach": "AI coach (when available)",
+  "tools.speechAnalysis.advanced.speechRegister": "Speech type",
+  "tools.speechAnalysis.advanced.speechRegisterAuto": "Auto (read vs spontaneous)",
+  "tools.speechAnalysis.advanced.speechRegisterReading": "Read aloud",
+  "tools.speechAnalysis.advanced.speechRegisterSpontaneous": "Spontaneous speech",
+  "tools.speechAnalysis.advanced.accumulateSpeaker":
+    "Accumulate clean speech for one speaker profile",
+  "tools.speechAnalysis.advanced.speakerProfile": "Speaker profile",
+  "tools.speechAnalysis.advanced.speakerProfileNew": "New profile…",
+  "tools.speechAnalysis.advanced.newProfileLabel": "New profile name",
+  "tools.speechAnalysis.advanced.newProfilePlaceholder": "e.g. me",
+  "tools.speechAnalysis.meta.registerAuto.reading": "Mode: read aloud (auto)",
+  "tools.speechAnalysis.meta.registerAuto.spontaneous": "Mode: spontaneous (auto)",
+  "tools.speechAnalysis.meta.registerManual.reading": "Mode: read aloud",
+  "tools.speechAnalysis.meta.registerManual.spontaneous": "Mode: spontaneous",
+  "tools.speechAnalysis.meta.accumulation":
+    "Profile “{label}”: {combinedSec}s clean speech (this file {fileSec}s, prior {priorSec}s)",
+  "tools.speechAnalysis.caveat.speakerProfileAccumulated":
+    "Articulation duration gate uses accumulated clean speech from the speaker profile",
+  "tools.speechAnalysis.advanced.hint":
+    "Only affects speech analysis; global STT in Settings is unchanged.",
+  "tools.speechAnalysis.status.pending": "Queued",
+  "tools.speechAnalysis.status.processing": "Processing…",
+  "tools.speechAnalysis.status.done": "Done",
+  "tools.speechAnalysis.status.error": "Error",
+  "tools.speechAnalysis.readFailed": "Could not read or decode this audio file.",
+  "tools.speechAnalysis.unsupportedFormat": "This audio format is not supported.",
+  "tools.speechAnalysis.emptyAudio": "The file contains no usable audio.",
+  "tools.speechAnalysis.invalidPath": "Invalid file path.",
+  "tools.speechAnalysis.exportFailed": "Could not save report.",
+  "tools.speechAnalysis.technicalDetails": "Technical details and transcript",
+  "tools.speechAnalysis.processingHint": "Analysis in progress — stage and progress update automatically.",
+  "tools.speechAnalysis.readyToAnalyze": "Click Analyze to run speech analysis.",
+  "tools.speechAnalysis.downloadCtcModel": "Download model",
+  "tools.speechAnalysis.downloadCtcHint":
+    "Articulation metrics need a separate {model} model (not your main recognition model).",
+  "tools.speechAnalysis.retryAfterDownload": "Analyze again",
+  "tools.speechAnalysis.downloadFailed": "Could not download the model.",
+  "tools.speechAnalysis.summary.overallTitle": "Speech quality",
+  "tools.speechAnalysis.summary.dimension.recording": "Recording",
+  "tools.speechAnalysis.summary.dimension.signalQuality": "Signal quality",
+  "tools.speechAnalysis.summary.dimension.confidence": "Confidence",
+  "tools.speechAnalysis.summary.dimension.intelligibility":
+    "Intelligibility (STT confidence)",
+  "tools.speechAnalysis.summary.dimension.articulation": "Recognition consistency (draft)",
+  "tools.speechAnalysis.summary.dimension.fluency": "Fluency",
+  "tools.speechAnalysis.summary.dimension.prosody": "Prosody",
+  "tools.speechAnalysis.summary.grade.excellent": "Excellent",
+  "tools.speechAnalysis.summary.grade.good": "Good",
+  "tools.speechAnalysis.summary.grade.fair": "Fair",
+  "tools.speechAnalysis.summary.grade.weak": "Weak",
+  "tools.speechAnalysis.summary.grade.unavailable": "Not enough data",
+  "tools.speechAnalysis.summary.detail.recording": "Signal cleanliness and level",
+  "tools.speechAnalysis.summary.detail.signalQuality":
+    "SNR, clipping, bandwidth — affects reliability, not the diction score",
+  "tools.speechAnalysis.summary.detail.intelligibilityProxy":
+    "Indirect: share of low-confidence words (not WER without a script)",
+  "tools.speechAnalysis.summary.detail.articulationProxy":
+    "CTC self-consistency on symbols; phoneme GOP needs G2P",
+  "tools.speechAnalysis.summary.detail.articulationDraft":
+    "Need more speech for a full CTC consistency score",
+  "tools.speechAnalysis.summary.label.full": "Diction score",
+  "tools.speechAnalysis.summary.label.preliminary":
+    "Preliminary score (fluency and expressiveness)",
+  "tools.speechAnalysis.summary.label.preliminaryAxes":
+    "Preliminary score ({axes})",
+  "tools.speechAnalysis.summary.label.insufficientData":
+    "Not enough data to score (speech {speechSec}s)",
+  "tools.speechAnalysis.summary.label.hidden": "Score unavailable",
+  "tools.speechAnalysis.summary.badgePreliminary": "preliminary",
+  "tools.speechAnalysis.summary.badgeFull": "full",
+  "tools.speechAnalysis.summary.noScore": "—",
+  "tools.speechAnalysis.summary.hiddenHint":
+    "Need articulation (GigaAM CTC) and intelligibility, or more speech for individual metrics.",
+  "tools.speechAnalysis.summary.coverage": "Blocks in score: {included} of {total}",
+  "tools.speechAnalysis.summary.coverageBreakdown":
+    "Included: {includedList}. Not included: {missingList}.",
+  "tools.speechAnalysis.summary.weakSpot": "Weakest area: {name} ({score}/100)",
+  "tools.speechAnalysis.summary.lowestAxis":
+    "No weak areas; lowest score: {name} ({score}/100)",
+  "tools.speechAnalysis.summary.articulationNotScored":
+    "Sound articulation is not scored yet (need {remaining}s more speech; {actual} of {required}s so far).",
+  "tools.speechAnalysis.summary.reason.pauseMeasurementUnreliable":
+    "Could not reliably measure pauses from energy — fluency score hidden",
+  "tools.speechAnalysis.summary.fluencyMetric.sylPerSec": "Rate (syllables/s):",
+  "tools.speechAnalysis.summary.fluencyMetric.wpm": "Speed (words/min):",
+  "tools.speechAnalysis.summary.fluencyMetric.pauses": "Pauses:",
+  "tools.speechAnalysis.summary.fluencyMetric.pausesValue":
+    "≥{minMs} ms — {count}, mean {meanMs} ms",
+  "tools.speechAnalysis.summary.fluencyMetric.longPauses": "Long pauses:",
+  "tools.speechAnalysis.summary.fluencyMetric.fillers": "Fillers per 100 words:",
+  "tools.speechAnalysis.summary.fluencyMetric.reps": "Hesitation repeats:",
+  "tools.speechAnalysis.summary.prosodyF0ChartCaption": "F0 contour (voiced frames)",
+  "tools.speechAnalysis.summary.f0Expand": "Enlarge F0 chart",
+  "tools.speechAnalysis.summary.f0ExpandHint": "click to enlarge",
+  "tools.speechAnalysis.summary.f0ExpandClose": "Close",
+  "tools.speechAnalysis.summary.reason.needsLongerRecording":
+    "Need a longer speech sample for this metric",
+  "tools.speechAnalysis.summary.reason.needsLongerRecording.howTo":
+    "Record a continuous monologue or read aloud: fewer long pauses and silence, more steady speech.",
+  "tools.speechAnalysis.summary.reason.recordingDuration":
+    "Speech so far: {actual}s; this metric needs at least {required}s",
+  "tools.speechAnalysis.summary.reason.articulationAwait":
+    "Waiting: need {remaining}s more speech ({actual} of {required}s)",
+  "tools.speechAnalysis.summary.missingReason.articulationShortSpeech": "not enough speech",
+  "tools.speechAnalysis.summary.missingReason.confidenceMerged": "merged with intelligibility",
+  "tools.speechAnalysis.summary.reason.needsMoreWords": "Need more recognized words",
+  "tools.speechAnalysis.summary.reason.needsMoreWords.howTo":
+    "Speak a bit louder and clearer, reduce background noise; same topic but longer with fewer long pauses.",
+  "tools.speechAnalysis.summary.reason.wordCount":
+    "Words recognized: {actual}; need at least {required}",
+  "tools.speechAnalysis.summary.reason.needsMoreArticulationTokens":
+    "Not enough text for articulation scoring",
+  "tools.speechAnalysis.summary.reason.needsMoreArticulationTokens.howTo":
+    "Read a longer passage aloud — we need more words and letters in the transcript, not just seconds of audio.",
+  "tools.speechAnalysis.summary.reason.articulationTokenCount":
+    "Alignment symbols: {actual}; need at least {required}",
+  "tools.speechAnalysis.summary.reason.needsCtcModel":
+    "Download GigaAM CTC for articulation metrics",
+  "tools.speechAnalysis.summary.reason.needsCtcModel.howTo":
+    "In Auto mode the app downloads GigaAM CTC and recalculates. Otherwise use Download on this card.",
+  "tools.speechAnalysis.summary.reason.needsVoicedFrames":
+    "Too few voiced frames for F0",
+  "tools.speechAnalysis.summary.reason.needsVoicedFrames.howTo":
+    "Speak louder and more continuously, closer to the mic; less noise and whispering — steady vowels help.",
+  "tools.speechAnalysis.summary.reason.wordConfidenceUnavailable":
+    "Per-word confidence is not available for this recognizer",
+  "tools.speechAnalysis.summary.reason.wordConfidenceUnavailable.howTo":
+    "The app will download the needed component (when possible) and refresh these metrics automatically.",
+  "tools.speechAnalysis.summary.reason.noRecognizedWords":
+    "No speech recognized or too few words",
+  "tools.speechAnalysis.summary.reason.noRecognizedWords.howTo":
+    "Check volume and file format; record 20–30s of continuous speech without long silence at the edges.",
+  "tools.speechAnalysis.summary.reason.articulationUnavailable":
+    "Articulation was not computed (CTC error or missing data)",
+  "tools.speechAnalysis.summary.reason.articulationUnavailable.howTo":
+    "Retry after CTC is installed; if it keeps failing, try another file or a shorter clip for decode.",
+  "tools.speechAnalysis.reliability.title": "Recording reliability",
+  "tools.speechAnalysis.reliability.high": "high",
+  "tools.speechAnalysis.reliability.medium": "medium",
+  "tools.speechAnalysis.reliability.low": "low",
+  "tools.speechAnalysis.summary.verdictPending":
+    "Verdict labels (Excellent/Good…) appear when at least 4 blocks contribute to the score.",
+  "tools.speechAnalysis.problems.sectionTitle": "What to work on",
+  "tools.speechAnalysis.problems.ctcSelfConsistencySource":
+    "Technical: letter mismatches between main STT and a second CTC decode (not a reference script). Reductions and pairs with fewer than 3 repeats are hidden.",
+  "tools.speechAnalysis.problems.uncertaintyDisclaimer":
+    "The model may be unsure about individual words — that is not always a diction flaw; listen to the clip.",
+  "tools.speechAnalysis.problems.uncertaintySource":
+    "Words and spans where recognition was uncertain. Dual-decode letter diffs are under technical details — weak diction signal.",
+  "tools.speechAnalysis.problems.sttUncertaintySource":
+    "Words where the recognizer was uncertain (no CTC frame posteriors yet).",
+  "tools.speechAnalysis.playFragment": "Play snippet",
+  "tools.speechAnalysis.problems.wordsTitle":
+    "Words where the recognizer was uncertain",
+  "tools.speechAnalysis.problems.substitutionsTitle":
+    "Letter mismatches (after reduction filter)",
+  "tools.speechAnalysis.technical.letterMismatchTitle":
+    "Decode self-consistency (letters)",
+  "tools.speechAnalysis.technical.letterBaseline":
+    "Recording-wide mismatch baseline: about {percent}% of letters",
+  "tools.speechAnalysis.technical.letterOutliersTitle":
+    "Letters clearly above baseline (≥8 tokens, +3 pp)",
+  "tools.speechAnalysis.technical.weakSymbolRow":
+    "{symbol}: {errors} of {count} ({percent}%), {excess} pp above baseline",
+  "tools.speechAnalysis.technical.noLetterIssuesAboveBaseline":
+    "No letter outliers above the recording baseline.",
+  "tools.speechAnalysis.technical.noSubstitutionsAboveThreshold":
+    "No substitution pairs with three or more repeats.",
+  "tools.speechAnalysis.problems.weakSymbolDetail": "{errors} errors of {count}",
+  "tools.speechAnalysis.problems.repetitionStutter": "hesitation repeat",
+  "tools.speechAnalysis.problems.repetitionEmphasis": "expressive repeat",
+  "tools.speechAnalysis.problems.repetitionsTitle": "Repeats and hesitations",
+  "tools.speechAnalysis.problems.repetitionCount": "Adjacent word repeats: {count}",
+  "tools.speechAnalysis.problems.lowConfidence": "low STT confidence",
+  "tools.speechAnalysis.problems.suspiciousWord": "suspicious transcript token",
+  "tools.speechAnalysis.problems.notInDictionary": "not in dictionary (possible STT error)",
+  "tools.speechAnalysis.problems.mixedAlphanumeric": "mixed letters and digits",
+  "tools.speechAnalysis.problems.mixedScript": "mixed Latin and Cyrillic",
+  "tools.speechAnalysis.problems.garbageCyrillic": "suspicious Cyrillic form",
+  "tools.speechAnalysis.problems.repeatedChars": "repeated characters",
+  "tools.speechAnalysis.problems.abbreviation": "suspicious abbreviation",
+  "tools.speechAnalysis.problems.repetitionDeliberate": "possibly intentional repeat",
+  "tools.speechAnalysis.summary.label.readAloud": "Read-aloud score vs reference",
+  "tools.speechAnalysis.summary.detail.fluencyReadAloud":
+    "Tempo is not scored in read-aloud reference mode",
+  "tools.speechAnalysis.summary.reason.readAloudNoTempo":
+    "Tempo is excluded for tongue twisters and read-aloud reference mode",
+  "tools.speechAnalysis.summary.detail.intelligibilitySuspiciousWords":
+    "Suspicious transcript tokens — see Attention block",
+  "tools.speechAnalysis.advanced.readAloud": "Read against reference (WER/CER)",
+  "tools.speechAnalysis.advanced.tongueTwister": "Tongue twister",
+  "tools.speechAnalysis.advanced.tongueTwisterNone": "Custom text below",
+  "tools.speechAnalysis.advanced.referenceText": "Reference text",
+  "tools.speechAnalysis.meta.referenceEval": "WER {wer}% · CER {cer}%",
+  "tools.speechAnalysis.qc.snrCapped": "SNR > 40 dB",
+  "tools.speechAnalysis.qc.possibly_processed": "possibly processed recording",
+  "tools.speechAnalysis.caveat.transcriptSuspiciousWords":
+    "Suspicious transcript tokens: {suspicious} of {total} (score not reduced on short clips).",
+  "tools.speechAnalysis.caveat.possiblyProcessedRecording":
+    "Very high SNR — possible synthesis or heavy processing; noise estimate may be optimistic.",
+  "tools.speechAnalysis.problems.lowGop": "weak alignment (transcript GOP proxy)",
+  "tools.speechAnalysis.transcript.clickHint":
+    "Click a word to play that span. Highlighted tokens are flagged issues.",
+  "tools.speechAnalysis.summary.fluencyMetric.midPhrasePauses": "Mid-phrase pauses:",
+  "tools.speechAnalysis.summary.fluencyMetric.punctuationPauses": "Punctuation-boundary pauses:",
+  "tools.speechAnalysis.summary.fluencyMetric.veryLongPauses": "Very long pauses:",
+  "tools.speechAnalysis.summary.voiceQuality.jitter": "Jitter (local) {value}%",
+  "tools.speechAnalysis.summary.voiceQuality.shimmer": "Shimmer (local) {value}%",
+  "tools.speechAnalysis.summary.voiceQuality.cpps": "CPPS (proxy) {value} dB",
+  "tools.speechAnalysis.problems.transcriptQualitySource":
+    "The transcript may include chunk-merge artifacts — STT-based metrics are less reliable.",
+  "tools.speechAnalysis.caveat.transcriptQualityDegraded":
+    "Repeated phrases or suspicious words in the transcript — verify the text before trusting fluency or intelligibility.",
+  "tools.speechAnalysis.summary.fluencyMetric.sylPerSecArticulation":
+    "Articulation rate (ex-pause, syl/s):",
+  "tools.speechAnalysis.summary.fluencyMetric.longPausesValue":
+    "≥{minMs} ms — {count}",
+  "tools.speechAnalysis.technical.workingSampleRate": "working {hz} Hz",
+  "tools.speechAnalysis.technical.sourceSampleRate": "file {hz} Hz",
+  "tools.speechAnalysis.caveat.preliminaryScore":
+    "Preliminary total: not all axes are in the score yet (see list above).",
+  "tools.speechAnalysis.caveat.articulationCharLevel":
+    "GOP/PER use letter symbols, not clinical phonemes — G2P required for phoneme-level scores.",
+  "tools.speechAnalysis.summary.detail.confidence": "Mean word recognition confidence",
+  "tools.speechAnalysis.summary.detail.intelligibility": "Share of low-confidence words",
+  "tools.speechAnalysis.summary.detail.articulation": "Pronunciation consistency (GOP/PER)",
+  "tools.speechAnalysis.summary.detail.fluency": "Pace, pauses, and fillers",
+  "tools.speechAnalysis.summary.detail.prosody":
+    "F0 σ (semitones), voiced fraction, range — not full intonation",
+  "tools.speechAnalysis.summary.detail.prosodyValues":
+    "F0 spread p10–p90: {std} st (target ~2–5); voiced among speech frames: {voiced}%; p5–p95: {range} st",
+  "tools.speechAnalysis.summary.detail.fluencyValues":
+    "Pace: {sylPerSec} syl/s, {wpm} wpm · pauses ≥{minPauseMs} ms: {pauseCount} (mean {meanPauseMs} ms), long: {longPauses} · fillers: {fillers}/100 words · repeats: {reps}",
+  "tools.speechAnalysis.summary.detail.intelligibilityMerged":
+    "Score reflects STT model confidence; the attention list uses separate dictionary/threshold heuristics",
+  "tools.speechAnalysis.summary.detail.prosodyLow": "Too few voiced frames for reliable F0",
+  "tools.speechAnalysis.technical.words": "{count} words",
+  "tools.speechAnalysis.technical.longPauses": "{count} long pauses",
+  "tools.speechAnalysis.technical.fillers": "{value} fillers per 100 words",
+  "tools.speechAnalysis.technical.meanConfidence": "mean confidence {percent}%",
+  "tools.speechAnalysis.technical.ctcModel": "model {model}",
+  "tools.speechAnalysis.qc.lowSnr": "low SNR",
+  "tools.speechAnalysis.qc.moderateSnr": "moderate SNR",
+  "tools.speechAnalysis.qc.clipping": "clipping",
+  "tools.speechAnalysis.qc.narrowband": "narrowband",
+  "tools.speechAnalysis.qc.shortSpeech": "short speech (< 1 min)",
+  "tools.speechAnalysis.caveat.wordConfidenceUnavailable":
+    "Per-word confidence is not available from this recognition model.",
+  "tools.speechAnalysis.caveat.articulationCtcMissing":
+    "Articulation metrics need the GigaAM CTC model, which is not installed.",
+  "tools.speechAnalysis.caveat.articulationCtcDecodeFailed":
+    "CTC decode failed while computing articulation metrics.",
+  "tools.speechAnalysis.caveat.prosodyLowConfidence":
+    "Prosody was scored with low confidence (few voiced frames).",
+  "tools.speechAnalysis.caveat.qcLowSnr": "Low signal-to-noise ratio — metrics may be less reliable.",
+  "tools.speechAnalysis.caveat.qcModerateSnr": "Moderate SNR — some metrics may be noisy.",
+  "tools.speechAnalysis.caveat.qcClipping": "Clipping detected in the recording.",
+  "tools.speechAnalysis.caveat.qcNarrowband": "Low sample rate.",
+  "tools.speechAnalysis.caveat.qcShortSpeech": "Short speech sample — some metrics are indicative only.",
+  "tools.speechAnalysis.caveat.noSpeech": "No speech detected or audio is too quiet.",
 
   "tools.vocalSeparator.windowLoading": "Loading",
   "tools.vocalSeparator.title": "Split vocals / instrumental",

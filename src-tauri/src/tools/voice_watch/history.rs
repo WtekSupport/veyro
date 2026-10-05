@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::settings::data_storage::default_data_storage_root;
+use crate::tools::voice_watch::paths::paths_equal;
 
 pub const HISTORY_FILE: &str = "voice-history.json";
 
@@ -19,6 +20,8 @@ pub enum HistoryStatus {
     TooLong,
     NotAudio,
     Skipped,
+    /// In the shared file index only — no STT queued (e.g. added from speech analysis).
+    Indexed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,10 +86,34 @@ pub fn save_history(entries: &[HistoryEntry]) -> Result<(), String> {
     fs::write(&path, json).map_err(|e| e.to_string())
 }
 
+fn dedupe_history(entries: Vec<HistoryEntry>) -> Vec<HistoryEntry> {
+    let mut sorted = entries;
+    sorted.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+    let mut kept = Vec::with_capacity(sorted.len());
+    for entry in sorted {
+        let duplicate = kept.iter().any(|prev: &HistoryEntry| {
+            paths_equal(&prev.path, &entry.path)
+                || prev
+                    .content_sha256
+                    .as_deref()
+                    .zip(entry.content_sha256.as_deref())
+                    .is_some_and(|(left, right)| left == right)
+        });
+        if !duplicate {
+            kept.push(entry);
+        }
+    }
+    kept
+}
+
 pub fn list_history() -> Vec<HistoryEntry> {
-    let mut entries = load_history();
-    entries.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
-    entries
+    let loaded = load_history();
+    let before = loaded.len();
+    let deduped = dedupe_history(loaded);
+    if deduped.len() != before {
+        let _ = save_history(&deduped);
+    }
+    deduped
 }
 
 pub fn purge_expired(retention_days: u32) -> Vec<HistoryEntry> {

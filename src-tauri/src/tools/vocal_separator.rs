@@ -23,6 +23,7 @@ use veyro_separation::{
     SeparationProfile, SeparationWarning,
 };
 
+use super::heavy_job::run_stage;
 use super::shared::{
     decode_for_separation, throttled_percent_callback, ToolsTranscriptionGuard,
     validate_tool_file_path,
@@ -305,7 +306,7 @@ pub async fn separate_vocal_file(
     let path_buf_for_work = path_buf.clone();
     let settings_for_work = settings.clone();
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    run_stage("vocal_separator", move || {
         emit_phase(
             &app_for_progress,
             &path_key_for_progress,
@@ -405,7 +406,7 @@ pub async fn separate_vocal_file(
             Vec::new(),
         );
 
-        Ok::<VocalSeparatorResult, String>(VocalSeparatorResult {
+        Ok(VocalSeparatorResult {
             file_name: path_buf_for_work
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -420,9 +421,6 @@ pub async fn separate_vocal_file(
         })
     })
     .await
-    .map_err(|error| format!("tools.vocalSeparator.separationFailed|{error}"))?;
-
-    result
 }
 
 /// Second independent inference on the **original mix** (not the instrumental file).
@@ -461,7 +459,7 @@ pub async fn split_instrumental_further(
     let path_buf_for_work = path_buf.clone();
     let settings_for_work = settings.clone();
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    run_stage("vocal_separator_multi_stem", move || {
         emit_phase(
             &app_for_progress,
             &path_key_for_progress,
@@ -585,7 +583,7 @@ pub async fn split_instrumental_further(
             instrument_stems,
         );
 
-        Ok::<SplitInstrumentalResult, String>(SplitInstrumentalResult {
+        Ok(SplitInstrumentalResult {
             file_name: path_buf_for_work
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -599,7 +597,4 @@ pub async fn split_instrumental_further(
         })
     })
     .await
-    .map_err(|error| format!("tools.vocalSeparator.separationFailed|{error}"))?;
-
-    result
 }

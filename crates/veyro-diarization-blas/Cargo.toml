@@ -1,0 +1,9 @@
+[package]
+name = "veyro-diarization-blas"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Pulls Intel MKL (CBLAS) into the link line when speakrs is enabled (Windows MSVC)"
+
+[dependencies]
+intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-seq"] }

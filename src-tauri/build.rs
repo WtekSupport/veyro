@@ -18,7 +18,15 @@ fn copy_if_changed(source: &Path, dest: &Path) -> io::Result<()> {
     fs::write(dest, source_bytes)
 }
 
+/// Tauri sets these cfgs; register them for `unexpected_cfgs` when tauri-build is skipped.
+fn emit_tauri_cfg_check_lints() {
+    println!("cargo::rustc-check-cfg=cfg(desktop)");
+    println!("cargo::rustc-check-cfg=cfg(mobile)");
+}
+
 fn main() {
+    emit_tauri_cfg_check_lints();
+
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let version_path = manifest_dir.join("../version.json");
     println!("cargo:rerun-if-changed={}", version_path.display());
@@ -90,6 +98,35 @@ pub const VERSION_BUILD: u32 = {build};
 
     #[cfg(all(windows, feature = "silero-te"))]
     stage_windows_libtorch_dlls(&manifest_dir);
+
+    let build_features = enabled_cargo_features();
+    if !build_features.is_empty() {
+        println!(
+            "cargo:rustc-env=VEYRO_CARGO_BUILD_FEATURES={}",
+            build_features.join(",")
+        );
+    }
+    println!(
+        "cargo:rustc-env=VEYRO_MANIFEST_DIR={}",
+        manifest_dir.display()
+    );
+
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("src/tools/heavy_job.rs").display()
+    );
+}
+
+fn enabled_cargo_features() -> Vec<String> {
+    std::env::vars()
+        .filter_map(|(key, value)| {
+            if !key.starts_with("CARGO_FEATURE_") || value != "1" {
+                return None;
+            }
+            let name = key["CARGO_FEATURE_".len()..].to_lowercase().replace('_', "-");
+            Some(name)
+        })
+        .collect()
 }
 
 #[cfg(all(windows, feature = "silero-te"))]
@@ -146,4 +183,3 @@ fn stage_windows_libtorch_dlls(manifest_dir: &PathBuf) {
         }
     }
 }
-

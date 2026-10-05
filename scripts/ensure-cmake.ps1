@@ -4,7 +4,8 @@
 $ErrorActionPreference = "Stop"
 
 $cmakeVersion = "3.31.6"
-$toolsDir = Join-Path (Join-Path $PSScriptRoot "..") ".tools"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$toolsDir = Join-Path $repoRoot ".tools"
 $cmakeRoot = Join-Path $toolsDir "cmake"
 $cmakeBin = Join-Path $cmakeRoot "bin"
 $cmakeExe = Join-Path $cmakeBin "cmake.exe"
@@ -37,7 +38,7 @@ if ($systemCmake) {
 }
 
 if (Test-CmakeReady) {
-    Write-Host "Using portable CMake at $cmakeBin"
+    $env:PATH = "$cmakeBin;$env:PATH"
     exit 0
 }
 
@@ -74,4 +75,5 @@ if (-not (Test-CmakeReady)) {
     throw "Portable CMake install failed at $cmakeExe"
 }
 
+$env:PATH = "$cmakeBin;$env:PATH"
 Write-Host "Portable CMake ready: $(& $cmakeExe --version | Select-Object -First 1)"

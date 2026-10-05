@@ -1,8 +1,11 @@
 .update-banner-slot:not([hidden]) {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 50;
+  left: 0;
+  right: 0;
+  z-index: 5000;
   padding: var(--space-md) var(--space-lg) 0;
+  pointer-events: none;
 }
 
 .update-banner {
@@ -11,14 +14,20 @@
   justify-content: space-between;
   gap: var(--space-lg);
   padding: var(--space-md) var(--space-lg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 193, 69, 0.12),
-    rgba(20, 20, 20, 0.96)
+  border: 1px solid rgba(255, 193, 69, 0.38);
+  border-radius: 10px;
+  background-color: var(--bg-elevated);
+  background-image: linear-gradient(
+    180deg,
+    #242424 0%,
+    var(--bg-elevated) 55%,
+    #141414 100%
   );
-  box-shadow: 0 4px 24px var(--glow);
+  box-shadow:
+    0 14px 42px rgba(0, 0, 0, 0.72),
+    0 4px 12px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 216, 117, 0.12);
+  pointer-events: auto;
 }
 
 .update-banner-text {
@@ -26,6 +35,18 @@
   min-width: 0;
   color: var(--parchment);
   font-size: 13px;
+}
+
+.update-banner-line {
+  margin: 0;
+}
+
+.update-banner-detail {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--parchment-dim);
+  word-break: break-word;
 }
 
 .update-banner-actions {
@@ -2384,8 +2405,15 @@ input[type="range"]::-moz-range-thumb {
   margin: 0;
 }
 
-.error-text {
+.error-copy {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.error-text {
   margin: 0;
   padding: 6px 8px;
   border-radius: 6px;
@@ -2393,6 +2421,16 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid rgba(204, 68, 68, 0.35);
   color: #f5a5a5;
   font-size: 0.78rem;
+}
+
+.error-detail {
+  margin: 0;
+  padding: 0 8px;
+  color: #f5a5a5;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
 }
 
 .error-dismiss {
@@ -3204,14 +3242,561 @@ body.tool-window {
 }
 
 #tool-audio-srt-app,
-#tool-vocal-separator-app {
+#tool-vocal-separator-app,
+#tool-speech-analysis-app {
   box-sizing: border-box;
   height: 100vh;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
   background: var(--bg-deep);
   color: var(--parchment);
+}
+
+#tool-speech-analysis-app {
+  overflow: hidden;
+}
+
+#tool-speech-analysis-app .voice-files-sidebar:not(.voice-files-sidebar--collapsed) {
+  flex: 0 0 220px;
+  width: 220px;
+}
+
+.voice-files-sidebar-toggle {
+  flex-shrink: 0;
+}
+
+.speech-analysis-advanced {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 10px 10px 8px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.speech-analysis-advanced summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.68rem;
+  margin: 0 0 10px;
+  padding: 0 2px;
+  user-select: none;
+  list-style-position: inside;
+}
+
+.speech-analysis-advanced-label {
+  display: block;
+  margin: 0 0 10px;
+  font-size: 0.65rem;
+  line-height: 1.3;
+}
+
+.speech-analysis-advanced-select {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  box-sizing: border-box;
+  padding: 6px 1.75rem 6px 8px;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  color-scheme: dark;
+  appearance: none;
+  background-color: var(--bg-input);
+  color: var(--parchment);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ffc145' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 10px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.speech-analysis-advanced-select:focus {
+  outline: none;
+  border-color: var(--brass);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+
+.speech-analysis-advanced-select option {
+  background-color: var(--bg-input);
+  color: var(--parchment);
+}
+
+.speech-analysis-advanced-hint {
+  margin: 8px 0 0;
+  padding: 0 1px;
+  font-size: 0.6rem;
+  line-height: 1.45;
+}
+
+.speech-analysis-backfill-hint {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 10px 0;
+  font-size: 0.6rem;
+  line-height: 1.4;
+}
+
+.speech-analysis-plan-banner {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 6px 10px 0;
+  font-size: 0.6rem;
+  line-height: 1.4;
+}
+
+.speech-analysis-advanced-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.speech-analysis-metrics-hint {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.speech-analysis-coach {
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+}
+
+.speech-analysis-coach--muted {
+  opacity: 0.85;
+}
+
+.speech-analysis-coach h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.speech-analysis-coach h4 {
+  margin: 12px 0 6px;
+  font-size: 0.85rem;
+}
+
+.speech-analysis-coach-disclaimer {
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+}
+
+.speech-analysis-coach ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.speech-analysis-badge--preliminary-card {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.65rem;
+  vertical-align: middle;
+}
+
+.speech-analysis-sidebar-foot {
+  flex-shrink: 0;
+  padding: 10px 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.speech-analysis-sidebar-foot .btn {
+  width: 100%;
+}
+
+.speech-analysis-metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin-bottom: 12px;
+}
+
+.speech-analysis-metrics th {
+  text-align: left;
+  padding: 6px 10px 6px 0;
+  vertical-align: top;
+  color: var(--text-muted, rgba(245, 235, 220, 0.72));
+  font-weight: 500;
+  width: 38%;
+}
+
+.speech-analysis-metrics td {
+  padding: 6px 0;
+}
+
+.speech-analysis-metric-list {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted, rgba(245, 235, 220, 0.72));
+}
+
+.speech-analysis-metric-label {
+  color: inherit;
+}
+
+.speech-analysis-f0-chart {
+  margin-top: 10px;
+  max-width: 100%;
+  color: var(--accent, #e8c547);
+}
+
+.speech-analysis-f0-chart-hit {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.speech-analysis-f0-chart-hit:hover {
+  background: rgba(232, 197, 71, 0.06);
+}
+
+.speech-analysis-f0-chart-hit:focus-visible {
+  outline: 2px solid var(--accent, #e8c547);
+  outline-offset: 2px;
+}
+
+.speech-analysis-f0-svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.speech-analysis-f0-svg--modal {
+  min-height: 200px;
+}
+
+.speech-analysis-f0-chart figcaption {
+  font-size: 0.78rem;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.speech-analysis-f0-modal {
+  width: min(960px, 96vw);
+  max-width: 96vw;
+  padding: 16px 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: var(--surface-elevated, #1e1c18);
+  color: inherit;
+}
+
+.speech-analysis-f0-modal::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.speech-analysis-f0-modal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.speech-analysis-f0-modal-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.speech-analysis-f0-modal-body {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.speech-analysis-f0-chart--modal {
+  margin: 0;
+}
+
+.speech-analysis-transcript {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.speech-analysis-transcript--interactive {
+  white-space: normal;
+}
+
+.speech-analysis-transcript-word {
+  display: inline;
+  margin: 0 0.12em 0.2em 0;
+  padding: 0 0.1em;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 3px;
+  text-align: left;
+}
+
+.speech-analysis-transcript-word:hover {
+  background: rgba(232, 197, 71, 0.15);
+}
+
+.speech-analysis-transcript-word--issue {
+  background: rgba(220, 80, 80, 0.18);
+  text-decoration: underline dotted;
+}
+
+.speech-analysis-block h3 {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+}
+
+.speech-analysis-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.speech-analysis-processing {
+  padding: 8px 0 16px;
+}
+
+.speech-analysis-stage {
+  margin: 16px 0 6px;
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+
+.speech-analysis-hero {
+  text-align: center;
+  padding: 20px 12px 24px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.speech-analysis-hero-label {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  color: var(--text-muted, rgba(245, 235, 220, 0.72));
+}
+
+.speech-analysis-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: rgba(255, 193, 69, 0.18);
+  color: var(--brass-bright, #ffc145);
+  vertical-align: middle;
+}
+
+.speech-analysis-badge--full {
+  background: rgba(120, 200, 140, 0.15);
+  color: #9fd4a8;
+}
+
+.speech-analysis-coverage,
+.speech-analysis-reliability {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+}
+
+.speech-analysis-problems {
+  margin: 16px 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.speech-analysis-problems h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.speech-analysis-problems h4 {
+  margin: 12px 0 6px;
+  font-size: 0.85rem;
+}
+
+.speech-analysis-problem-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+}
+
+.speech-analysis-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted, rgba(245, 235, 220, 0.72));
+  margin-right: 6px;
+}
+
+.speech-analysis-play-fragment {
+  margin-right: 6px;
+  min-width: 2rem;
+  padding: 0 0.35rem;
+  vertical-align: middle;
+}
+
+.speech-analysis-dimension-hint {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.speech-analysis-audio {
+  display: none;
+}
+
+.speech-analysis-overall {
+  font-size: 3.2rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.speech-analysis-overall-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.speech-analysis-overall-value--muted {
+  opacity: 0.55;
+}
+
+.speech-analysis-problems-source {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.speech-analysis-overall-denom,
+.speech-analysis-score-denom {
+  font-size: 0.45em;
+  font-weight: 500;
+  opacity: 0.65;
+  margin-left: 2px;
+}
+
+.speech-analysis-overall-grade {
+  margin: 10px 0 0;
+  font-size: 1rem;
+}
+
+.speech-analysis-dimension-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.speech-analysis-dimension-card {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.speech-analysis-dimension-card--prosody {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 720px) {
+  .speech-analysis-dimension-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  .speech-analysis-dimension-card--prosody {
+    grid-column: span 2;
+  }
+}
+
+@media (min-width: 1100px) {
+  .speech-analysis-dimension-card--prosody {
+    grid-column: 1 / -1;
+  }
+}
+
+.speech-analysis-dimension-title {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.speech-analysis-dimension-score {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.speech-analysis-dimension-grade {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+}
+
+.speech-analysis-dimension-detail {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.speech-analysis-card-hint {
+  margin: 10px 0 8px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.speech-analysis-caveats {
+  margin: 0 0 16px;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--text-muted, rgba(245, 235, 220, 0.72));
+}
+
+.speech-analysis-technical {
+  margin-bottom: 12px;
+  font-size: 0.88rem;
+}
+
+.speech-analysis-technical summary {
+  cursor: pointer;
+  font-weight: 500;
+  padding: 8px 0;
+}
+
+.tool-window-header {
+  margin-bottom: 16px;
+}
+
+.tool-window-header h1 {
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.tool-window-header p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted, rgba(245, 235, 220, 0.72));
+  line-height: 1.45;
 }
 
 .audio-srt-tool .audio-srt-actions {
@@ -3233,12 +3818,36 @@ body.tool-window {
 }
 
 .audio-srt-diarization {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 0 12px 8px;
   padding: 8px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   font-size: 0.85rem;
   background: rgba(0, 0, 0, 0.16);
+}
+
+.audio-srt-diarization-model-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.audio-srt-diarization-model-actions .vocal-sep-model-download {
+  width: 100%;
+  max-width: 100%;
+}
+
+.audio-srt-diarization-model-actions .download-progress {
+  width: 100%;
+  margin-top: 0;
+  box-sizing: border-box;
 }
 
 .audio-srt-diarization-body {
@@ -3608,6 +4217,39 @@ body.tool-window {
   color: var(--parchment-dim);
 }
 
+/* Karaoke: avoid -webkit-box on inline spans (collapses spaces at line wrap). */
+.audio-srt-preview-subtitle.audio-srt-preview-subtitle--karaoke {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  -webkit-box-orient: unset;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+  max-height: none;
+}
+
+.audio-srt-preview-line {
+  display: block;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.audio-srt-preview-word {
+  opacity: 0.72;
+  transition: opacity 0.06s ease-out, color 0.06s ease-out;
+}
+
+.audio-srt-preview-word + .audio-srt-preview-word {
+  margin-left: 0.32em;
+}
+
+.audio-srt-preview-word--active {
+  opacity: 1;
+  color: var(--accent, #f5d76e);
+}
+
 .audio-srt-preview-subtitle-meta {
   margin: 0;
   flex: 0 0 1.05rem;
@@ -3820,6 +4462,32 @@ body.tool-window {
 .voice-files-sidebar-title {
   font-size: 0.7rem;
   font-weight: 600;
+}
+
+.voice-files-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.voice-files-sidebar-section:last-child {
+  border-bottom: none;
+}
+
+.voice-files-sidebar-section-title {
+  margin: 0;
+  padding: 4px 6px 2px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  opacity: 0.72;
+  letter-spacing: 0.04em;
+}
+
+.voice-files-sidebar-section .voice-files-browser {
+  flex: 0 1 auto;
+  max-height: min(220px, 38vh);
 }
 
 .voice-files-browser {
@@ -4324,6 +4992,15 @@ body.tool-window {
 .voice-files-dropzone--busy {
   opacity: 0.65;
   pointer-events: none;
+}
+
+.voice-files-dropzone.voice-files-dropzone--sidebar {
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 6px;
+  background: transparent;
+  min-height: 0;
 }
 
 .voice-files-dropzone-text {

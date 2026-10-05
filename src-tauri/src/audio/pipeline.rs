@@ -27,6 +27,12 @@ enum AudioCommand {
         mic_level: Arc<AtomicU32>,
         mic_monitor: MicMonitor,
     },
+    StartToolRecording {
+        source: CaptureSource,
+        audio_tx: Sender<Vec<f32>>,
+        mic_level: Arc<AtomicU32>,
+        mic_monitor: MicMonitor,
+    },
     StartLevelMonitor {
         device_id: Option<String>,
         mic_level: Arc<AtomicU32>,
@@ -273,6 +279,10 @@ impl AudioPipeline {
         self.input_stream_active.load(Ordering::Relaxed)
     }
 
+    pub fn capture_source(&self) -> CaptureSource {
+        self.capture_source.clone()
+    }
+
     /// Starts PTT release: clears gate, requests VAD flush, returns the flush receiver.
     /// Caller should wait on the receiver outside `audio` lock, then call `restore_ptt_flush_rx`.
     pub fn begin_ptt_release(&mut self) -> Result<Option<Receiver<AudioSegment>>, AudioError> {
@@ -369,6 +379,32 @@ impl AudioPipeline {
     }
 
     /// Keep an input stream open for the settings mic meter when capture is idle.
+    pub fn start_tool_recording(
+        &mut self,
+        source: CaptureSource,
+        sample_tx: Sender<Vec<f32>>,
+    ) -> Result<(u32, u16), AudioError> {
+        if self.is_capturing() || self.running.load(Ordering::Relaxed) {
+            return Err(AudioError::Stream(
+                "microphone busy with dictation".to_string(),
+            ));
+        }
+        let (sample_rate, channels) = capture_source_format(&source)?;
+        self.cmd_tx
+            .send(AudioCommand::StartToolRecording {
+                source,
+                audio_tx: sample_tx,
+                mic_level: Arc::clone(&self.mic_level),
+                mic_monitor: self.mic_monitor.clone(),
+            })
+            .map_err(|error| AudioError::Stream(error.to_string()))?;
+        Ok((sample_rate, channels))
+    }
+
+    pub fn stop_tool_recording(&mut self) {
+        let _ = self.cmd_tx.send(AudioCommand::StopCapture);
+    }
+
     pub fn ensure_level_monitor(
         &mut self,
         device_id: Option<String>,
@@ -512,7 +548,8 @@ impl AudioPipeline {
 
                     match audio_rx.try_recv() {
                         Ok(samples) => {
-                            if ptt_mode && !ptt_gate.load(Ordering::SeqCst) {
+                            let gate_open = !ptt_mode || ptt_gate.load(Ordering::SeqCst);
+                            if ptt_mode && !gate_open {
                                 continue;
                             }
                             match detector.push_samples(&samples) {
@@ -589,6 +626,11 @@ enum StreamKind {
     None,
     Capture,
     Monitor,
+    ToolRecording,
+}
+
+fn capture_source_format(source: &CaptureSource) -> Result<(u32, u16), AudioError> {
+    source.capture_format()
 }
 
 fn set_active_input_name(active_input_name: &Mutex<Option<String>>, name: Option<String>) {
@@ -888,12 +930,78 @@ fn audio_thread_main(
                     }
                 }
             }
+            Ok(AudioCommand::StartToolRecording {
+                source,
+                audio_tx,
+                mic_level,
+                mic_monitor,
+            }) => {
+                let after_restart = stream_handle.is_some();
+                stop_input_stream(
+                    stream_handle.take(),
+                    &input_stream_active,
+                    &mut active_mic_level,
+                    &active_input_name,
+                );
+                stream_kind = StreamKind::None;
+                let source_label = source.display_name();
+                let start_result = match source {
+                    CaptureSource::Microphone { device_id } => {
+                        start_input_stream_resilient(
+                            device_id.as_deref(),
+                            audio_tx,
+                            mic_level.clone(),
+                            mic_monitor,
+                            after_restart,
+                        )
+                        .map(|(handle, rate, channels, name)| {
+                            (
+                                ActiveStreamHandle::Microphone(handle),
+                                rate,
+                                channels,
+                                name,
+                            )
+                        })
+                    }
+                    CaptureSource::MicrophoneAndLoopback {
+                        device_id,
+                        process_id,
+                        label,
+                    } => start_mic_and_loopback_mixed(
+                        device_id.as_deref(),
+                        process_id,
+                        &label,
+                        audio_tx,
+                        mic_level.clone(),
+                        mic_monitor,
+                        after_restart,
+                    ),
+                };
+                match start_result {
+                    Ok((handle, rate, channels, device_name)) => {
+                        info!(
+                            "speech coach tool recording started: {device_name} ({rate} Hz, {channels} ch) [{source_label}]"
+                        );
+                        stream_handle = Some(handle);
+                        active_mic_level = Some(mic_level);
+                        stream_kind = StreamKind::ToolRecording;
+                        set_active_input_name(&active_input_name, Some(device_name));
+                        input_stream_active.store(true, Ordering::Relaxed);
+                    }
+                    Err(error) => {
+                        input_stream_active.store(false, Ordering::Relaxed);
+                        warn!(
+                            "failed to start tool recording stream for {source_label}: {error}"
+                        );
+                    }
+                }
+            }
             Ok(AudioCommand::StartLevelMonitor {
                 device_id,
                 mic_level,
                 mic_monitor,
             }) => {
-                if stream_kind == StreamKind::Capture {
+                if stream_kind == StreamKind::Capture || stream_kind == StreamKind::ToolRecording {
                     info!("mic level monitor skipped — capture stream already active");
                     continue;
                 }

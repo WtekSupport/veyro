@@ -2,9 +2,11 @@
 
 mod filter;
 mod history;
+mod paths;
 mod presets;
 mod queue;
 mod registry;
+mod voice_records;
 mod service;
 mod stability;
 mod watcher;
@@ -14,8 +16,9 @@ pub use history::{
 };
 pub use presets::{list_presets, VoiceWatchPreset};
 pub use queue::{
-    apply_text_mode_override, enqueue_paths, get_queue_snapshot, remove_from_index,
-    retry_history_entry, VoiceJob, VoiceJobMeta, VoiceJobSource, VoiceQueueSnapshot,
+    apply_text_mode_override, enqueue_paths, get_queue_snapshot, register_dictation_session_recording,
+    register_index_paths, remove_from_index, retry_history_entry, VoiceJob, VoiceJobMeta,
+    VoiceJobSource, VoiceQueueSnapshot,
 };
 pub use service::{
     apply_settings_to_voice_watch, is_cloud_provider_active, start_voice_watch_runtime,

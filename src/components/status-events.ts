@@ -1,5 +1,6 @@
 import type { ActivityLogEntry } from "../api";
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 import { renderActivityLogListOnly } from "./status";
 import { syncStatusOverlayPopoverPosition } from "./status-overlay-layout";
 
@@ -129,12 +130,4 @@ function bindEventsEscapeListener(): void {
     }
     setStatusEventsOpen(false);
   });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

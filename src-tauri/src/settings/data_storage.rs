@@ -7,6 +7,8 @@ pub const SUBDIR_STT_MODELS: &str = "models";
 pub const SUBDIR_LLM_MODELS: &str = "llm-models";
 pub const SUBDIR_DICTIONARY: &str = "dictionary";
 pub const SUBDIR_SEGMENT_QUEUE: &str = "segment-queue";
+pub const SUBDIR_VOICE_RECORDS: &str = "voice_records";
+pub const SUBDIR_DICTATION_BUFFERS: &str = "dictation_buffers";
 pub const DICTIONARY_FILE: &str = "dictionary.toml";
 
 pub fn default_data_storage_root() -> Result<PathBuf, ConfigError> {
@@ -91,6 +93,8 @@ pub fn ensure_data_storage_layout(root: &Path) -> Result<(), ConfigError> {
         SUBDIR_LLM_MODELS,
         SUBDIR_DICTIONARY,
         SUBDIR_SEGMENT_QUEUE,
+        SUBDIR_VOICE_RECORDS,
+        SUBDIR_DICTATION_BUFFERS,
     ] {
         let path = root.join(sub);
         std::fs::create_dir_all(&path).map_err(|error| {

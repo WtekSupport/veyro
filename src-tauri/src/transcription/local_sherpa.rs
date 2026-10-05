@@ -22,7 +22,9 @@ use crate::transcription::local_stt_model_store::{
 };
 use crate::transcription::models::{TranscriptionOptions, TranscriptionResult};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
-use crate::transcription::sherpa::build_offline_config;
+use crate::transcription::sherpa::{
+    build_offline_config, clip_audio_for_offline_decode, max_offline_audio_ms,
+};
 
 /// Serialize all sherpa-onnx native calls (prewarm + transcribe share one recognizer).
 fn sherpa_inference_lock() -> &'static Mutex<()> {
@@ -160,22 +162,33 @@ impl SharedSherpa {
             )));
         }
 
+        let max_ms = max_offline_audio_ms(settings);
+        let chunks = clip_audio_for_offline_decode(audio, max_ms);
         info!(
             ms = audio.duration_ms,
             samples = audio.samples.len(),
+            chunks = chunks.len(),
+            max_chunk_ms = max_ms,
             "sherpa decode start"
         );
 
-        let stream = recognizer.create_stream();
-        if let Some(lang) = options.language.as_deref().filter(|v| !v.is_empty()) {
-            stream.set_option("language", lang);
+        let mut parts = Vec::new();
+        for chunk in chunks {
+            let stream = recognizer.create_stream();
+            if let Some(lang) = options.language.as_deref().filter(|v| !v.is_empty()) {
+                stream.set_option("language", lang);
+            }
+            stream.accept_waveform(chunk.sample_rate as i32, &chunk.samples);
+            recognizer.decode(&stream);
+            let result = stream.get_result().ok_or_else(|| {
+                TranscriptionError::InferenceFailed("sherpa decode returned no result".to_string())
+            })?;
+            let piece = result.text.trim();
+            if !piece.is_empty() {
+                parts.push(piece.to_string());
+            }
         }
-        stream.accept_waveform(audio.sample_rate as i32, &audio.samples);
-        recognizer.decode(&stream);
-        let result = stream.get_result().ok_or_else(|| {
-            TranscriptionError::InferenceFailed("sherpa decode returned no result".to_string())
-        })?;
-        let text = result.text.trim().to_string();
+        let text = crate::transcription::sherpa::merge_transcript_pieces(&parts);
         info!(chars = text.chars().count(), "sherpa decode done");
         Ok(text)
     }
@@ -228,6 +241,7 @@ where
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("sherpa-stt".into())
+        .stack_size(16 * 1024 * 1024)
         .spawn(move || {
             let _ = tx.send(work());
         })

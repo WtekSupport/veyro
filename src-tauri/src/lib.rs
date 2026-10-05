@@ -18,6 +18,7 @@ mod privacy;
 pub mod llm;
 mod setup;
 pub mod settings;
+pub mod speech_analysis_models;
 pub mod separation;
 pub mod text;
 pub mod subtitles;
@@ -56,6 +57,9 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 use transcription::{create_transcriber, model_store};
+
+/// Tokio worker threads use a small default stack on Windows; local ML / tool analysis needs more.
+const HEAVY_WORKER_STACK: usize = 16 * 1024 * 1024;
 
 #[cfg(all(windows, feature = "local-llm"))]
 fn configure_llm_dll_search(app: &AppHandle) {
@@ -240,62 +244,68 @@ pub(crate) fn spawn_prewarm_local_models(
         return;
     }
 
-    tauri::async_runtime::spawn(async move {
-        if prewarm_stt {
-            match ctx.runtime.prewarm_transcriber().await {
-                Ok(()) => {
-                    ctx.record_activity(
-                        app.as_ref(),
-                        ActivityLevel::Info,
-                        "activity.model.prewarm_done",
-                        json!({}),
-                    );
-                }
-                Err(error) => {
-                    tracing::warn!("local STT prewarm failed: {error}");
-                    ctx.record_activity(
-                        app.as_ref(),
-                        ActivityLevel::Warn,
-                        "activity.model.prewarm_failed",
-                        json!({ "error": error.to_string() }),
-                    );
-                }
-            }
-        }
-
-        if prewarm_llm {
-            if let Err(error) = LlmEngine::ensure_loaded(&settings, &ctx.llm_engine) {
-                tracing::warn!("local LLM ensure_loaded before prewarm failed: {error}");
-            }
-            let engine = ctx
-                .llm_engine
-                .read()
-                .map(|guard| guard.clone())
-                .unwrap_or_else(|poisoned| poisoned.into_inner().clone());
-
-            if engine.is_ready() {
-                match engine.prewarm().await {
-                    Ok(()) => {
-                        ctx.record_activity(
-                            app.as_ref(),
-                            ActivityLevel::Info,
-                            "activity.llm.prewarm_done",
-                            json!({}),
-                        );
-                    }
-                    Err(error) => {
-                        tracing::warn!("local LLM prewarm failed: {error}");
-                        ctx.record_activity(
-                            app.as_ref(),
-                            ActivityLevel::Warn,
-                            "activity.llm.prewarm_failed",
-                            json!({ "error": error }),
-                        );
+    std::thread::Builder::new()
+        .name("veyro-model-prewarm".into())
+        .stack_size(HEAVY_WORKER_STACK)
+        .spawn(move || {
+            tauri::async_runtime::block_on(async move {
+                if prewarm_stt {
+                    match ctx.runtime.prewarm_transcriber().await {
+                        Ok(()) => {
+                            ctx.record_activity(
+                                app.as_ref(),
+                                ActivityLevel::Info,
+                                "activity.model.prewarm_done",
+                                json!({}),
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!("local STT prewarm failed: {error}");
+                            ctx.record_activity(
+                                app.as_ref(),
+                                ActivityLevel::Warn,
+                                "activity.model.prewarm_failed",
+                                json!({ "error": error.to_string() }),
+                            );
+                        }
                     }
                 }
-            }
-        }
-    });
+
+                if prewarm_llm {
+                    if let Err(error) = LlmEngine::ensure_loaded(&settings, &ctx.llm_engine) {
+                        tracing::warn!("local LLM ensure_loaded before prewarm failed: {error}");
+                    }
+                    let engine = ctx
+                        .llm_engine
+                        .read()
+                        .map(|guard| guard.clone())
+                        .unwrap_or_else(|poisoned| poisoned.into_inner().clone());
+
+                    if engine.is_ready() {
+                        match engine.prewarm().await {
+                            Ok(()) => {
+                                ctx.record_activity(
+                                    app.as_ref(),
+                                    ActivityLevel::Info,
+                                    "activity.llm.prewarm_done",
+                                    json!({}),
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!("local LLM prewarm failed: {error}");
+                                ctx.record_activity(
+                                    app.as_ref(),
+                                    ActivityLevel::Warn,
+                                    "activity.llm.prewarm_failed",
+                                    json!({ "error": error }),
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        })
+        .ok();
 }
 
 pub(crate) fn spawn_prewarm_microphone(
@@ -1459,18 +1469,39 @@ fn get_diarization_model_status(
 async fn download_diarization_model(
     app: AppHandle,
     ctx: tauri::State<'_, Arc<AppContext>>,
+    quality: Option<String>,
 ) -> Result<String, String> {
     let settings = settings_for_models_dir(ctx.inner())?;
+    let tier = match quality.as_deref() {
+        Some("accurate") => diarization::DiarizationQuality::Accurate,
+        _ => diarization::DiarizationQuality::Fast,
+    };
+    let model_label = match tier {
+        diarization::DiarizationQuality::Accurate => "accurate",
+        diarization::DiarizationQuality::Fast => "fast",
+    };
     let app_ctx = Arc::clone(ctx.inner());
     app_ctx.record_activity(
         Some(&app),
         ActivityLevel::Info,
         "activity.model.download_started",
-        json!({ "model": "diarization/balanced" }),
+        json!({ "model": format!("diarization/{model_label}") }),
     );
     let settings_for_work = settings.clone();
+    let app_for_progress = app.clone();
+    let quality_for_progress = model_label.to_string();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        diarization::ensure_models(&settings_for_work)
+        diarization::model_store::ensure_models_with_progress(&settings_for_work, tier, |progress| {
+            app::events::emit_diarization_model_download_progress(
+                &app_for_progress,
+                app::events::DiarizationModelDownloadProgressPayload {
+                    quality: quality_for_progress.clone(),
+                    downloaded: progress.downloaded,
+                    total: progress.total,
+                    percent: progress.percent,
+                },
+            );
+        })
     })
     .await
     .map_err(|error| error.to_string())?;
@@ -1717,6 +1748,103 @@ async fn open_audio_srt_tool_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn open_speech_analysis_tool_window(app: AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    window::await_on_main_thread(&app, move || window::show_speech_analysis_tool_window(&handle))
+        .await?
+}
+
+#[tauri::command]
+async fn analyze_speech_analysis_file(
+    app: tauri::AppHandle,
+    path: String,
+    options: Option<tools::SpeechAnalysisOptions>,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+) -> Result<tools::SpeechAnalysisReport, String> {
+    tools::analyze_speech_analysis_file(
+        app,
+        Arc::clone(ctx.inner()),
+        path,
+        options.unwrap_or_default(),
+    )
+    .await
+}
+
+#[tauri::command]
+fn list_speech_analysis_models(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    lang: Option<String>,
+) -> Result<Vec<tools::SpeechModelStatusDto>, String> {
+    tools::list_speech_analysis_models(ctx, lang)
+}
+
+#[tauri::command]
+fn speech_analysis_resolve_plan(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    lang: Option<String>,
+    options: Option<tools::SpeechAnalysisOptions>,
+) -> Result<tools::SpeechAnalysisPlan, String> {
+    tools::speech_analysis_resolve_plan(ctx, lang, options)
+}
+
+#[tauri::command]
+async fn speech_analysis_ensure_models(
+    app: tauri::AppHandle,
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    plan: tools::SpeechAnalysisPlan,
+    path_key: String,
+) -> Result<(), String> {
+    tools::speech_analysis_ensure_models(app, ctx, plan, path_key).await
+}
+
+#[tauri::command]
+fn speech_analysis_load_disk_cache(
+    ctx: tauri::State<'_, Arc<AppContext>>,
+    path_key: String,
+) -> Result<Option<tools::SpeechAnalysisReport>, String> {
+    tools::speech_analysis_load_disk_cache(ctx, path_key)
+}
+
+#[tauri::command]
+fn list_speech_analysis_speaker_profiles() -> Vec<tools::SpeakerProfileSummary> {
+    tools::list_speech_analysis_speaker_profiles()
+}
+
+#[tauri::command]
+fn create_speech_analysis_speaker_profile(
+    label: String,
+) -> Result<tools::SpeakerProfileSummary, String> {
+    tools::create_speech_analysis_speaker_profile(label)
+}
+
+#[tauri::command]
+fn list_speech_analysis_tongue_twisters() -> Vec<tools::TongueTwisterPreset> {
+    tools::list_speech_analysis_tongue_twisters()
+}
+
+#[tauri::command]
+fn pick_speech_analysis_save_path(
+    default_name: String,
+    extension: String,
+) -> Result<Option<String>, String> {
+    Ok(tools::pick_export_path(&default_name, &extension)?
+        .map(|path| path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn export_speech_analysis_report(
+    path: String,
+    report: tools::SpeechAnalysisReport,
+    format: String,
+) -> Result<(), String> {
+    let path_buf = std::path::PathBuf::from(path);
+    match format.as_str() {
+        "md" => tools::export_markdown(&path_buf, &report),
+        other => Err(format!("unsupported export format: {other}")),
+    }
+}
+
+#[tauri::command]
 fn pick_voice_files() -> Result<Vec<String>, String> {
     Ok(rfd::FileDialog::new()
         .add_filter(
@@ -1769,6 +1897,14 @@ fn enqueue_voice_file(
         stt_language_override,
     };
     tools::voice_watch::enqueue_paths(&app, Arc::clone(ctx.inner()), paths, meta)
+}
+
+#[tauri::command]
+fn register_voice_index_paths(
+    app: AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<tools::voice_watch::HistoryEntry>, String> {
+    tools::voice_watch::register_index_paths(&app, paths)
 }
 
 #[tauri::command]
@@ -2355,10 +2491,22 @@ pub fn run() {
             get_dictation_transcript,
             remove_dictation_transcript,
             open_audio_srt_tool_window,
+            open_speech_analysis_tool_window,
             open_vocal_separator_tool_window,
+            analyze_speech_analysis_file,
+            list_speech_analysis_models,
+            speech_analysis_resolve_plan,
+            speech_analysis_ensure_models,
+            speech_analysis_load_disk_cache,
+            list_speech_analysis_speaker_profiles,
+            create_speech_analysis_speaker_profile,
+            list_speech_analysis_tongue_twisters,
+            pick_speech_analysis_save_path,
+            export_speech_analysis_report,
             pick_voice_files,
             transcribe_voice_file,
             enqueue_voice_file,
+            register_voice_index_paths,
             get_voice_queue,
             list_voice_history,
             clear_voice_history,
@@ -2520,6 +2668,7 @@ pub fn run() {
                         || window.label() == window::TOOL_DICTATION_TRANSCRIPTS_WINDOW_LABEL
                         || window.label() == window::TOOL_AUDIO_SRT_WINDOW_LABEL
                         || window.label() == window::TOOL_VOCAL_SEPARATOR_WINDOW_LABEL
+                        || window.label() == window::TOOL_SPEECH_ANALYSIS_WINDOW_LABEL
                         || window.label() == window::TOOLS_WINDOW_LABEL
                     {
                         // Tool windows are ephemeral — allow the native close button to dismiss them.

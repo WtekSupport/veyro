@@ -24,7 +24,9 @@ impl TranscriptionError {
     pub fn user_message(&self, locale: UiLocale) -> String {
         match self {
             Self::OpenAi(error) => error.user_message(locale),
-            Self::Cancelled => crate::i18n::translate(locale, "openai.cancelled", &[]),
+            Self::Cancelled => {
+                crate::i18n::translate(locale, "transcription.cancelled", &[])
+            }
             Self::InvalidAudio(detail) => {
                 crate::i18n::translate(locale, "openai.invalid_audio", &[("detail", detail)])
             }

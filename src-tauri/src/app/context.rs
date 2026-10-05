@@ -25,6 +25,7 @@ use crate::llm::LlmEngine;
 use crate::llm::model_store::needs_local_llm;
 use crate::settings::{has_api_key, AppSettings};
 use crate::transcription::{create_transcriber, TranscriptionProvider};
+use crate::speech_analysis_models::SpeechAnalysisModelSession;
 
 pub struct AppContext {
     pub controller: SharedController,
@@ -44,6 +45,7 @@ pub struct AppContext {
     pub ptt_postprocess: PttPostprocessSession,
     pub dictation_session: Arc<DictationSession>,
     pub focus_defer_buffer: FocusDeferBuffer,
+    pub speech_analysis_models: Arc<SpeechAnalysisModelSession>,
 }
 
 impl AppContext {
@@ -93,6 +95,7 @@ impl AppContext {
             ptt_postprocess: PttPostprocessSession::new(),
             dictation_session,
             focus_defer_buffer: FocusDeferBuffer::new(),
+            speech_analysis_models: Arc::new(SpeechAnalysisModelSession::default()),
         }
     }
 

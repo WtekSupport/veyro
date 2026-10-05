@@ -4,8 +4,9 @@ import {
   openDictationTranscriptsToolWindowAndWaitReady,
   openVocalSeparatorToolWindowAndWaitReady,
   openVoiceFilesToolWindowAndWaitReady,
+  openSpeechAnalysisToolWindowAndWaitReady,
 } from "../api";
-import { escapeHtml } from "../lib/tool-file-queue";
+import { escapeHtml } from "../lib/html";
 import { iconTools } from "./icons";
 import { t } from "../i18n";
 
@@ -13,6 +14,7 @@ function renderToolsCards(
   voiceFilesOpening: boolean,
   dictationBuffersOpening: boolean,
   audioSrtOpening: boolean,
+  speechAnalysisOpening: boolean,
   vocalSepOpening: boolean,
   showVocalSep: boolean,
 ): string {
@@ -33,6 +35,23 @@ function renderToolsCards(
           }
           <span class="tools-card-title">${escapeHtml(t("tools.voiceFiles.title"))}</span>
           <span class="tools-card-desc">${escapeHtml(t("tools.voiceFiles.description"))}</span>
+        </button>
+      </li>
+      <li>
+        <button
+          type="button"
+          class="tools-card${speechAnalysisOpening ? " tools-card--loading" : ""}"
+          data-open-speech-analysis-tool
+          ${speechAnalysisOpening ? "disabled" : ""}
+          aria-busy="${speechAnalysisOpening ? "true" : "false"}"
+        >
+          ${
+            speechAnalysisOpening
+              ? `<span class="tools-card-loading-badge">${escapeHtml(t("tools.speechAnalysis.windowLoading"))}</span>`
+              : ""
+          }
+          <span class="tools-card-title">${escapeHtml(t("tools.speechAnalysis.title"))}</span>
+          <span class="tools-card-desc">${escapeHtml(t("tools.speechAnalysis.description"))}</span>
         </button>
       </li>
       <li>
@@ -101,6 +120,7 @@ export function renderToolsPanelEmbedded(
   voiceFilesOpening = false,
   dictationBuffersOpening = false,
   audioSrtOpening = false,
+  speechAnalysisOpening = false,
   vocalSepOpening = false,
   showVocalSep = false,
 ): string {
@@ -119,7 +139,7 @@ export function renderToolsPanelEmbedded(
         >×</button>
       </header>
       <div class="status-quick-settings-body tools-in-main-body" data-tools-cards-host>
-        ${renderToolsCards(voiceFilesOpening, dictationBuffersOpening, audioSrtOpening, vocalSepOpening, showVocalSep)}
+        ${renderToolsCards(voiceFilesOpening, dictationBuffersOpening, audioSrtOpening, speechAnalysisOpening, vocalSepOpening, showVocalSep)}
       </div>
     </div>
   `;
@@ -144,6 +164,7 @@ export function renderToolsList(
   voiceFilesOpening = false,
   dictationBuffersOpening = false,
   audioSrtOpening = false,
+  speechAnalysisOpening = false,
   vocalSepOpening = false,
   showVocalSep = false,
 ): string {
@@ -151,6 +172,7 @@ export function renderToolsList(
     voiceFilesOpening,
     dictationBuffersOpening,
     audioSrtOpening,
+    speechAnalysisOpening,
     vocalSepOpening,
     showVocalSep,
   );
@@ -163,6 +185,7 @@ function refreshToolsCards(host: HTMLElement): void {
     flags.voice,
     flags.dictation,
     flags.srt,
+    flags.speechAnalysis,
     flags.vocalSep,
     showVocalSep,
   );
@@ -170,6 +193,7 @@ function refreshToolsCards(host: HTMLElement): void {
   bindVoiceFilesOpen(panel);
   bindDictationTranscriptsOpen(panel);
   bindAudioSrtOpen(panel);
+  bindSpeechAnalysisOpen(panel);
   bindVocalSepOpen(panel);
 }
 
@@ -177,12 +201,14 @@ function readOpeningFlags(host: HTMLElement): {
   voice: boolean;
   dictation: boolean;
   srt: boolean;
+  speechAnalysis: boolean;
   vocalSep: boolean;
 } {
   return {
     voice: host.dataset.voiceFilesOpening === "true",
     dictation: host.dataset.dictationTranscriptsOpening === "true",
     srt: host.dataset.audioSrtOpening === "true",
+    speechAnalysis: host.dataset.speechAnalysisOpening === "true",
     vocalSep: host.dataset.vocalSepOpening === "true",
   };
 }
@@ -260,6 +286,35 @@ function bindAudioSrtOpen(root: ParentNode): void {
     });
 }
 
+function bindSpeechAnalysisOpen(root: ParentNode): void {
+  root
+    .querySelector<HTMLButtonElement>("[data-open-speech-analysis-tool]")
+    ?.addEventListener("click", () => {
+      void openSpeechAnalysisFromCard(root);
+    });
+}
+
+async function openSpeechAnalysisFromCard(root: ParentNode): Promise<void> {
+  const panel = toolsPanelFromRoot(root);
+  const host = panel.querySelector<HTMLElement>("[data-tools-cards-host]");
+  if (!host) {
+    return;
+  }
+  if (host.dataset.speechAnalysisOpening === "true") {
+    return;
+  }
+  host.dataset.speechAnalysisOpening = "true";
+  refreshToolsCards(host);
+  try {
+    await openSpeechAnalysisToolWindowAndWaitReady();
+  } catch (error) {
+    console.error("open speech analysis tool", error);
+  } finally {
+    host.dataset.speechAnalysisOpening = "false";
+    refreshToolsCards(host);
+  }
+}
+
 async function openAudioSrtFromCard(root: ParentNode): Promise<void> {
   const panel = toolsPanelFromRoot(root);
   const host = panel.querySelector<HTMLElement>("[data-tools-cards-host]");
@@ -327,5 +382,6 @@ export function bindToolsList(root: ParentNode): void {
   bindVoiceFilesOpen(root);
   bindDictationTranscriptsOpen(root);
   bindAudioSrtOpen(root);
+  bindSpeechAnalysisOpen(root);
   bindVocalSepOpen(root);
 }

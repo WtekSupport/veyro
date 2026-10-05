@@ -10,6 +10,7 @@ pub mod language;
 pub mod whisper_auto_lang;
 pub mod languages;
 pub mod model_store;
+pub mod offline_decode;
 #[cfg(feature = "local-sherpa-stt")]
 pub mod sherpa;
 pub mod models;

@@ -628,6 +628,7 @@ async fn process_one_segment(
         return;
     }
     segment = preprocessed.segment;
+    crate::tools::dictation_session_audio::append_session_segment(session_id, &segment);
 
     let dictionary = crate::text::dictionary::load_dictionary_for_settings(&settings)
         .unwrap_or_default();
@@ -1123,6 +1124,9 @@ pub(crate) fn schedule_ptt_postprocess_finish(app: AppHandle, ctx: Arc<AppContex
             &http,
         )
         .await;
+        if let Some(ctx) = app.try_state::<Arc<AppContext>>() {
+            ctx.maybe_stop_focus_watch(&app);
+        }
     });
 }
 
@@ -1274,6 +1278,12 @@ async fn try_finish_ptt_postprocess(
             let _ = with_controller(controller, app, |controller, handle| {
                 controller.recover_to_ready(handle)
             });
+            crate::tools::dictation_transcripts::complete_session(
+                Some(app),
+                ctx.dictation_session.current_id(),
+                None,
+            );
+            ctx.maybe_stop_focus_watch(app);
             return;
         }
     };
@@ -1389,9 +1399,17 @@ async fn try_finish_ptt_postprocess(
     );
     emit_injection_completed(app);
 
+    let session_id = ctx.dictation_session.current_id();
+    crate::tools::dictation_transcripts::complete_session(
+        Some(app),
+        session_id,
+        Some(&final_text),
+    );
+
     let _ = with_controller(controller, app, |controller, handle| {
         controller.recover_to_ready(handle)
     });
+    ctx.maybe_stop_focus_watch(app);
 }
 
 struct PttFinishGuard<'a>(&'a crate::app::ptt_postprocess::PttPostprocessSession);

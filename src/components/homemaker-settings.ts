@@ -27,6 +27,7 @@ import { renderHomemakerSileroDownloads } from "./homemaker-silero-ui";
 import { iconPlus } from "./icons";
 import { renderWeakPcHomemakerSwitch } from "./settings";
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 
 
 
@@ -61,20 +62,6 @@ export function effectiveDataStorage(settings: AppSettings): HomemakerDataStorag
 }
 
 
-
-function escapeHtml(value: string): string {
-
-  return value
-
-    .replaceAll("&", "&amp;")
-
-    .replaceAll("<", "&lt;")
-
-    .replaceAll(">", "&gt;")
-
-    .replaceAll('"', "&quot;");
-
-}
 
 function resolveHomemakerSkillDisplay(
   settings: AppSettings,

@@ -31,6 +31,7 @@ skill-import.html export-ignore
 tool-audio-srt.html export-ignore
 tool-vocal-separator.html export-ignore
 tool-voice-files.html export-ignore
+tool-speech-analysis.html export-ignore
 tools.html export-ignore
 crates export-ignore
 tsconfig.json export-ignore

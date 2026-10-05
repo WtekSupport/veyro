@@ -48,7 +48,9 @@ export function formatToolErrorForResultField(
 ): string {
   const { key, technical } = parseToolErrorRaw(raw);
   const messageKey = key ?? defaultFailedKey;
-  const lines: string[] = [t(messageKey)];
+  const lines: string[] = [
+    t(messageKey),
+  ];
 
   const detailKey = detailKeyFor(messageKey);
   if (hasMessageKey(detailKey)) {

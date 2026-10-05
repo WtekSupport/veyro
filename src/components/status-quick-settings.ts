@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { escapeHtml } from "../lib/html";
 import { iconSettings } from "./icons";
 import { syncStatusOverlayPopoverPosition } from "./status-overlay-layout";
 
@@ -102,12 +103,4 @@ function bindQuickSettingsEscapeListener(): void {
     }
     setStatusQuickSettingsOpen(false);
   });
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

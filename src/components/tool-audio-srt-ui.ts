@@ -9,10 +9,13 @@ import {
   pickVoiceFiles,
   saveSubtitleFile,
   transcribeAudioToSrt,
+  type AudioSrtCueWord,
   type AudioSrtOptions,
   type AudioSrtProgressPayload,
   type AudioSrtProgressPhase,
   type AudioSrtSpeakerCountMode,
+  type DiarizationModelDownloadProgress,
+  type DiarizationQuality,
   type AudioSrtSpeakerInfo,
   type AudioSrtTranscriptionResult,
   type SubtitleSttCapability,
@@ -26,11 +29,17 @@ import { showConfirmDialog } from "./confirm-dialog";
 import { iconCopy } from "./icons";
 import { ToolDecodeProgressSmoother } from "../lib/tool-decode-progress";
 import {
+  modelDownloadProgressPercent,
+  patchModelDownloadProgressDom,
+  renderModelDownloadProgressBlock,
+} from "../lib/model-download-progress";
+import {
   formatToolErrorForResultField,
   toolErrorMessageKey,
 } from "../lib/tool-error-display";
 import { runToolWithSttLanguageRecovery } from "../lib/tool-stt-auto-recovery";
 import { t, type MessageKey } from "../i18n";
+import { escapeHtml } from "../lib/html";
 
 export type AudioSrtJobStatus = "pending" | "processing" | "done" | "error";
 
@@ -50,6 +59,8 @@ export interface AudioSrtJob {
   aiRewriteApplied: boolean;
   speakers: AudioSrtSpeakerInfo[];
   cueSpeakerIds: Array<number | null>;
+  wordTimingsAvailable: boolean;
+  cueWords: AudioSrtCueWord[][];
 }
 
 export interface AudioSrtUiOptions {
@@ -65,6 +76,7 @@ export interface AudioSrtUiOptions {
   readingTailMs: number;
   advancedOpen: boolean;
   speakerDiarization: boolean;
+  diarizationQuality: DiarizationQuality;
   speakerCountMode: AudioSrtSpeakerCountMode;
   speakerExactCount: number;
   speakerMinCount: number;
@@ -73,6 +85,14 @@ export interface AudioSrtUiOptions {
   diarizationMinSpeechSecs: number;
   diarizationSensitivity: number;
   diarizationExpertOpen: boolean;
+  karaokeWordHighlight: boolean;
+  /** Saved advanced options while karaoke is on (restored when karaoke is turned off). */
+  karaokeHiddenStash: KaraokeHiddenOptionsStash | null;
+}
+
+interface KaraokeHiddenOptionsStash {
+  useDictationTextSettings: boolean;
+  smartSplit: boolean;
 }
 
 const DEFAULT_UI_OPTIONS: AudioSrtUiOptions = {
@@ -88,6 +108,7 @@ const DEFAULT_UI_OPTIONS: AudioSrtUiOptions = {
   readingTailMs: 200,
   advancedOpen: false,
   speakerDiarization: false,
+  diarizationQuality: "fast",
   speakerCountMode: "auto",
   speakerExactCount: 2,
   speakerMinCount: 1,
@@ -96,14 +117,42 @@ const DEFAULT_UI_OPTIONS: AudioSrtUiOptions = {
   diarizationMinSpeechSecs: 0.25,
   diarizationSensitivity: 0.45,
   diarizationExpertOpen: false,
+  karaokeWordHighlight: false,
+  karaokeHiddenStash: null,
 };
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+function enforceKaraokeCompatibleValues(options: AudioSrtUiOptions): void {
+  if (!options.karaokeWordHighlight) {
+    return;
+  }
+  options.useDictationTextSettings = false;
+  options.smartSplit = true;
+}
+
+function applyKaraokeToggle(options: AudioSrtUiOptions, wasOn: boolean, nowOn: boolean): void {
+  if (nowOn && !wasOn) {
+    options.karaokeHiddenStash = {
+      useDictationTextSettings: options.useDictationTextSettings,
+      smartSplit: options.smartSplit,
+    };
+    options.karaokeWordHighlight = true;
+    enforceKaraokeCompatibleValues(options);
+    return;
+  }
+  if (!nowOn && wasOn) {
+    options.karaokeWordHighlight = false;
+    if (options.karaokeHiddenStash) {
+      options.useDictationTextSettings =
+        options.karaokeHiddenStash.useDictationTextSettings;
+      options.smartSplit = options.karaokeHiddenStash.smartSplit;
+      options.karaokeHiddenStash = null;
+    }
+    return;
+  }
+  options.karaokeWordHighlight = nowOn;
+  if (nowOn) {
+    enforceKaraokeCompatibleValues(options);
+  }
 }
 
 function escapeRegExp(value: string): string {
@@ -226,9 +275,18 @@ function statusLabel(job: AudioSrtJob, visiblePercent: number | null): string {
   }
 }
 
-function resultFootnote(job: AudioSrtJob | null | undefined): string {
+function resultFootnote(
+  job: AudioSrtJob | null | undefined,
+  karaokeRequested: boolean,
+): string {
   if (!job || job.status !== "done") {
     return "";
+  }
+  if (karaokeRequested && !job.wordTimingsAvailable) {
+    if (job.aiRewriteApplied) {
+      return t("tools.audioSrt.karaokeUnavailableAi");
+    }
+    return t("tools.audioSrt.karaokeUnavailable");
   }
   if (job.rewriteFallback) {
     return t("tools.audioSrt.rewriteFallback");
@@ -304,6 +362,56 @@ const SRT_ADVANCED_LIMITS = {
   maxLineLength: { min: 20, max: 60, step: 1 },
   globalOffsetMs: { min: -3000, max: 3000, step: 50 },
 } as const;
+
+interface DiarizationModelUiState {
+  fastReady: boolean;
+  accurateReady: boolean;
+  speakrsAvailable: boolean;
+  needPolyvoiceDownload: boolean;
+  needSpeakrsDownload: boolean;
+  accurateSizeMb: number;
+  fastSizeMb: number;
+  downloading: boolean;
+  downloadProgress: DiarizationModelDownloadProgress | null;
+  downloadError: string | null;
+}
+
+function diarizationDownloadTier(
+  options: AudioSrtUiOptions,
+  model: DiarizationModelUiState,
+): DiarizationQuality {
+  if (options.diarizationQuality === "accurate" && model.speakrsAvailable) {
+    return "accurate";
+  }
+  return "fast";
+}
+
+function needsDiarizationModelDownload(
+  options: AudioSrtUiOptions,
+  model: DiarizationModelUiState,
+): boolean {
+  if (!options.speakerDiarization) {
+    return false;
+  }
+  if (options.diarizationQuality === "accurate") {
+    if (model.speakrsAvailable) {
+      return model.needSpeakrsDownload;
+    }
+    return model.needPolyvoiceDownload;
+  }
+  return model.needPolyvoiceDownload;
+}
+
+function showSpeakrsBuildHint(
+  options: AudioSrtUiOptions,
+  model: DiarizationModelUiState,
+): boolean {
+  return (
+    options.speakerDiarization &&
+    options.diarizationQuality === "accurate" &&
+    !model.speakrsAvailable
+  );
+}
 
 const DIARIZATION_LIMITS = {
   speakerCount: { min: 1, max: 20 },
@@ -460,6 +568,8 @@ function syncSrtSliderLabels(root: HTMLElement): void {
 function renderDiarizationOptions(
   options: AudioSrtUiOptions,
   diarizationAvailable: boolean | null,
+  diarizationModel: DiarizationModelUiState,
+  providerBlocked: boolean,
 ): string {
   const unavailable = diarizationAvailable === false;
   const enabled = options.speakerDiarization && !unavailable;
@@ -486,9 +596,72 @@ function renderDiarizationOptions(
       `
         : "";
 
+  const qualityHintKey = diarizationModel.speakrsAvailable
+    ? "tools.audioSrt.hint.diarizationQualitySpeakrs"
+    : "tools.audioSrt.hint.diarizationQuality";
+
+  const showDownload = needsDiarizationModelDownload(options, diarizationModel);
+  const showSpeakrsHint = showSpeakrsBuildHint(options, diarizationModel);
+  const downloadTier = diarizationDownloadTier(options, diarizationModel);
+  const downloadSizeMb =
+    downloadTier === "accurate"
+      ? diarizationModel.accurateSizeMb
+      : diarizationModel.fastSizeMb;
+  const speakrsBuildHint = showSpeakrsHint
+    ? `<p class="voice-files-fallback-hint" role="status">${escapeHtml(t("tools.audioSrt.diarizationSpeakrsNotInBuild"))}</p>`
+    : "";
+  const downloadProgressBlock =
+    diarizationModel.downloading && diarizationModel.downloadProgress
+      ? renderModelDownloadProgressBlock(
+          diarizationModel.downloadProgress,
+          modelDownloadProgressPercent(diarizationModel.downloadProgress),
+          'data-diarization-model-download="active"',
+        )
+      : diarizationModel.downloading
+        ? renderModelDownloadProgressBlock(
+            { downloaded: 0, total: null, percent: null },
+            null,
+            'data-diarization-model-download="active"',
+          )
+        : "";
+  const downloadBlock = showDownload
+    ? `
+        <div class="audio-srt-diarization-model-actions">
+          <button
+            type="button"
+            class="btn btn-secondary btn-compact"
+            data-download-diarization-model
+            ${diarizationModel.downloading ? "disabled" : ""}
+          >
+            ${escapeHtml(t("tools.audioSrt.diarizationDownload"))} (~${downloadSizeMb} ${escapeHtml(t("tools.audioSrt.diarizationDownloadSizeUnit"))})
+          </button>
+          ${
+            diarizationModel.downloading
+              ? downloadProgressBlock
+              : diarizationModel.downloadError
+                ? `<p class="voice-files-stage-hint" role="alert">${escapeHtml(diarizationModel.downloadError)}</p>`
+                : `<p class="voice-files-stage-hint" role="status">${escapeHtml(
+                    downloadTier === "accurate" && diarizationModel.speakrsAvailable
+                      ? t("tools.audioSrt.diarizationDownloadHintAccurate")
+                      : t("tools.audioSrt.diarizationDownloadHintFast"),
+                  )}</p>`
+          }
+        </div>
+      `
+    : "";
+
   const body = enabled
     ? `
       <div class="audio-srt-diarization-body">
+        <label class="field-compact">
+          ${renderFieldTitle("tools.audioSrt.diarizationQuality", qualityHintKey)}
+          <select data-opt-diarization-quality>
+            <option value="fast"${options.diarizationQuality === "fast" ? " selected" : ""}>${escapeHtml(t("tools.audioSrt.diarizationQualityFast"))}</option>
+            <option value="accurate"${options.diarizationQuality === "accurate" ? " selected" : ""}>${escapeHtml(t("tools.audioSrt.diarizationQualityAccurate"))}</option>
+          </select>
+        </label>
+        ${speakrsBuildHint}
+        ${downloadBlock}
         <label class="field-compact">
           ${renderFieldTitle("tools.audioSrt.speakerCountMode", "tools.audioSrt.hint.speakerCountMode")}
           <select data-opt-speaker-count-mode>
@@ -545,6 +718,18 @@ function renderDiarizationOptions(
           ? `<p class="voice-files-stage-hint" role="status">${escapeHtml(t("tools.audioSrt.diarizationUnavailable"))}</p>`
           : ""
       }
+      <label class="field-compact field-compact--checkbox${providerBlocked ? " field-compact--disabled" : ""}">
+        <input
+          type="checkbox"
+          data-opt-karaoke
+          ${options.karaokeWordHighlight ? "checked" : ""}
+          ${providerBlocked ? "disabled" : ""}
+        />
+        ${renderFieldTitle(
+          "tools.audioSrt.karaokeWordHighlight",
+          "tools.audioSrt.hint.karaokeWordHighlight",
+        )}
+      </label>
       ${body}
     </section>
   `;
@@ -601,6 +786,7 @@ function renderSpeakersPanel(job: AudioSrtJob | null | undefined): string {
 }
 
 function renderAdvancedOptions(options: AudioSrtUiOptions): string {
+  const karaokeActive = options.karaokeWordHighlight;
   const pauseSplitField = options.smartSplit
     ? ""
     : renderAdvancedSlider(
@@ -617,10 +803,16 @@ function renderAdvancedOptions(options: AudioSrtUiOptions): string {
     <details class="audio-srt-advanced"${options.advancedOpen ? " open" : ""} data-audio-srt-advanced>
       <summary>${escapeHtml(t("tools.audioSrt.advanced"))}</summary>
       <div class="audio-srt-advanced-body">
+        ${
+          karaokeActive
+            ? ""
+            : `
         <label class="field-compact field-compact--checkbox">
           <input type="checkbox" data-opt-smart-split ${options.smartSplit ? "checked" : ""} />
           ${renderFieldTitle("tools.audioSrt.smartSplit", "tools.audioSrt.hint.smartSplit")}
         </label>
+        `
+        }
         ${pauseSplitField}
         ${renderAdvancedSlider(
           "readingTail",
@@ -678,6 +870,10 @@ function renderAdvancedOptions(options: AudioSrtUiOptions): string {
           <input type="checkbox" data-opt-bom ${options.utf8Bom ? "checked" : ""} />
           ${renderFieldTitle("tools.audioSrt.utf8Bom", "tools.audioSrt.hint.utf8Bom")}
         </label>
+        ${
+          karaokeActive
+            ? ""
+            : `
         <label class="field-compact field-compact--checkbox">
           <input type="checkbox" data-opt-dictation ${options.useDictationTextSettings ? "checked" : ""} />
           ${renderFieldTitle(
@@ -685,6 +881,8 @@ function renderAdvancedOptions(options: AudioSrtUiOptions): string {
             "tools.audioSrt.hint.useDictationTextSettings",
           )}
         </label>
+        `
+        }
       </div>
     </details>
   `;
@@ -700,6 +898,7 @@ export function renderAudioSrtTool(
   visibleProgressPercent: number | null = null,
   statusHint: string | null = null,
   diarizationAvailable: boolean | null = null,
+  diarizationModel: DiarizationModelUiState,
 ): string {
   const selected =
     jobs.find((job) => job.id === selectedId) ??
@@ -733,9 +932,7 @@ export function renderAudioSrtTool(
   const showPreview = selected?.status === "done" && Boolean(selected.path);
   const copyTitle = copyHint ?? t("tools.audioSrt.copy");
   const saveAsTitle = saveHint ?? t("tools.audioSrt.saveAs");
-  const saveSrtTitle = t("tools.audioSrt.save");
-  const saveVttTitle = t("tools.audioSrt.saveVtt");
-  const footnote = resultFootnote(selected);
+  const footnote = resultFootnote(selected, uiOptions.karaokeWordHighlight);
   const footnoteClass = selected?.rewriteFallback
     ? "voice-files-fallback-hint"
     : "voice-files-stage-hint";
@@ -762,7 +959,7 @@ export function renderAudioSrtTool(
         ${renderQueueCompact(jobs, selectedId, visibleProgressPercent)}
       </div>
 
-      ${renderDiarizationOptions(uiOptions, diarizationAvailable)}
+      ${renderDiarizationOptions(uiOptions, diarizationAvailable, diarizationModel, providerBlocked)}
       ${renderAdvancedOptions(uiOptions)}
 
       ${
@@ -789,12 +986,6 @@ export function renderAudioSrtTool(
       }
 
       <div class="audio-srt-actions">
-        <button type="button" class="btn btn-secondary btn-compact" data-save-srt ${canExport ? "" : "disabled"}>
-          ${escapeHtml(saveSrtTitle)}
-        </button>
-        <button type="button" class="btn btn-secondary btn-compact" data-save-vtt ${canExport ? "" : "disabled"}>
-          ${escapeHtml(saveVttTitle)}
-        </button>
         <button type="button" class="btn btn-secondary btn-compact" data-save-srt-as ${canExport ? "" : "disabled"}>
           ${escapeHtml(saveAsTitle)}
         </button>
@@ -834,6 +1025,7 @@ function nextJobId(): string {
 }
 
 function buildApiOptions(ui: AudioSrtUiOptions): AudioSrtOptions {
+  enforceKaraokeCompatibleValues(ui);
   const base: AudioSrtOptions = {
     maxLineLength: ui.maxLineLength,
     maxLinesPerCue: ui.maxLinesPerCue,
@@ -846,6 +1038,7 @@ function buildApiOptions(ui: AudioSrtUiOptions): AudioSrtOptions {
     minCueDurationMs: ui.minCueDurationMs,
     readingTailMs: ui.readingTailMs,
     speakerDiarization: ui.speakerDiarization,
+    karaokeWordHighlight: ui.karaokeWordHighlight,
   };
   if (!ui.speakerDiarization) {
     return base;
@@ -857,6 +1050,7 @@ function buildApiOptions(ui: AudioSrtUiOptions): AudioSrtOptions {
     speakerMinCount: ui.speakerMinCount,
     speakerMaxCount: ui.speakerMaxCount,
     includeSpeakerNames: ui.includeSpeakerNames,
+    diarizationQuality: ui.diarizationQuality,
     diarizationMinSpeechSecs: ui.diarizationMinSpeechSecs,
     diarizationSensitivity: ui.diarizationSensitivity,
   };
@@ -876,7 +1070,53 @@ export function createAudioSrtController(root: HTMLElement): {
   let capability: SubtitleSttCapability = "supported";
   /** null = still probing backend feature flag */
   let diarizationAvailable: boolean | null = null;
+  let diarizationModel: DiarizationModelUiState = {
+    fastReady: false,
+    accurateReady: false,
+    speakrsAvailable: false,
+    needPolyvoiceDownload: true,
+    needSpeakrsDownload: true,
+    accurateSizeMb: 60,
+    fastSizeMb: 12,
+    downloading: false,
+    downloadProgress: null,
+    downloadError: null,
+  };
   let uiOptions: AudioSrtUiOptions = { ...DEFAULT_UI_OPTIONS };
+  let diarizationDownloadUnlisten: UnlistenFn | null = null;
+
+  const applyDiarizationStatus = (
+    status: Awaited<ReturnType<typeof getDiarizationModelStatus>>,
+  ): void => {
+    diarizationAvailable = status.available;
+    diarizationModel = {
+      ...diarizationModel,
+      fastReady: status.fastReady,
+      accurateReady: status.accurateReady,
+      speakrsAvailable: status.speakrsAvailable,
+      needPolyvoiceDownload:
+        status.needPolyvoiceDownload ?? !status.fastReady,
+      needSpeakrsDownload:
+        status.needSpeakrsDownload ??
+        (status.speakrsAvailable ? !status.accurateReady : false),
+      accurateSizeMb: status.accurateSizeMb || status.sizeMb || 12,
+      fastSizeMb: status.sizeMb || 12,
+      downloadError: status.accurateReady ? null : diarizationModel.downloadError,
+    };
+  };
+
+  const refreshDiarizationModelStatus = async (): Promise<void> => {
+    try {
+      const status = await getDiarizationModelStatus();
+      applyDiarizationStatus(status);
+      if (!status.available) {
+        uiOptions.speakerDiarization = false;
+      }
+    } catch {
+      diarizationAvailable = false;
+      uiOptions.speakerDiarization = false;
+    }
+  };
   const preview = createAudioSrtPreview();
   const decodeProgress = new ToolDecodeProgressSmoother();
 
@@ -904,6 +1144,17 @@ export function createAudioSrtController(root: HTMLElement): {
       visible: Boolean(selected?.status === "done" && selected.path),
       speakers: selected?.status === "done" ? selected.speakers : [],
       cueSpeakerIds: selected?.status === "done" ? selected.cueSpeakerIds : [],
+      cueWords:
+        selected?.status === "done" &&
+        uiOptions.karaokeWordHighlight &&
+        selected.wordTimingsAvailable
+          ? selected.cueWords
+          : [],
+      karaokeHighlight: Boolean(
+        uiOptions.karaokeWordHighlight &&
+          selected?.status === "done" &&
+          selected.wordTimingsAvailable,
+      ),
       onSpeakerBadgeClick: (speakerId) => {
         const input = root.querySelector<HTMLInputElement>(
           `[data-speaker-label="${speakerId}"]`,
@@ -923,22 +1174,7 @@ export function createAudioSrtController(root: HTMLElement): {
       capability = "supported";
     });
 
-  void getDiarizationModelStatus()
-    .then((status) => {
-      diarizationAvailable = status.available;
-      if (!status.available) {
-        uiOptions.speakerDiarization = false;
-        if (statusHint === t("tools.audioSrt.diarizationUnavailable")) {
-          statusHint = null;
-        }
-      }
-      paint();
-    })
-    .catch(() => {
-      diarizationAvailable = false;
-      uiOptions.speakerDiarization = false;
-      paint();
-    });
+  void refreshDiarizationModelStatus().then(() => paint());
 
   const readUiOptionsFromDom = (): void => {
     const maxLine = root.querySelector<HTMLInputElement>("[data-opt-max-line]");
@@ -946,6 +1182,7 @@ export function createAudioSrtController(root: HTMLElement): {
     const offset = root.querySelector<HTMLInputElement>("[data-opt-offset]");
     const bom = root.querySelector<HTMLInputElement>("[data-opt-bom]");
     const dictation = root.querySelector<HTMLInputElement>("[data-opt-dictation]");
+    const karaoke = root.querySelector<HTMLInputElement>("[data-opt-karaoke]");
     const smartSplit = root.querySelector<HTMLInputElement>("[data-opt-smart-split]");
     const pauseSplit = root.querySelector<HTMLInputElement>("[data-opt-pause-split]");
     const readingTail = root.querySelector<HTMLInputElement>("[data-opt-reading-tail]");
@@ -954,6 +1191,9 @@ export function createAudioSrtController(root: HTMLElement): {
     const advanced = root.querySelector<HTMLDetailsElement>("[data-audio-srt-advanced]");
     const speakerDiarization = root.querySelector<HTMLInputElement>(
       "[data-opt-speaker-diarization]",
+    );
+    const diarizationQuality = root.querySelector<HTMLSelectElement>(
+      "[data-opt-diarization-quality]",
     );
     const speakerCountMode = root.querySelector<HTMLSelectElement>(
       "[data-opt-speaker-count-mode]",
@@ -992,6 +1232,9 @@ export function createAudioSrtController(root: HTMLElement): {
     if (dictation) {
       uiOptions.useDictationTextSettings = dictation.checked;
     }
+    if (karaoke) {
+      uiOptions.karaokeWordHighlight = karaoke.checked;
+    }
     if (smartSplit) {
       uiOptions.smartSplit = smartSplit.checked;
     }
@@ -1024,6 +1267,10 @@ export function createAudioSrtController(root: HTMLElement): {
     }
     if (speakerDiarization) {
       uiOptions.speakerDiarization = speakerDiarization.checked;
+    }
+    if (diarizationQuality) {
+      uiOptions.diarizationQuality =
+        diarizationQuality.value === "accurate" ? "accurate" : "fast";
     }
     if (speakerCountMode) {
       const mode = speakerCountMode.value;
@@ -1141,6 +1388,7 @@ export function createAudioSrtController(root: HTMLElement): {
   };
 
   const paint = (): void => {
+    enforceKaraokeCompatibleValues(uiOptions);
     const selected =
       jobs.find((job) => job.id === selectedId) ??
       (jobs.length > 0 ? jobs[jobs.length - 1] : undefined);
@@ -1158,6 +1406,7 @@ export function createAudioSrtController(root: HTMLElement): {
       visible,
       statusHint,
       diarizationAvailable,
+      diarizationModel,
     );
     bind();
     syncPreview();
@@ -1209,39 +1458,75 @@ export function createAudioSrtController(root: HTMLElement): {
   };
 
   const ensureDiarizationModel = async (): Promise<
-    { ok: true } | { ok: false; reason: "cancelled" | "unavailable" | "download" }
+    | { ok: true }
+    | { ok: false; reason: "cancelled" | "unavailable" | "download" | "missing" }
   > => {
     try {
-      const status = await getDiarizationModelStatus();
-      if (!status.available) {
-        uiOptions.speakerDiarization = false;
-        diarizationAvailable = false;
+      await refreshDiarizationModelStatus();
+      if (!diarizationAvailable) {
         paint();
         return { ok: false, reason: "unavailable" };
       }
-      diarizationAvailable = true;
-      if (status.exists) {
+      if (!needsDiarizationModelDownload(uiOptions, diarizationModel)) {
         return { ok: true };
       }
-      const ok = await showConfirmDialog({
-        message: t("tools.audioSrt.diarizationDownloadConfirm", {
-          size: String(status.sizeMb || 12),
-        }),
-        confirmLabel: t("tools.audioSrt.diarizationDownload"),
-      });
-      if (!ok) {
-        return { ok: false, reason: "cancelled" };
-      }
-      statusHint = t("tools.audioSrt.diarizationDownloading");
       paint();
-      await downloadDiarizationModel();
-      statusHint = null;
-      paint();
-      return { ok: true };
+      return { ok: false, reason: "missing" };
     } catch {
-      statusHint = null;
-      paint();
       return { ok: false, reason: "download" };
+    }
+  };
+
+  const downloadDiarizationModelForUi = async (): Promise<void> => {
+    if (diarizationModel.downloading) {
+      return;
+    }
+    const tier = diarizationDownloadTier(uiOptions, diarizationModel);
+    const sizeMb =
+      tier === "accurate" ? diarizationModel.accurateSizeMb : diarizationModel.fastSizeMb;
+    const confirmKey =
+      tier === "accurate" && diarizationModel.speakrsAvailable
+        ? "tools.audioSrt.diarizationDownloadConfirmAccurate"
+        : "tools.audioSrt.diarizationDownloadConfirm";
+    const ok = await showConfirmDialog({
+      message: t(confirmKey, { size: String(sizeMb) }),
+      confirmLabel: t("tools.audioSrt.diarizationDownload"),
+    });
+    if (!ok) {
+      return;
+    }
+    diarizationModel = {
+      ...diarizationModel,
+      downloading: true,
+      downloadProgress: { quality: tier, downloaded: 0, total: null, percent: null },
+      downloadError: null,
+    };
+    statusHint = null;
+    paint();
+    try {
+      await downloadDiarizationModel(tier);
+      await refreshDiarizationModelStatus();
+      statusHint = null;
+      if (!needsDiarizationModelDownload(uiOptions, diarizationModel)) {
+        diarizationModel = { ...diarizationModel, downloadError: null };
+      }
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      const downloadError = formatToolErrorForResultField(
+        raw,
+        "tools.audioSrt.diarizationDownloadFailed",
+      );
+      diarizationModel = { ...diarizationModel, downloadError };
+      statusHint = t(
+        toolErrorMessageKey(raw, "tools.audioSrt.diarizationDownloadFailed"),
+      );
+    } finally {
+      diarizationModel = {
+        ...diarizationModel,
+        downloading: false,
+        downloadProgress: null,
+      };
+      paint();
     }
   };
 
@@ -1250,16 +1535,16 @@ export function createAudioSrtController(root: HTMLElement): {
       void pickAndEnqueue();
     });
 
+    root
+      .querySelector<HTMLButtonElement>("[data-download-diarization-model]")
+      ?.addEventListener("click", () => {
+        void downloadDiarizationModelForUi();
+      });
+
     root.querySelector<HTMLButtonElement>("[data-copy-srt-result]")?.addEventListener("click", () => {
       void copyResult();
     });
 
-    root.querySelector<HTMLButtonElement>("[data-save-srt]")?.addEventListener("click", () => {
-      void saveResult("srt");
-    });
-    root.querySelector<HTMLButtonElement>("[data-save-vtt]")?.addEventListener("click", () => {
-      void saveResult("vtt");
-    });
     root.querySelector<HTMLButtonElement>("[data-save-srt-as]")?.addEventListener("click", () => {
       void saveResult("auto");
     });
@@ -1280,11 +1565,12 @@ export function createAudioSrtController(root: HTMLElement): {
     });
 
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
-      "[data-opt-max-line], [data-opt-max-lines], [data-opt-offset], [data-opt-bom], [data-opt-dictation], [data-opt-smart-split], [data-opt-pause-split], [data-opt-reading-tail], [data-opt-max-cue-sec], [data-opt-min-cue-sec], [data-opt-speaker-diarization], [data-opt-speaker-count-mode], [data-opt-speaker-exact], [data-opt-speaker-min], [data-opt-speaker-max], [data-opt-include-speaker-names], [data-opt-diar-min-speech], [data-opt-diar-sensitivity]",
+      "[data-opt-max-line], [data-opt-max-lines], [data-opt-offset], [data-opt-bom], [data-opt-dictation], [data-opt-smart-split], [data-opt-pause-split], [data-opt-reading-tail], [data-opt-max-cue-sec], [data-opt-min-cue-sec], [data-opt-speaker-diarization], [data-opt-diarization-quality], [data-opt-speaker-count-mode], [data-opt-speaker-exact], [data-opt-speaker-min], [data-opt-speaker-max], [data-opt-include-speaker-names], [data-opt-diar-min-speech], [data-opt-diar-sensitivity]",
     ).forEach((element) => {
       const onUpdate = (): void => {
         const smartBefore = uiOptions.smartSplit;
         const diarBefore = uiOptions.speakerDiarization;
+        const qualityBefore = uiOptions.diarizationQuality;
         const modeBefore = uiOptions.speakerCountMode;
         readUiOptionsFromDom();
         syncSrtSliderLabels(root);
@@ -1292,6 +1578,8 @@ export function createAudioSrtController(root: HTMLElement): {
           (element.matches("[data-opt-smart-split]") && smartBefore !== uiOptions.smartSplit) ||
           (element.matches("[data-opt-speaker-diarization]") &&
             diarBefore !== uiOptions.speakerDiarization) ||
+          (element.matches("[data-opt-diarization-quality]") &&
+            qualityBefore !== uiOptions.diarizationQuality) ||
           (element.matches("[data-opt-speaker-count-mode]") &&
             modeBefore !== uiOptions.speakerCountMode);
         if (structureChanged) {
@@ -1306,18 +1594,11 @@ export function createAudioSrtController(root: HTMLElement): {
           }
           paint();
           if (
-            element.matches("[data-opt-speaker-diarization]") &&
-            uiOptions.speakerDiarization
+            uiOptions.speakerDiarization &&
+            (element.matches("[data-opt-speaker-diarization]") ||
+              element.matches("[data-opt-diarization-quality]"))
           ) {
-            void ensureDiarizationModel().then((result) => {
-              if (!result.ok && uiOptions.speakerDiarization) {
-                uiOptions.speakerDiarization = false;
-                if (result.reason === "unavailable") {
-                  diarizationAvailable = false;
-                }
-                paint();
-              }
-            });
+            void refreshDiarizationModelStatus().then(() => paint());
           }
         }
       };
@@ -1329,6 +1610,13 @@ export function createAudioSrtController(root: HTMLElement): {
 
     bindFieldHelp(root.querySelector<HTMLElement>(".audio-srt-advanced-body"));
     bindFieldHelp(root.querySelector<HTMLElement>("[data-audio-srt-diarization]"));
+
+    root.querySelector<HTMLInputElement>("[data-opt-karaoke]")?.addEventListener("change", () => {
+      const wasOn = uiOptions.karaokeWordHighlight;
+      readUiOptionsFromDom();
+      applyKaraokeToggle(uiOptions, wasOn, uiOptions.karaokeWordHighlight);
+      paint();
+    });
 
     root.querySelector<HTMLDetailsElement>("[data-audio-srt-advanced]")?.addEventListener("toggle", () => {
       readUiOptionsFromDom();
@@ -1539,6 +1827,8 @@ export function createAudioSrtController(root: HTMLElement): {
         aiRewriteApplied: false,
         speakers: [],
         cueSpeakerIds: [],
+        wordTimingsAvailable: false,
+        cueWords: [],
       });
       if (!selectedId) {
         selectedId = id;
@@ -1563,6 +1853,8 @@ export function createAudioSrtController(root: HTMLElement): {
             fileName: result.fileName || job.fileName,
             speakers: result.speakers ?? [],
             cueSpeakerIds: result.cueSpeakerIds ?? [],
+            wordTimingsAvailable: result.wordTimingsAvailable ?? false,
+            cueWords: result.cueWords ?? [],
           }
         : job,
     );
@@ -1603,6 +1895,12 @@ export function createAudioSrtController(root: HTMLElement): {
           if (!modelResult.ok) {
             if (modelResult.reason === "cancelled") {
               break;
+            }
+            if (modelResult.reason === "missing") {
+              statusHint = t("tools.audioSrt.diarizationModelRequiredDownload");
+              applyError(next.id, "tools.audioSrt.diarizationModelRequired");
+              paint();
+              continue;
             }
             applyError(
               next.id,
@@ -1654,6 +1952,20 @@ export function createAudioSrtController(root: HTMLElement): {
     progressUnlisten = unlisten;
   });
 
+  void listen<DiarizationModelDownloadProgress>(EVENTS.diarizationModelDownloadProgress, (event) => {
+    if (!diarizationModel.downloading) {
+      return;
+    }
+    const tier = diarizationDownloadTier(uiOptions, diarizationModel);
+    if (event.payload.quality !== tier) {
+      return;
+    }
+    diarizationModel = { ...diarizationModel, downloadProgress: event.payload };
+    patchModelDownloadProgressDom(root, event.payload, "[data-diarization-model-download]");
+  }).then((unlisten) => {
+    diarizationDownloadUnlisten = unlisten;
+  });
+
   paint();
 
   return {
@@ -1662,6 +1974,8 @@ export function createAudioSrtController(root: HTMLElement): {
       preview.destroy();
       void progressUnlisten?.();
       progressUnlisten = null;
+      void diarizationDownloadUnlisten?.();
+      diarizationDownloadUnlisten = null;
       decodeProgress.dispose();
     },
   };

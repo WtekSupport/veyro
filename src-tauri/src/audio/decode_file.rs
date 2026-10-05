@@ -23,6 +23,10 @@ fn is_wav_path(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
 }
 
+pub fn resample_audio_for_stt(segment: AudioSegment) -> Result<AudioSegment, String> {
+    resample_to_stt(segment).map_err(|error| error.to_string())
+}
+
 fn resample_to_stt(segment: AudioSegment) -> Result<AudioSegment, AudioError> {
     if segment.sample_rate == TARGET_SAMPLE_RATE && segment.channels == 1 {
         return Ok(segment);
@@ -328,10 +332,20 @@ pub fn decode_audio_file(path: &Path) -> Result<AudioSegment, String> {
     decode_audio_file_with_progress(path, None)
 }
 
+fn is_wma_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("wma"))
+}
+
 fn decode_raw_segment(
     path: &Path,
     on_progress: Option<DecodeProgressCallback>,
 ) -> Result<AudioSegment, String> {
+    if is_wma_path(path) {
+        return Err("unsupported_format".to_string());
+    }
+
     let segment = if is_wav_path(path) {
         decode_wav_file_with_byte_progress(path, on_progress.clone())
             .or_else(|_| decode_wav_file(path))

@@ -1,10 +1,4 @@
-export function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
+export { escapeHtml } from "./html";
 
 export function fileNameFromPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");

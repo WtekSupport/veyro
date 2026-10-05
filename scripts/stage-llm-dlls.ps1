@@ -4,6 +4,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RepoRoot,
 
+    [string]$OutputDirName = "release",
+
     [switch]$Required
 )
 
@@ -11,7 +13,7 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "ensure-cargo-target.ps1")
 $targetRoot = $env:CARGO_TARGET_DIR
-$releaseDir = Join-Path $targetRoot "release"
+$releaseDir = Join-Path $targetRoot $OutputDirName
 $binariesDir = Join-Path (Join-Path $RepoRoot "src-tauri") "binaries"
 $triple = "x86_64-pc-windows-msvc"
 

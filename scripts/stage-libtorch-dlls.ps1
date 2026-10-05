@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RepoRoot,
 
-    [ValidateSet("debug", "release")]
+    [ValidateSet("debug", "release", "release-dist")]
     [string]$Profile = "release",
 
     [switch]$Required
@@ -71,7 +71,6 @@ function Stage-LibtorchDll {
     $base = [IO.Path]::GetFileNameWithoutExtension($name)
     $bundleDest = Join-Path $binariesDir "$base-$triple.dll"
     Copy-Item $SrcPath $bundleDest -Force
-    Write-Host "Staged libtorch $name -> $Profile (+ deps/) + binaries/"
 }
 
 $copied = 0
@@ -89,4 +88,8 @@ if (Test-Path $mklDispatchDir) {
 
 if ($Required -and $copied -eq 0) {
     Write-Error "No libtorch DLLs under $libDir"
+}
+
+if ($copied -gt 0 -and $env:VEYRO_DEV_VERBOSE -eq "1") {
+    Write-Host "Staged $copied libtorch/MKL DLL(s) for $Profile"
 }

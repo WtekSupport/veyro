@@ -5,7 +5,7 @@ mod normalize;
 mod types;
 
 pub use config::EnergyAlignConfig;
-pub use normalize::unified_from_timed_segments;
+pub use normalize::{segment_words_for_alignment, unified_from_timed_segments};
 pub use types::{AlignError, CoarseSegment, UnifiedInput, WordTiming};
 
 use crate::audio::segment::AudioSegment;
@@ -52,15 +52,13 @@ mod tests {
     }
 
     #[test]
-    fn align_without_segments_requires_ctc() {
+    fn align_without_segments_uses_ctc_uniform() {
         let input = UnifiedInput {
-            full_text: "hello".to_string(),
+            full_text: "hello world".to_string(),
             coarse_segments: None,
         };
         let audio = AudioSegment::new(vec![0.2; 8_000], 16_000, 1);
-        assert_eq!(
-            align(&audio, &input, EnergyAlignConfig::default()),
-            Err(AlignError::CtcUnavailable)
-        );
+        let words = align(&audio, &input, EnergyAlignConfig::default()).expect("align");
+        assert_eq!(words.len(), 2);
     }
 }

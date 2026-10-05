@@ -87,6 +87,9 @@ function Resolve-LocalFeatures {
 
     if ($env:VEYRO_DISABLE_DIARIZATION -ne "1") {
         $parts += "local-diarization"
+        if ($env:VEYRO_DISABLE_DIARIZATION_SPEAKRS -ne "1") {
+            $parts += "local-diarization-speakrs"
+        }
     }
 
     if ($parts.Count -eq 0) {
@@ -94,17 +97,69 @@ function Resolve-LocalFeatures {
         return ""
     }
 
-    return ($parts -join ",")
+    $joined = $parts -join ","
+    if ($joined -match "vulkan" -and -not $env:VULKAN_SDK) {
+        . (Join-Path $PSScriptRoot "ensure-vulkan-sdk.ps1")
+        $vulkanSdk = Get-VulkanSdkPath -RepoRoot $RepoRoot
+        if (-not $vulkanSdk) {
+            Write-Error @"
+Vulkan Cargo features are enabled ($joined) but VULKAN_SDK is not set.
+Install the Vulkan SDK, set VULKAN_SDK, or place a portable SDK under .tools/vulkan (see docs/BUILD.md).
+"@
+        }
+        $env:VULKAN_SDK = $vulkanSdk
+    }
+
+    return $joined
 }
 
-# llama-cpp-sys builds ggml-vulkan via ExternalProject; high MSBuild parallelism
-# races vulkan-shaders-gen configure/build/install (cmake cache / cmake_install.cmake).
-# Cargo also forwards its -j value to build scripts as NUM_JOBS (cmake --build --parallel).
-function Get-LlamaCppBuildParallelism {
+# llama-cpp-sys builds ggml-vulkan via ExternalProject; parallel MSBuild races vulkan-shaders-gen.
+# Rust compilation uses all logical cores; cmake --build stays serial (wrapper + VEYRO_CMAKE_PARALLEL).
+function Get-CargoBuildJobs {
+    if ($env:VEYRO_CARGO_JOBS) {
+        return $env:VEYRO_CARGO_JOBS
+    }
+    $cores = [Environment]::ProcessorCount
+    if ($cores -lt 1) {
+        return "4"
+    }
+    return [string]$cores
+}
+
+function Get-CmakeBuildParallelism {
     if ($env:VEYRO_CMAKE_PARALLEL) {
         return $env:VEYRO_CMAKE_PARALLEL
     }
     return "1"
+}
+
+function Get-LlamaCppBuildParallelism {
+    return Get-CargoBuildJobs
+}
+
+function Get-VeyroReleaseLayout {
+    $profile = if ($env:VEYRO_RELEASE_PROFILE) {
+        $env:VEYRO_RELEASE_PROFILE.Trim()
+    } else {
+        "release"
+    }
+    if (-not $profile) {
+        $profile = "release"
+    }
+
+    if ($profile -eq "release") {
+        return @{
+            ProfileName  = "release"
+            OutputDirName = "release"
+            CargoArgs    = @("--release")
+        }
+    }
+
+    return @{
+        ProfileName   = $profile
+        OutputDirName = $profile
+        CargoArgs     = @("--profile", $profile)
+    }
 }
 
 function Set-LlamaCppBuildParallelism {
@@ -116,11 +171,34 @@ function Set-LlamaCppBuildParallelism {
     . (Join-Path $PSScriptRoot "enable-serial-cmake-wrapper.ps1")
     Enable-SerialCmakeWrapper -RepoRoot $RepoRoot
 
-    $parallel = Get-LlamaCppBuildParallelism
-    $env:CMAKE_BUILD_PARALLEL_LEVEL = $parallel
-    $env:NUM_JOBS = $parallel
+    $cargoJobs = Get-CargoBuildJobs
+    $cmakeParallel = Get-CmakeBuildParallelism
+    $env:CMAKE_BUILD_PARALLEL_LEVEL = $cmakeParallel
+    $env:NUM_JOBS = $cmakeParallel
     $env:MSBUILDDISABLENODREUSE = "1"
-    Write-Host "CMake/Cargo parallel jobs: $parallel (override with VEYRO_CMAKE_PARALLEL)"
-    Write-Host "Serial MSBuild shim: $(Join-Path $RepoRoot '.tools\veyro-cmake-wrapper\cmake.bat')"
-    return $parallel
+    Write-Host "Build parallelism: cargo -j $cargoJobs, cmake --parallel $cmakeParallel (llama MSBuild serial)"
+    return $cargoJobs
+}
+
+function Enable-DiarizationBlasLink {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [AllowEmptyString()]
+        [string]$Features,
+        [ValidateSet("debug", "release", "release-dist")]
+        [string]$CargoProfile = "debug"
+    )
+
+    if ($Features -notmatch "local-diarization-speakrs") {
+        return
+    }
+    if (-not ($IsWindows -or $env:OS -like "*Windows*")) {
+        return
+    }
+
+    & (Join-Path $PSScriptRoot "set-diarization-blas-rustflags.ps1") -RepoRoot $RepoRoot -CargoProfile $CargoProfile
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 }

@@ -7,6 +7,7 @@ Set-Location $repoRoot
 $features = Resolve-LocalFeatures -RepoRoot $repoRoot
 Write-Host "CARGO_TARGET_DIR=$env:CARGO_TARGET_DIR"
 Write-Host "features=$features"
+Enable-DiarizationBlasLink -RepoRoot $repoRoot -Features $features
 Push-Location (Join-Path $repoRoot "src-tauri")
 try {
     cargo check @((Get-CargoFeatureArgs -Features $features))

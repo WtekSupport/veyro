@@ -8,7 +8,7 @@ use crate::audio::segment::AudioSegment;
 use crate::network::openai_error::OpenAiError;
 use crate::network::retry::RetryConfig;
 use crate::settings::secrets;
-use crate::timed_text::TimedTextSegment;
+use crate::timed_text::{TimedTextSegment, TimedWord};
 use crate::transcription::models::{TranscriptionOptions, TranscriptionResult};
 use crate::transcription::provider::{TranscriptionError, TranscriptionProvider};
 
@@ -38,7 +38,12 @@ impl OpenAITranscriptionProvider {
             .text("temperature", "0")
             .part("file", part);
 
-        if options.request_segment_timestamps {
+        if options.request_word_timestamps {
+            form = form
+                .text("response_format", "verbose_json")
+                .text("timestamp_granularities[]", "segment")
+                .text("timestamp_granularities[]", "word");
+        } else if options.request_segment_timestamps {
             form = form
                 .text("response_format", "verbose_json")
                 .text("timestamp_granularities[]", "segment");
@@ -54,7 +59,42 @@ impl OpenAITranscriptionProvider {
         Ok(form)
     }
 
-    fn parse_timed_segments(payload: &serde_json::Value) -> Option<Vec<TimedTextSegment>> {
+    fn parse_word_timings(value: &serde_json::Value) -> Vec<TimedWord> {
+        let Some(words) = value.as_array() else {
+            return Vec::new();
+        };
+        let mut timed = Vec::new();
+        for word in words {
+            let text = word
+                .get("word")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if text.is_empty() {
+                continue;
+            }
+            let start_sec = word.get("start").and_then(|value| value.as_f64());
+            let end_sec = word.get("end").and_then(|value| value.as_f64());
+            let (Some(start_sec), Some(end_sec)) = (start_sec, end_sec) else {
+                continue;
+            };
+            let start_ms = (start_sec * 1000.0).round().max(0.0) as u64;
+            let end_ms = (end_sec * 1000.0).round().max(start_sec * 1000.0) as u64;
+            timed.push(TimedWord {
+                confidence: None,
+                text,
+                start_ms,
+                end_ms,
+            });
+        }
+        timed
+    }
+
+    fn parse_timed_segments(
+        payload: &serde_json::Value,
+        include_words: bool,
+    ) -> Option<Vec<TimedTextSegment>> {
         let segments = payload.get("segments")?.as_array()?;
         let mut timed = Vec::new();
         for segment in segments {
@@ -71,11 +111,16 @@ impl OpenAITranscriptionProvider {
             let end_sec = segment.get("end").and_then(|value| value.as_f64())?;
             let start_ms = (start_sec * 1000.0).round().max(0.0) as u64;
             let end_ms = (end_sec * 1000.0).round().max(start_sec * 1000.0) as u64;
+            let words = if include_words {
+                Self::parse_word_timings(segment.get("words").unwrap_or(&serde_json::Value::Null))
+            } else {
+                Vec::new()
+            };
             timed.push(TimedTextSegment {
                 text,
                 start_ms,
                 end_ms,
-                words: Vec::new(),
+                words,
             });
         }
         if timed.is_empty() {
@@ -137,8 +182,10 @@ impl TranscriptionProvider for OpenAITranscriptionProvider {
                             .trim()
                             .to_string();
 
-                        let timed_segments = if options.request_segment_timestamps {
-                            Self::parse_timed_segments(&payload)
+                        let timed_segments = if options.request_word_timestamps {
+                            Self::parse_timed_segments(&payload, true)
+                        } else if options.request_segment_timestamps {
+                            Self::parse_timed_segments(&payload, false)
                         } else {
                             None
                         };

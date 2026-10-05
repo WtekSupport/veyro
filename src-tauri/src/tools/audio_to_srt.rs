@@ -13,13 +13,13 @@ use crate::error::AppError;
 use crate::llm::LlmEngine;
 use crate::settings::{AppSettings, LocalSttEngine, TextProcessingMode};
 use crate::subtitles::{
-    apply_speaker_prefixes, assign_cue_speakers, build_subtitle_cues, render_srt, render_vtt,
-    SubtitleLineEnding, SubtitleOptions,
+    apply_speaker_prefixes, assign_cue_speakers, build_subtitle_cues, cues_have_karaoke_word_timings,
+    merge_short_words, render_srt, render_vtt, SubtitleLineEnding, SubtitleOptions,
 };
-use crate::diarization::{self, DiarizeOptions, SpeakerCountMode};
+use crate::diarization::{self, DiarizationQuality, DiarizeOptions, SpeakerCountMode};
 use crate::text::dictionary::{load_dictionary_for_settings, protected_terms, Dictionary};
 use crate::text::pipeline::{process_transcription_immediate_sync, rewrite_processed_text};
-use crate::timed_text::TimedTextSegment;
+use crate::timed_text::{TimedTextSegment, TimedWord};
 use crate::transcription::models::WhisperProgressCallback;
 use crate::transcription::prompt::WhisperPromptInput;
 use crate::transcription::TranscriptionProvider;
@@ -28,8 +28,10 @@ use crate::vad::detect_speech_regions;
 use super::audio_to_srt_timing::{
     expand_stt_chunks, merge_region_timed_segments, sort_timed_segments_by_start,
 };
+use super::heavy_job::run_stage;
 use super::shared::{
-    decode_and_preprocess_for_tools, throttled_percent_callback, ToolsTranscriptionGuard,
+    decode_and_preprocess_for_tools, throttled_percent_callback, tool_transcriber,
+    ToolsTranscriptionGuard,
     validate_tool_file_path,
 };
 
@@ -78,6 +80,9 @@ pub struct AudioToSrtOptions {
     /// Optional speaker diarization after ASR (`todo/ТЗ_ диаризация…`).
     #[serde(default)]
     pub speaker_diarization: bool,
+    /// Fast polyvoice vs accurate speakrs (when compiled) / VBx polyvoice fallback.
+    #[serde(default)]
+    pub diarization_quality: DiarizationQualityDto,
     #[serde(default)]
     pub speaker_count_mode: SpeakerCountModeDto,
     #[serde(default = "default_speaker_exact_count")]
@@ -95,6 +100,17 @@ pub struct AudioToSrtOptions {
     /// Clustering sensitivity (AHC threshold when not default); expert.
     #[serde(default = "default_diarization_sensitivity")]
     pub diarization_sensitivity: f32,
+    /// WebVTT karaoke word highlight (requires word-level STT in the same pass).
+    #[serde(default)]
+    pub karaoke_word_highlight: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DiarizationQualityDto {
+    #[default]
+    Fast,
+    Accurate,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -173,6 +189,7 @@ impl Default for AudioToSrtOptions {
             reading_tail_ms: default_reading_tail_ms(),
             stt_language_override: None,
             speaker_diarization: false,
+            diarization_quality: DiarizationQualityDto::Fast,
             speaker_count_mode: SpeakerCountModeDto::Auto,
             speaker_exact_count: default_speaker_exact_count(),
             speaker_min_count: default_speaker_min_count(),
@@ -180,6 +197,7 @@ impl Default for AudioToSrtOptions {
             include_speaker_names: default_include_speaker_names(),
             diarization_min_speech_secs: default_diarization_min_speech_secs(),
             diarization_sensitivity: default_diarization_sensitivity(),
+            karaoke_word_highlight: false,
         }
     }
 }
@@ -206,8 +224,14 @@ pub struct AudioToSrtResult {
     /// Speaker ids aligned with cues in export order (same count as non-empty rendered cues).
     #[serde(default)]
     pub cue_speaker_ids: Vec<Option<u32>>,
+    #[serde(default)]
+    pub word_timings_available: bool,
+    /// Word timings per exported cue (preview); empty when karaoke unavailable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cue_words: Vec<Vec<TimedWord>>,
 }
 
+/// Karaoke word highlight (VTT) uses the same matrix: local Whisper + OpenAI cloud only.
 pub fn subtitle_stt_capability(settings: &AppSettings) -> SubtitleSttCapability {
     if settings.transcription_provider == "local" {
         match settings.local_stt_variant().engine() {
@@ -225,6 +249,10 @@ fn subtitle_settings(base: &AppSettings, options: &AudioToSrtOptions) -> AppSett
     let mut settings = base.clone();
     if !options.use_dictation_text_settings {
         settings.numbers_as_words = false;
+    }
+    if options.karaoke_word_highlight {
+        // Word timings must match post-cleanup text; no AI rewrite in this tool run.
+        settings.text_processing_mode = TextProcessingMode::Basic;
     }
     if let Some(language) = options
         .stt_language_override
@@ -323,6 +351,8 @@ pub async fn transcribe_audio_to_srt(
             ai_rewrite_applied: false,
             speakers: Vec::new(),
             cue_speaker_ids: Vec::new(),
+            word_timings_available: false,
+            cue_words: Vec::new(),
         });
     }
 
@@ -333,7 +363,7 @@ pub async fn transcribe_audio_to_srt(
     let speech_regions = detect_speech_regions(&prepared.segment, &vad_config)
         .map_err(|error| error.to_string())?;
 
-    let transcriber = ctx.runtime.transcriber();
+    let transcriber = tool_transcriber(&ctx, &settings);
     let stt_auto_mode = super::shared::stt_failed_in_auto_mode(
         &base_settings,
         options.stt_language_override.as_deref(),
@@ -347,6 +377,7 @@ pub async fn transcribe_audio_to_srt(
         &settings,
         &dictionary.vocabulary,
         stt_auto_mode,
+        options.karaoke_word_highlight,
     )
     .await?;
 
@@ -360,6 +391,7 @@ pub async fn transcribe_audio_to_srt(
         timed.detected_language.as_deref(),
         ai_mode,
         &dictionary,
+        options.karaoke_word_highlight,
     )
     .await?;
 
@@ -369,6 +401,10 @@ pub async fn transcribe_audio_to_srt(
         } else {
             emit_phase(&app, &path_key, AudioSrtProgressPhase::Diarizing);
             let diarize_opts = DiarizeOptions {
+                quality: match options.diarization_quality {
+                    DiarizationQualityDto::Fast => DiarizationQuality::Fast,
+                    DiarizationQualityDto::Accurate => DiarizationQuality::Accurate,
+                },
                 count_mode: match options.speaker_count_mode {
                     SpeakerCountModeDto::Auto => SpeakerCountMode::Auto,
                     SpeakerCountModeDto::Exact => SpeakerCountMode::Exact,
@@ -380,14 +416,17 @@ pub async fn transcribe_audio_to_srt(
                 min_speech_secs: options.diarization_min_speech_secs,
                 sensitivity: options.diarization_sensitivity,
             };
-            // Run blocking polyvoice off the async runtime.
             let settings_for_diar = settings.clone();
-            let segment_for_diar = prepared.segment.clone();
-            tauri::async_runtime::spawn_blocking(move || {
+            // Speakrs is trained on raw waveforms. Denoise/high-pass is for STT
+            // and for the fast polyvoice path.
+            let segment_for_diar = match options.diarization_quality {
+                DiarizationQualityDto::Accurate => prepared.captured.clone(),
+                DiarizationQualityDto::Fast => prepared.segment.clone(),
+            };
+            run_stage("audio_srt_diarize", move || {
                 diarization::diarize_segment(&settings_for_diar, &segment_for_diar, &diarize_opts)
             })
-            .await
-            .map_err(|error| format!("tools.audioSrt.diarizationFailed|{error}"))??
+            .await?
         }
     } else {
         Vec::new()
@@ -407,6 +446,29 @@ pub async fn transcribe_audio_to_srt(
     if !speaker_intervals.is_empty() {
         assign_cue_speakers(&mut cues, &speaker_intervals);
     }
+
+    const KARAOKE_MIN_WORD_MS: u64 = 90;
+    if options.karaoke_word_highlight {
+        for cue in cues.iter_mut() {
+            if !cue.words.is_empty() {
+                cue.words = merge_short_words(&cue.words, KARAOKE_MIN_WORD_MS);
+            }
+        }
+    }
+
+    let word_timings_available = options.karaoke_word_highlight
+        && processed_segments.words_preserved
+        && cues_have_karaoke_word_timings(&cues);
+    let karaoke_vtt = options.karaoke_word_highlight && word_timings_available;
+    let cue_words: Vec<Vec<TimedWord>> = if karaoke_vtt {
+        cues
+            .iter()
+            .filter(|cue| !cue.lines.is_empty())
+            .map(|cue| cue.words.clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut speaker_ids: Vec<u32> = cues.iter().filter_map(|cue| cue.speaker_id).collect();
     speaker_ids.sort_unstable();
@@ -448,6 +510,7 @@ pub async fn transcribe_audio_to_srt(
         SubtitleLineEnding::CrLf,
         options.global_offset_ms,
         options.utf8_bom,
+        karaoke_vtt,
     );
 
     emit_phase(&app, &path_key, AudioSrtProgressPhase::Done);
@@ -461,6 +524,8 @@ pub async fn transcribe_audio_to_srt(
         ai_rewrite_applied: processed_segments.ai_rewrite_applied,
         speakers,
         cue_speaker_ids,
+        word_timings_available,
+        cue_words,
     })
 }
 
@@ -478,6 +543,7 @@ async fn transcribe_speech_regions(
     settings: &AppSettings,
     vocabulary: &[String],
     stt_auto_mode: bool,
+    karaoke_word_highlight: bool,
 ) -> Result<RegionTranscriptionOutcome, String> {
     let raw_regions: Vec<(u64, crate::audio::segment::AudioSegment)> = if speech_regions.is_empty() {
         vec![(0, prepared.segment.clone())]
@@ -488,6 +554,9 @@ async fn transcribe_speech_regions(
             .collect()
     };
     let max_chunk_ms = settings.vad_config().maximum_segment_ms as u64;
+    let max_chunk_ms = max_chunk_ms.min(crate::transcription::offline_decode::max_offline_audio_ms(
+        settings,
+    ));
     let regions = expand_stt_chunks(raw_regions, max_chunk_ms);
 
     let total_ms = regions
@@ -534,6 +603,7 @@ async fn transcribe_speech_regions(
             Some(chunk_progress),
             TranscribeSegmentFlags {
                 request_segment_timestamps: true,
+                request_word_timestamps: karaoke_word_highlight,
             },
             auto_language_hint.clone(),
         )
@@ -578,6 +648,43 @@ struct ProcessedSegmentsOutcome {
     rewrite_fallback: bool,
     rewrite_fallback_reason: Option<String>,
     ai_rewrite_applied: bool,
+    words_preserved: bool,
+}
+
+fn trim_word_punctuation(token: &str) -> &str {
+    token.trim_matches(|c: char| {
+        c.is_ascii_punctuation() || matches!(c, '«' | '»' | '—' | '…')
+    })
+}
+
+fn normalize_karaoke_compare_key(text: &str) -> String {
+    text.split_whitespace()
+        .map(trim_word_punctuation)
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn karaoke_words_match_cleaned_text(cleaned: &str, words: &[TimedWord]) -> bool {
+    if words.is_empty() {
+        return false;
+    }
+    let from_words = words
+        .iter()
+        .map(|word| word.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    normalize_karaoke_compare_key(cleaned) == normalize_karaoke_compare_key(&from_words)
+}
+
+fn text_from_timed_words(words: &[TimedWord]) -> String {
+    words
+        .iter()
+        .map(|word| word.text.trim())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 async fn process_timed_segments_for_subtitles(
@@ -589,6 +696,7 @@ async fn process_timed_segments_for_subtitles(
     whisper_detected_language: Option<&str>,
     ai_mode: TextProcessingMode,
     dictionary: &Dictionary,
+    karaoke_word_highlight: bool,
 ) -> Result<ProcessedSegmentsOutcome, String> {
     if ai_mode.uses_ai() {
         emit_phase(app, path_key, AudioSrtProgressPhase::AiRewrite);
@@ -610,6 +718,7 @@ async fn process_timed_segments_for_subtitles(
     let mut rewrite_fallback_reason = None;
     let mut ai_applied = false;
     let mut processed = Vec::with_capacity(segments.len());
+    let mut words_preserved = karaoke_word_highlight;
 
     for segment in segments {
         let immediate = process_transcription_immediate_sync(
@@ -645,16 +754,34 @@ async fn process_timed_segments_for_subtitles(
             text = rewritten.text;
         }
 
-        let trimmed = text.trim();
+        let mut trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             continue;
         }
+        let mut words = segment.words.clone();
+        if karaoke_word_highlight {
+            if ai_mode.uses_ai() {
+                words.clear();
+                words_preserved = false;
+            } else if words.is_empty() {
+                words_preserved = false;
+            } else if !karaoke_words_match_cleaned_text(&trimmed, &words) {
+                // Keep STT word timings; align cue text to the timed word sequence.
+                trimmed = text_from_timed_words(&words);
+            }
+        } else {
+            words.clear();
+        }
         processed.push(TimedTextSegment {
-            text: trimmed.to_string(),
+            text: trimmed,
             start_ms: segment.start_ms,
             end_ms: segment.end_ms,
-            words: Vec::new(),
+            words,
         });
+    }
+
+    if karaoke_word_highlight && !processed.iter().any(|segment| !segment.words.is_empty()) {
+        words_preserved = false;
     }
 
     Ok(ProcessedSegmentsOutcome {
@@ -662,5 +789,6 @@ async fn process_timed_segments_for_subtitles(
         rewrite_fallback,
         rewrite_fallback_reason,
         ai_rewrite_applied: ai_applied && !rewrite_fallback,
+        words_preserved,
     })
 }

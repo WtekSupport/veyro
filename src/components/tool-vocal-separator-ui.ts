@@ -17,8 +17,8 @@ import {
   type VocalSeparatorProgressPhase,
   type VocalSeparatorResult,
 } from "../api";
+import { escapeHtml } from "../lib/html";
 import {
-  escapeHtml,
   fileNameFromPath,
   pathsMatch,
   runSequentialJobs,

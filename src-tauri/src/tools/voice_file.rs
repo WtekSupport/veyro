@@ -16,7 +16,7 @@ use crate::transcription::prompt::WhisperPromptInput;
 
 use super::shared::{
     decode_and_preprocess_for_tools, stt_failed_in_auto_mode, throttled_percent_callback,
-    ToolsTranscriptionGuard, STT_SELECT_LANGUAGE_ERROR, validate_tool_file_path,
+    tool_transcriber, ToolsTranscriptionGuard, STT_SELECT_LANGUAGE_ERROR, validate_tool_file_path,
 };
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -154,7 +154,7 @@ pub async fn transcribe_voice_file(
         path_key.clone(),
         VoiceFileProgressPhase::Transcribing,
     );
-    let transcriber = ctx.runtime.transcriber();
+    let transcriber = tool_transcriber(&ctx, &settings);
     let transcription = transcribe_segment_with_retries(
         transcriber,
         segment,

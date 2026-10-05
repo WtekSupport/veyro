@@ -98,6 +98,7 @@ mod tests {
                 text: "hi".to_string(),
                 start_ms: 100,
                 end_ms: 400,
+                confidence: None,
             }],
         }];
         offset_timed_segments(&mut segments, 6_000);

@@ -1,15 +1,8 @@
 import { updateSettings, type UiMode } from "../api";
 import { t } from "../i18n";
 import { setError } from "../state";
+import { escapeHtml } from "../lib/html";
 import { showConfirmDialog } from "./confirm-dialog";
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 export function renderUiModeLink(currentMode: UiMode): string {
   const nextMode: UiMode = currentMode === "homemaker" ? "expert" : "homemaker";

@@ -86,6 +86,20 @@ export function translateError(code: string, fallback: string): string {
   return fallback;
 }
 
+/** User-facing line for an AppError code, with the raw message as a second line. */
+export function formatAppError(
+  code: string,
+  technical: string,
+): { primary: string; detail: string | null } {
+  const key = `errors.${code}` as MessageKey;
+  const raw = technical.trim();
+  if (key in en) {
+    const primary = t(key);
+    return { primary, detail: raw && raw !== primary ? raw : null };
+  }
+  return { primary: raw || t("errors.internal"), detail: null };
+}
+
 export function translateState(state: string): string {
   const key = `states.${state}` as MessageKey;
   if (key in en) {

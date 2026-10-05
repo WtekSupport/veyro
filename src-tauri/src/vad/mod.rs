@@ -11,4 +11,4 @@ pub use analyzer::{silero_compiled, silero_runtime_available};
 pub use analyzer::SILERO_RUNTIME_AVAILABLE;
 pub use config::VadConfig;
 pub use detector::{VadDetector, VadEvent};
-pub use offline::{coalesce_region_spans, detect_speech_regions, SpeechRegion};
+pub use offline::{coalesce_region_spans, detect_speech_regions, detect_speech_spans, SpeechRegion};

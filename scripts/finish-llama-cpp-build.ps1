@@ -16,6 +16,17 @@ $script:LastLlamaCmakeExit = 1
 . (Join-Path $PSScriptRoot "enable-serial-cmake-wrapper.ps1")
 Enable-SerialCmakeWrapper -RepoRoot $RepoRoot
 
+function Get-VeyroRealCmakeExe {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+    $bundled = Join-Path $RepoRoot ".tools\cmake\bin\cmake.exe"
+    if (Test-Path -LiteralPath $bundled) {
+        return $bundled
+    }
+    return "cmake.exe"
+}
+
+$realCmake = Get-VeyroRealCmakeExe -RepoRoot $RepoRoot
+
 . (Join-Path $PSScriptRoot "ensure-cargo-target.ps1")
 $targetDir = $env:CARGO_TARGET_DIR
 $buildRoot = Join-Path $targetDir "$Profile\build"
@@ -50,7 +61,7 @@ function Invoke-LlamaCppCmakeTarget {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $buildOutput = & cmake --build $CmakeBuild --target $Target --config Release --parallel $Parallel -- /m:1 /p:BuildInParallel=false 2>&1
+        $buildOutput = & $realCmake --build $CmakeBuild --target $Target --config Release --parallel $Parallel -- /m:1 /p:BuildInParallel=false 2>&1
         $script:LastLlamaCmakeExit = [int]$LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousEap

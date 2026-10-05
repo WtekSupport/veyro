@@ -81,6 +81,8 @@ npm run tauri:dev
 
 Скрипт dev по умолчанию ставит `CARGO_INCREMENTAL=0` на Windows; для более быстрых пересборок можно `VEYRO_CARGO_INCREMENTAL=1`.
 
+**Диаризация (speakrs) / `cblas_dgemm` LNK2019:** при `local-diarization-speakrs` speakrs включает BLAS у общего `ndarray`, и линковка cdylib `polyvoice` тоже требует CBLAS (Intel MKL на x86_64). `npm run tauri:dev` / `tauri:build` перед `cargo` вызывают `scripts/set-diarization-blas-rustflags.ps1` (краткий путь к MKL из ocipkg + `RUSTFLAGS` с `/LIBPATH` для MSVC). Вручную: `powershell -File scripts/set-diarization-blas-rustflags.ps1 -RepoRoot .`, затем **в той же сессии** `cargo build …`. Обход без speakrs: `VEYRO_DISABLE_DIARIZATION_SPEAKRS=1`.
+
 **Silero TE (libtorch):** `npm run tauri:dev` / `tauri:build` вызывают `scripts/stage-libtorch-dlls.ps1` (скачивает Intel MKL redist при первом запуске, кладёт DLL рядом с `veyro.exe` и в `debug/deps/`). Вручную: `powershell -File scripts/stage-libtorch-dlls.ps1 -RepoRoot . -Profile debug`. Сборка с `silero-te` также копирует DLL из `src-tauri/binaries/` через `build.rs`. Если видите **Intel MKL FATAL ERROR** (`mkl_avx512.1.dll` / `mkl_def.1.dll`), убедитесь что `CARGO_TARGET_DIR=C:\veyro-target` (не другой каталог) и перезапустите dev после staging.
 
 ### Release + NSIS-инсталлятор
@@ -88,6 +90,18 @@ npm run tauri:dev
 ```powershell
 npm run tauri:build
 ```
+
+Локальная prod-сборка использует профиль **`release`** (быстрее линковка: без LTO, `codegen-units = 16`). Один проход `cargo build`, затем `tauri bundle` без повторной компиляции Rust.
+
+Публикация на GitHub с максимальной оптимизацией бинарника:
+
+```powershell
+npm run tauri:build:dist
+```
+
+(профиль **`release-dist`**: thin LTO, `codegen-units = 1` — дольше, чуть компактнее exe.)
+
+**Антивирус (Windows):** для ускорения сборки вручную добавьте в исключения AV каталоги репозитория, `.tools` и `C:\veyro-target` (Defender, Kaspersky и т.д.).
 
 Скрипт автоматически:
 
@@ -172,9 +186,12 @@ Portable Vulkan SDK: положите `vulkan_sdk.exe` в `.tools/` — расп
 | `VEYRO_DISABLE_SHERPA_STT=1` | Без sherpa-onnx (Parakeet / Qwen3 / GigaAM); только Whisper локально |
 | `VEYRO_DISABLE_SEPARATION=1` | Без инструмента «Разделить вокал / минус» (`local-separation`) |
 | `VEYRO_DISABLE_DIARIZATION=1` | Без опциональной диаризации в Audio→SRT (`local-diarization` / polyvoice) |
+| `VEYRO_DISABLE_DIARIZATION_SPEAKRS=1` | Без speakrs в сборке (режим «Точно» останется на polyvoice VBx; веса по-прежнему качаются из приложения) |
 | `VEYRO_DISABLE_VAD_SILERO=1` | Без Silero VAD (только WebRTC в детекторе речи) |
 | `VEYRO_ALLOW_CUDA=1` | Разрешить авто-выбор CUDA вместо Vulkan (NVIDIA) |
-| `VEYRO_CMAKE_PARALLEL` | Параллелизм cmake для llama.cpp (по умолчанию `1`) |
+| `VEYRO_CMAKE_PARALLEL` | Параллелизм `cmake --build` для llama.cpp (по умолчанию `1`; Rust компилируется отдельно) |
+| `VEYRO_CARGO_JOBS` | Параллелизм `cargo -j` (по умолчанию число логических ядер CPU) |
+| `VEYRO_RELEASE_PROFILE` | Cargo-профиль release: по умолчанию быстрый `release`; для GitHub — `release-dist` или `npm run tauri:build:dist` |
 | `VEYRO_CARGO_TARGET_DIR` | Переопределить каталог сборки (по умолчанию `C:\veyro-target`) |
 
 Модели разделения: **Quality** / **Fast** — [musetric/vocal-separation-roformer-onnx](https://huggingface.co/musetric/vocal-separation-roformer-onnx) (`syhft_core_t1100.onnx` + `.onnx.data`, STFT на стороне Veyro, CPU); **Legacy** — [StemSplitio/htdemucs-ft-vocals-onnx](https://huggingface.co/StemSplitio/htdemucs-ft-vocals-onnx). Расширенный режим «разбить минус на инструменты» — отдельный бандл **multi-stem** [StemSplitio/htdemucs-6s-onnx](https://huggingface.co/StemSplitio/htdemucs-6s-onnx) (`htdemucs_6s_fp16weights.onnx`); скачивается только при первом использовании, запускается вторым независимым проходом по **исходному миксу** (не по `_instrumental`). После обновления перекачайте модели из окна инструмента (старые silverdaw `folded_fp16_webgpu` больше не используются).
@@ -301,7 +318,8 @@ API key задаётся только через UI (OS keyring).
 
 | Платформа | Команда |
 |-----------|---------|
-| Windows x64 | `npm run tauri:build` |
+| Windows x64 (локально) | `npm run tauri:build` |
+| Windows x64 (релиз GitHub) | `npm run tauri:build:dist` |
 | macOS ARM | `CI=true npm run tauri:build:mac` |
 | Linux x64 | `npm run tauri build -- --features local-whisper-vulkan,local-llm-vulkan` |
 

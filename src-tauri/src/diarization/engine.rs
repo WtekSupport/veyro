@@ -1,31 +1,43 @@
-//! polyvoice offline diarization over an in-memory 16 kHz mono buffer.
+//! Offline diarization. Fast is polyvoice INT8 + VBx. Accurate is speakrs (pyannote FP32).
 
 use crate::audio::segment::AudioSegment;
 use crate::settings::AppSettings;
 
 use super::assign::SpeakerInterval;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpeakerCountMode {
+    #[default]
     Auto,
     Exact,
     Range,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiarizationQuality {
+    #[default]
+    Fast,
+    Accurate,
+}
+
 #[derive(Debug, Clone)]
 pub struct DiarizeOptions {
+    pub quality: DiarizationQuality,
     pub count_mode: SpeakerCountMode,
     pub exact_count: u8,
     pub min_count: u8,
     pub max_count: u8,
     pub min_speech_secs: f32,
-    /// Maps to AHC cosine threshold when not using default VBx; higher = stricter.
+    /// Accurate/speakrs: higher keeps more speakers (lower VBx `Fb` and AHC distance).
+    /// Fast/polyvoice VBx ignores this value.
     pub sensitivity: f32,
 }
 
 impl Default for DiarizeOptions {
     fn default() -> Self {
         Self {
+            quality: DiarizationQuality::Fast,
             count_mode: SpeakerCountMode::Auto,
             exact_count: 2,
             min_count: 1,
@@ -42,8 +54,22 @@ pub fn diarize_segment(
     segment: &AudioSegment,
     options: &DiarizeOptions,
 ) -> Result<Vec<SpeakerInterval>, String> {
-    use crate::audio::resampler::to_mono;
+    #[cfg(feature = "local-diarization-speakrs")]
+    if options.quality == DiarizationQuality::Accurate {
+        return super::engine_speakrs::diarize_segment_speakrs(settings, segment, options);
+    }
+
+    diarize_segment_polyvoice(settings, segment, options)
+}
+
+#[cfg(feature = "local-diarization")]
+fn diarize_segment_polyvoice(
+    settings: &AppSettings,
+    segment: &AudioSegment,
+    options: &DiarizeOptions,
+) -> Result<Vec<SpeakerInterval>, String> {
     use polyvoice::models::ModelRegistry;
+    use polyvoice::pipeline_v2::ClustererKind;
     use polyvoice::types::Profile;
     use polyvoice::{Pipeline, PipelineConfig};
 
@@ -53,23 +79,20 @@ pub fn diarize_segment(
         return Ok(Vec::new());
     }
 
-    let cache = model_store::ensure_models(settings)?;
+    let cache = model_store::polyvoice_models_dir(settings)?;
     let registry = ModelRegistry::with_cache_dir(&cache).map_err(|error| error.to_string())?;
 
     let mut config = PipelineConfig::default();
-    config.profile = Profile::Balanced;
     config.min_speech_secs = options.min_speech_secs.clamp(0.05, 2.0);
     config.max_speakers = match options.count_mode {
         SpeakerCountMode::Auto => 20,
         SpeakerCountMode::Exact => options.exact_count.clamp(1, 20),
         SpeakerCountMode::Range => options.max_count.clamp(options.min_count.max(1), 20),
     };
-    // Sensitivity: when user tunes it away from default, prefer AHC with that threshold.
-    if (options.sensitivity - 0.45).abs() > 0.02 {
-        config.clusterer = polyvoice::pipeline_v2::ClustererKind::Ahc {
-            threshold: options.sensitivity.clamp(0.15, 0.9),
-        };
-    }
+
+    // Fast and Balanced resolve the same INT8 weights. Accurate uses speakrs.
+    config.clusterer = ClustererKind::Vbx;
+    config.profile = Profile::Fast;
 
     let pipeline = Pipeline::builder()
         .config(config)
@@ -77,28 +100,19 @@ pub fn diarize_segment(
         .build()
         .map_err(|error| format!("tools.audioSrt.diarizationFailed|{error}"))?;
 
-    let mono = if segment.channels <= 1 {
-        segment.samples.clone()
-    } else {
-        to_mono(&segment.samples, segment.channels)
-    };
+    let samples_16k = crate::audio::resampler::resample_mono_to_16k(
+        &segment.samples,
+        segment.channels,
+        segment.sample_rate,
+    )
+    .map_err(|error| format!("tools.audioSrt.diarizationFailed|{error}"))?;
 
-    if segment.sample_rate != 16_000 {
-        let mut resampler = crate::audio::resampler::MonoResampler::new(segment.sample_rate, 16_000)
-            .map_err(|error| format!("tools.audioSrt.diarizationFailed|{error}"))?;
-        let resampled = resampler
-            .push(&mono, 1)
-            .map_err(|error| format!("tools.audioSrt.diarizationFailed|{error}"))?;
-        let result = run_pipeline(&pipeline, &resampled)?;
-        return Ok(filter_by_min_count(result, options));
-    }
-
-    let result = run_pipeline(&pipeline, &mono)?;
+    let result = run_polyvoice_pipeline(&pipeline, &samples_16k)?;
     Ok(filter_by_min_count(result, options))
 }
 
 #[cfg(feature = "local-diarization")]
-fn run_pipeline(
+fn run_polyvoice_pipeline(
     pipeline: &polyvoice::Pipeline,
     samples: &[f32],
 ) -> Result<Vec<SpeakerInterval>, String> {
@@ -139,7 +153,6 @@ fn filter_by_min_count(
     if ids.len() >= min {
         return intervals;
     }
-    // Too few speakers for requested range — keep raw result (auto fell short).
     intervals
 }
 
