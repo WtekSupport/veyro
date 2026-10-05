@@ -11,7 +11,6 @@ import {
   type SpeechRegisterHint,
   type SpeakerProfileSummary,
   type SpeechModelStatusDto,
-  createSpeechAnalysisSpeakerProfile,
   listSpeechAnalysisSpeakerProfiles,
   listSpeechAnalysisTongueTwisters,
   type TongueTwisterPreset,
