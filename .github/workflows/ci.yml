@@ -54,6 +54,10 @@ jobs:
             libssl-dev \
             libxdo-dev \
             patchelf
+      - name: Build frontend (tauri embed checks ../dist at compile time)
+        run: |
+          npm ci
+          npm run build
       - run: cargo test --no-default-features --lib
       - name: Lint (cloud-only lib, no optional Silero/tch)
         env:
@@ -99,6 +103,10 @@ jobs:
             cmake
       - name: Fresh sherpa prebuilt (avoid partial rust-cache trees)
         run: rm -rf target/sherpa-onnx-prebuilt
+      - name: Build frontend (tauri embed checks ../dist at compile time)
+        run: |
+          npm ci
+          npm run build
       - run: cargo test --no-default-features --features local-sherpa-stt,vad-silero --lib
       - name: Lint sherpa STT (lib)
         env:
