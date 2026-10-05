@@ -12,6 +12,14 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+## [1.10.37] — 2026-10-06
+
+### Fixed
+
+- **Capture / Status UI:** Mic monitor IPC no longer holds the controller mutex while waiting on the audio pipeline, which could stall PTT release and freeze the UI during capture.
+- **PTT release:** Deferred `finish_ptt_release` when the controller is busy; capture format is queried before taking the audio lock on pipeline start.
+- **Dictation state:** Injection from `Listening` transitions through `Processing` instead of an invalid direct jump to `Injecting`.
+
 ## [1.10.35] — 2026-10-05
 
 ### Fixed

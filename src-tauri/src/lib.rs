@@ -110,6 +110,9 @@ pub(crate) fn apply_audio_action(
                     controller.settings().vad_config(),
                 )
             };
+            let capture_format = source
+                .capture_format()
+                .map_err(error::AppError::from)?;
             ctx.set_audio_callbacks_enabled(false);
             let audio_result = {
                 let mut audio = ctx
@@ -117,7 +120,9 @@ pub(crate) fn apply_audio_action(
                     .lock()
                     .map_err(|_| error::AppError::Internal("audio lock poisoned".into()))?;
                 audio.set_vad_config(vad_config);
-                audio.start(source, mode).map_err(error::AppError::from)
+                audio
+                    .start(source, mode, Some(capture_format))
+                    .map_err(error::AppError::from)
             };
             if let Err(error) = audio_result {
                 ctx.set_audio_callbacks_enabled(true);
@@ -183,6 +188,9 @@ pub(crate) fn apply_audio_action(
                     controller.settings().vad_config(),
                 )
             };
+            let capture_format = source
+                .capture_format()
+                .map_err(error::AppError::from)?;
             ctx.set_audio_callbacks_enabled(false);
             let vad_join = {
                 let mut audio = ctx
@@ -191,7 +199,9 @@ pub(crate) fn apply_audio_action(
                     .map_err(|_| error::AppError::Internal("audio lock poisoned".into()))?;
                 let stop_join = audio.stop().map_err(error::AppError::from)?;
                 audio.set_vad_config(vad_config);
-                audio.start(source, mode).map_err(error::AppError::from)?;
+                audio
+                    .start(source, mode, Some(capture_format))
+                    .map_err(error::AppError::from)?;
                 stop_join
             };
             join_vad_worker(vad_join);
@@ -851,19 +861,18 @@ fn get_diagnostics(
 
 #[tauri::command]
 fn ensure_mic_monitor(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<(), String> {
-    let device = ctx
-        .inner()
-        .controller
-        .lock()
-        .map_err(|_| "application is busy, try again".to_string())?
-        .settings()
-        .microphone_device
-        .clone();
+    let inner = ctx.inner();
+    let device = {
+        let controller = inner
+            .controller
+            .try_lock()
+            .map_err(|_| "application is busy, try again".to_string())?;
+        controller.settings().microphone_device.clone()
+    };
 
-    let mut audio = ctx
-        .inner()
+    let mut audio = inner
         .audio
-        .lock()
+        .try_lock()
         .map_err(|_| "application is busy, try again".to_string())?;
     audio
         .ensure_level_monitor(device)
@@ -893,29 +902,29 @@ fn get_mic_monitor_snapshot(ctx: tauri::State<'_, Arc<AppContext>>) -> Result<Mi
     use crate::audio::level::mic_level_percent;
 
     let ctx = ctx.inner();
-    let (speech_active, vad_active, effective_threshold) = {
+    let (push_to_talk, effective_threshold) = {
         let controller = ctx
             .controller
-            .lock()
-            .map_err(|_| "application controller lock poisoned".to_string())?;
-        let settings = controller.settings();
-        let push_to_talk = settings.push_to_talk;
-        let effective_threshold = settings.effective_vad_threshold_percent();
-        let audio = ctx
-            .audio
-            .lock()
+            .try_lock()
             .map_err(|_| "application is busy, try again".to_string())?;
-        let capturing = audio.is_capturing();
-        let vad_active = if push_to_talk {
-            capturing && audio.is_ptt_gate_open()
-        } else {
-            capturing
-        };
+        let settings = controller.settings();
         (
-            audio.is_speech_active(),
-            vad_active,
-            effective_threshold,
+            settings.push_to_talk,
+            settings.effective_vad_threshold_percent(),
         )
+    };
+
+    let (speech_active, vad_active) = match ctx.audio.try_lock() {
+        Ok(audio) => {
+            let capturing = audio.is_capturing();
+            let vad_active = if push_to_talk {
+                capturing && audio.is_ptt_gate_open()
+            } else {
+                capturing
+            };
+            (audio.is_speech_active(), vad_active)
+        }
+        Err(_) => (false, false),
     };
 
     Ok(MicMonitorSnapshot {
