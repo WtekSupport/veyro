@@ -40,6 +40,11 @@ if ($features -match "silero-te") {
 }
 & (Join-Path $PSScriptRoot "sync-windows-bundle-resources.ps1") -RepoRoot $repoRoot
 
+if (-not (Set-UpdaterSigningEnv)) {
+    Write-Error "Updater signing env missing."
+}
+Invoke-VeyroFrontendBuild
+
 if (-not $SkipCargo) {
     Push-Location (Join-Path $repoRoot "src-tauri")
     try {
@@ -51,10 +56,6 @@ if (-not $SkipCargo) {
     }
 }
 
-if (-not (Set-UpdaterSigningEnv)) {
-    Write-Error "Updater signing env missing."
-}
-Invoke-VeyroFrontendBuild
 Invoke-VeyroTauriBundle -Features $features
 
 $version = Get-Content (Join-Path $repoRoot "version.json") -Raw | ConvertFrom-Json

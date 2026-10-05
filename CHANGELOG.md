@@ -12,6 +12,10 @@ Format: entries under `## [semver]` with date (UTC) when a release is published.
 
 ## Unreleased
 
+### Fixed
+
+- **Release build:** Windows installers could open a blank WebView to `localhost:1420` because Rust was compiled before `npm run build`; frontend is now built before the release `cargo build`.
+
 ## [1.10.33] — 2026-10-05
 
 ### Added
