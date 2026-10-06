@@ -1445,11 +1445,6 @@ mod tests {
     #[test]
     fn global_pass_opens_glued_words() {
         let audio = tone_segment(150, 200);
-        let segments = vec![CoarseSegment {
-            text: "one two".to_string(),
-            start_ms: 0,
-            end_ms: 500,
-        }];
         let mut glued = vec![
             WordTiming {
                 text: "one".into(),
