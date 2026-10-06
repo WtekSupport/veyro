@@ -13,6 +13,13 @@ fn disabled_cannot_skip_to_injecting() {
 }
 
 #[test]
+fn listening_reaches_injecting_via_processing() {
+    assert!(!AppState::Listening.can_transition_to(AppState::Injecting));
+    assert!(AppState::Listening.can_transition_to(AppState::Processing));
+    assert!(AppState::Processing.can_transition_to(AppState::Injecting));
+}
+
+#[test]
 fn network_error_recovers_to_ready() {
     assert!(AppState::NetworkUnavailable.can_transition_to(AppState::Ready));
 }

@@ -85,7 +85,7 @@ jobs:
         with:
           workspaces: src-tauri
           cache-on-failure: false
-          shared-key: sherpa-1.13.8-v3
+          shared-key: sherpa-1.13.8-v4
       - name: Install Linux build deps (minimal)
         run: |
           sudo apt-get update
@@ -102,7 +102,10 @@ jobs:
             patchelf \
             cmake
       - name: Fresh sherpa prebuilt (avoid partial rust-cache trees)
-        run: rm -rf target/sherpa-onnx-prebuilt
+        run: |
+          rm -rf target/sherpa-onnx-prebuilt
+          # rust-cache can skip build.rs while replaying stale link-search paths to a deleted tree.
+          rm -rf target/*/build/sherpa-onnx-sys-*
       - name: Build frontend (tauri embed checks ../dist at compile time)
         run: |
           npm ci
