@@ -71,7 +71,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hound = "3.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 arboard = "3.4"
-enigo = "0.3"
+enigo = "0.6"
 num2words2-core = "0.1.2"
 chislo = "0.3"
 num-bigint = "0.4"
