@@ -1,3 +1,7 @@
+<p align="center">
+  <strong>English</strong> | <a href="README-RU.md">Русский</a>
+</p>
+
 <div align="center">
 
 <img src="src/assets/logo.png" alt="Veyro logo" width="128" height="128" />
