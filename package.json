@@ -23,11 +23,11 @@
     "start:release": "powershell -ExecutionPolicy Bypass -File scripts/launch-release.ps1"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.12.1",
-    "@tauri-apps/plugin-opener": "2.7.0",
+    "@tauri-apps/api": "2.12.3",
+    "@tauri-apps/plugin-opener": "2.7.1",
     "@tauri-apps/plugin-process": "2.4.0",
-    "@tauri-apps/plugin-updater": "2.13.1",
-    "lucide": "^1.48.0"
+    "@tauri-apps/plugin-updater": "2.13.3",
+    "lucide": "^1.55.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.1",
