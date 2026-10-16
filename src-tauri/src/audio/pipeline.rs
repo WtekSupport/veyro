@@ -150,10 +150,13 @@ impl AudioPipeline {
         &mut self,
         source: CaptureSource,
         mode: CaptureMode,
+        cached_format: Option<(u32, u16)>,
     ) -> Result<(), AudioError> {
         if self.running.load(Ordering::SeqCst) {
             if let Some(thread) = self.stop()? {
-                let _ = thread.join();
+                std::thread::spawn(move || {
+                    let _ = thread.join();
+                });
             }
         }
 
@@ -164,13 +167,13 @@ impl AudioPipeline {
         if mode == CaptureMode::PushToTalk {
             self.ptt_active.store(false, Ordering::SeqCst);
             self.ptt_gate.store(false, Ordering::SeqCst);
-            self.start_capture_pipeline()?;
+            self.start_capture_pipeline(cached_format)?;
             info!("audio pipeline armed for push-to-talk (standby capture active)");
             return Ok(());
         }
 
         self.ptt_gate.store(true, Ordering::SeqCst);
-        self.start_capture_pipeline()?;
+        self.start_capture_pipeline(cached_format)?;
         info!("audio pipeline started in continuous mode");
         Ok(())
     }
@@ -269,7 +272,7 @@ impl AudioPipeline {
                 stream_active,
                 "restarting capture pipeline for push-to-talk press"
             );
-            self.start_capture_pipeline()?;
+            self.start_capture_pipeline(None)?;
         }
 
         Ok(None)
@@ -447,7 +450,10 @@ impl AudioPipeline {
         self.vad_thread.take()
     }
 
-    fn start_capture_pipeline(&mut self) -> Result<(), AudioError> {
+    fn start_capture_pipeline(
+        &mut self,
+        cached_format: Option<(u32, u16)>,
+    ) -> Result<(), AudioError> {
         if let Some(thread) = self.take_vad_worker() {
             std::thread::spawn(move || {
                 let _ = thread.join();
@@ -461,11 +467,9 @@ impl AudioPipeline {
         self.ptt_flush_rx = Some(ptt_flush_rx);
         self.ptt_flush_req_tx = Some(ptt_flush_req_tx);
 
-        let (sample_rate, channels) = match &self.capture_source {
-            CaptureSource::Microphone { device_id } => {
-                crate::audio::warmup::query_device_format(device_id.as_deref())?
-            }
-            CaptureSource::MicrophoneAndLoopback { .. } => (16_000, 1),
+        let (sample_rate, channels) = match cached_format {
+            Some(format) => format,
+            None => self.capture_source.capture_format()?,
         };
         crate::audio::warmup::warm_vad_detector(self.vad_config.clone(), sample_rate, channels);
         let ptt_gate = Arc::clone(&self.ptt_gate);

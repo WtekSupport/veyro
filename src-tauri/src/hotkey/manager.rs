@@ -312,31 +312,13 @@ pub(crate) fn spawn_ptt_press(app: AppHandle, ctx: Arc<AppContext>) {
     });
 }
 
-fn finish_ptt_release_on_controller(
+fn finish_ptt_release_on_controller_once(
     app: &AppHandle,
-    ctx: &Arc<AppContext>,
+    ctx: &AppContext,
     speech_queued: bool,
-) {
-    const ATTEMPTS: u32 = 100;
-    let mut controller = None;
-    for attempt in 0..ATTEMPTS {
-        match ctx.controller.try_lock() {
-            Ok(guard) => {
-                controller = Some(guard);
-                break;
-            }
-            Err(_) if attempt + 1 == ATTEMPTS => {
-                warn!(
-                    "ptt release: controller busy after {}ms; skipping finish_ptt_release (pipeline will recover state)",
-                    ATTEMPTS * 10
-                );
-            }
-            Err(_) => std::thread::sleep(Duration::from_millis(10)),
-        }
-    }
-
-    let Some(mut controller) = controller else {
-        return;
+) -> bool {
+    let Ok(mut controller) = ctx.controller.try_lock() else {
+        return false;
     };
     let _ = controller.begin_toggle_stop();
     if let Err(error) = controller.finish_ptt_release(app, speech_queued) {
@@ -347,6 +329,48 @@ fn finish_ptt_release_on_controller(
         app_state = ?controller.status().state,
         "controller state after finish_ptt_release"
     );
+    true
+}
+
+fn finish_ptt_release_on_controller(
+    app: &AppHandle,
+    ctx: &Arc<AppContext>,
+    speech_queued: bool,
+) {
+    const ATTEMPTS: u32 = 100;
+    for attempt in 0..ATTEMPTS {
+        if finish_ptt_release_on_controller_once(app, ctx, speech_queued) {
+            return;
+        }
+        if attempt + 1 == ATTEMPTS {
+            warn!(
+                "ptt release: controller busy after {}ms; deferring finish_ptt_release",
+                ATTEMPTS * 10
+            );
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let app = app.clone();
+    let ctx = Arc::clone(ctx);
+    std::thread::Builder::new()
+        .name("ptt-release-recover".into())
+        .spawn(move || {
+            const DEFERRED_ATTEMPTS: u32 = 150;
+            for _attempt in 0..DEFERRED_ATTEMPTS {
+                if finish_ptt_release_on_controller_once(&app, ctx.as_ref(), speech_queued) {
+                    crate::tray::menu::refresh_tray_menu(&app);
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            warn!(
+                "ptt release: deferred finish_ptt_release gave up after {}ms",
+                DEFERRED_ATTEMPTS * 20
+            );
+        })
+        .ok();
 }
 
 pub(crate) fn spawn_ptt_release(

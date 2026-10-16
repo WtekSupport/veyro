@@ -446,7 +446,9 @@ impl AppController {
             AppState::Processing | AppState::Transcribing => {
                 self.transition(app, AppState::Injecting)
             }
-            AppState::Ready => {
+            AppState::Ready | AppState::Listening => {
+                // PTT often stays in Listening if release UI did not run; transcription may
+                // still complete and inject — walk through Processing (not Injecting directly).
                 self.transition(app, AppState::Processing)?;
                 self.transition(app, AppState::Injecting)
             }

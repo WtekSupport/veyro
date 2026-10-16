@@ -906,7 +906,7 @@ async fn process_one_segment(
     );
 
     let _ = with_controller(&controller, &app, |controller, handle| {
-        controller.transition_only(handle, AppState::Injecting)
+        controller.transition_for_injection(handle)
     });
     tray::menu::refresh_tray_menu(&app);
 
@@ -1349,7 +1349,7 @@ async fn try_finish_ptt_postprocess(
     }
 
     let _ = with_controller(controller, app, |controller, handle| {
-        controller.transition_only(handle, AppState::Injecting)
+        controller.transition_for_injection(handle)
     });
 
     let replace_result = tokio::task::spawn_blocking({
